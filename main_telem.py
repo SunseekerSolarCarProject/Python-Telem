@@ -65,8 +65,8 @@ def hex_to_float(hex_data):
     try:
         if hex_data.startswith("0x"):
             hex_data = hex_data[2:]
-        if hex_data.contain("HHHHHHHH"):
-            hex_data = 0
+        if "HHHHHHHH" in hex_data:
+            return 0.0
         if len(hex_data) != 8:
             raise ValueError(f"Invalid hex length: {hex_data}")
         byte_data = bytes.fromhex(hex_data)
