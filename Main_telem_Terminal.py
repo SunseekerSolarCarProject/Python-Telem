@@ -7,7 +7,6 @@ import time
 import csv
 from datetime import datetime
 
-# Define the unit labels for each data point
 units = {
     'MC1 Velocity': 'm/s',
     'MC2 Velocity': 'm/s',
@@ -22,25 +21,12 @@ units = {
 }
 
 def find_serial_port():
-    """
-    Detect and return the first available serial port.
-    
-    :return: Port name if found, None otherwise
-    """
     ports = serial.tools.list_ports.comports()
     for port in ports:
         return port.device
     return None
 
 def configure_serial(port, baudrate=9600, timeout=1):
-    """
-    Configure the serial port with given parameters.
-
-    :param port: Serial port name
-    :param baudrate: Baud rate for the serial communication
-    :param timeout: Read timeout in seconds
-    :return: Configured serial object
-    """
     try:
         ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
         if ser.isOpen():
@@ -52,56 +38,51 @@ def configure_serial(port, baudrate=9600, timeout=1):
 
 def hex_to_float(hex_data):
     """
-    Convert hex data to a single-precision float.
+    Convert a hex string representing IEEE 754 single-precision floating-point to a float.
 
-    :param hex_data: Hex string
-    :return: Converted float value
+    :param hex_data: A string containing the hex representation (e.g., '40490FDB')
+    :return: The corresponding floating-point value, or 0.0 if the data is invalid
     """
     try:
+        # Filter out any invalid hex strings containing 'H'
+        if "H" in hex_data or hex_data == "00000000":
+            return 0.0
+        
+        # Remove the '0x' prefix if present
         if hex_data.startswith("0x"):
             hex_data = hex_data[2:]
-        if "HHHHHHHH" in hex_data:
-            return 0.0
-        if len(hex_data) != 8:
-            raise ValueError(f"Invalid hex length: {hex_data}")
+        
+        # Convert hex string to bytes
         byte_data = bytes.fromhex(hex_data)
+        
+        # Unpack to float using IEEE 754 format
         float_value = struct.unpack('!f', byte_data)[0]
         return float_value
     except (ValueError, struct.error) as e:
         print(f"Error converting hex to float for data '{hex_data}': {e}")
-        return None
+        return 0.0
 
 def process_serial_data(line):
-    """
-    Process a single line of serial data.
-
-    :param line: A line of serial data
-    :return: Processed data as a dictionary
-    """
     processed_data = {}
     parts = line.split(',')
 
-    if parts[0] == 'TL_TIM':
-        processed_data['timestamp'] = parts[1]
-    else:
+    if parts[0] != 'TL_TIM':
         key = parts[0]
         hex1 = parts[1].strip()
         hex2 = parts[2].strip()
         float1 = hex_to_float(hex1)
         float2 = hex_to_float(hex2)
-        processed_data[key] = (float1, float2)
+        
+        if float1 is not None and float2 is not None:
+            averaged_value = (float1 + float2) / 2.0
+            processed_data[key] = averaged_value
     
     return processed_data
 
 def read_and_process_data(data_list, ser):
-    """
-    Read hex data from the serial port, convert it to float, and process it.
-
-    :param data_list: List to store processed data
-    :param ser: Configured serial object
-    """
     try:
         buffer = ""
+        interval_data = {}
         while True:
             if ser.inWaiting() > 0:
                 buffer += ser.read(ser.inWaiting()).decode('utf-8')
@@ -112,11 +93,16 @@ def read_and_process_data(data_list, ser):
                         if line and line not in ["ABCDEF", "UVWXYZ"]:
                             processed_data = process_serial_data(line)
                             if processed_data:
-                                processed_data_for_purpose = process_data_for_purpose(processed_data)
-                                if processed_data_for_purpose:
-                                    data_list.append(processed_data_for_purpose)
-                                    display_data(processed_data_for_purpose)
+                                interval_data.update(processed_data)
                     buffer = lines[-1]
+
+                    if 'TL_TIM' in line:
+                        timestamp = line.split(',')[1].strip()
+                        interval_data['timestamp'] = timestamp
+                        data_list.append(interval_data.copy())
+                        display_data(interval_data)
+                        interval_data.clear()
+
     except serial.SerialException as e:
         print(f"Serial exception: {e}")
     except KeyboardInterrupt:
@@ -126,48 +112,7 @@ def read_and_process_data(data_list, ser):
             ser.close()
             print("Serial port closed.")
 
-def process_data_for_purpose(data):
-    """
-    Process the data for specific purposes and calculate the milliamp-hour.
-
-    :param data: Dictionary of processed data
-    :return: Dictionary of results
-    """
-    results = {'timestamp': data.get('timestamp')}
-    
-    if 'MC1VEL' in data:
-        results['MC1 Velocity'] = data['MC1VEL'][0]
-    if 'MC2VEL' in data:
-        results['MC2 Velocity'] = data['MC2VEL'][0]
-    if 'MC1BUS' in data:
-        results['MC1 Bus'] = data['MC1BUS'][0]
-    if 'MC2BUS' in data:
-        results['MC2 Bus'] = data['MC2BUS'][0]
-    if 'BP_VMX' in data:
-        results['BP_VMX'] = data['BP_VMX'][0]
-    if 'BP_VMN' in data:
-        results['BP_VMN'] = data['BP_VMN'][0]
-    if 'BP_TMX' in data:
-        results['BP_TMX'] = data['BP_TMX'][0]
-    if 'BP_ISH' in data:
-        results['BP_ISH'] = data['BP_ISH'][0]
-    if 'BP_PVS' in data:
-        results['BP_PVS'] = data['BP_PVS'][0]
-    
-    if 'BP_ISH' in data and 'BP_PVS' in data:
-        current_in_amps = data['BP_ISH'][0]
-        voltage_in_volts = data['BP_PVS'][0]
-        if current_in_amps is not None and voltage_in_volts is not None:
-            results['Battery mAh'] = current_in_amps * voltage_in_volts * 1000
-    
-    return results
-
 def display_data(data):
-    """
-    Display the processed data in the terminal.
-
-    :param data: Dictionary of processed data
-    """
     for key, value in data.items():
         if key != 'timestamp':
             print(f"{key}: {value} {units.get(key, '')}")
@@ -175,12 +120,6 @@ def display_data(data):
     print("-" * 40)
 
 def save_data_to_csv(data_list, filename):
-    """
-    Save the processed data to a CSV file.
-
-    :param data_list: List of processed data
-    :param filename: CSV file name
-    """
     if not data_list:
         return
     
@@ -191,11 +130,6 @@ def save_data_to_csv(data_list, filename):
         dict_writer.writerows(data_list)
 
 def get_save_location():
-    """
-    Get the CSV save location from the user.
-
-    :return: The file path to save the CSV file
-    """
     save_location = input("Enter the path to save the CSV file (including file name): ")
     if not save_location:
         save_location = 'serial_data.csv'
