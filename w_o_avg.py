@@ -42,28 +42,20 @@ def hex_to_float(hex_data):
 
     :param hex_data: A string containing the hex representation (e.g., '40490FDB')
     :return: The corresponding floating-point value, or 0.0 if the data is invalid
-
-    o0xhhhhhhhh
     """
     try:
-        # Remove the '0x' prefix if present
         if hex_data.startswith("0x"):
             hex_data = hex_data[2:]
 
         if "HHHHHHHH" in hex_data:
             return 0.0
         
-        # Ensure the hex string is 8 characters long
         if len(hex_data) != 8:
             raise ValueError(f"Invalid hex length: {hex_data}")
         
-        # Convert hex string to bytes (check for byte order)
         byte_data = bytes.fromhex(hex_data)
+        float_value = struct.unpack('<f', byte_data)[0]  # Using '<f' for little-endian order
         
-        # Unpack to float using IEEE 754 format
-        float_value = struct.unpack('<f', byte_data)[0]  # Use '!f' for network (big-endian) order
-        
-        # Verify the result is within a reasonable range
         if not (float('-inf') < float_value < float('inf')):
             raise ValueError(f"Unreasonable float value: {float_value}")
         
@@ -115,7 +107,8 @@ def read_and_process_data(data_list, ser):
     except serial.SerialException as e:
         print(f"Serial exception: {e}")
     except KeyboardInterrupt:
-        print("Stopping serial read.")
+        print("Stopping serial read due to KeyboardInterrupt.")
+        raise  # Re-raise the KeyboardInterrupt to handle it in the main loop
     finally:
         if ser.isOpen():
             ser.close()
@@ -147,18 +140,32 @@ def get_save_location():
 if __name__ == '__main__':
     data_list = []
 
-    port = find_serial_port()
-    if port:
-        serial_port = configure_serial(port)
-        if serial_port:
-            try:
-                read_and_process_data(data_list, serial_port)
-            except KeyboardInterrupt:
-                save_location = get_save_location()
-                save_data_to_csv(data_list, save_location)
-                print(f"Data saved to {save_location}")
-                print("Process terminated.")
-        else:
-            print("Failed to configure serial port.")
-    else:
-        print("No serial port found.")
+    try:
+        while True:
+            port = find_serial_port()
+            if port:
+                serial_port = configure_serial(port)
+                if serial_port:
+                    connection_lost = False
+                    while True:
+                        try:
+                            if not read_and_process_data(data_list, serial_port):
+                                connection_lost = True
+                                break  # Exit the inner loop to try reconnecting
+                        except KeyboardInterrupt:
+                            print("Exiting program.")
+                            raise  # Re-raise to handle in the outer try block
+                    if connection_lost:
+                        continue  # Try reconnecting by going back to find_serial_port()
+                else:
+                    print("Failed to configure serial port. Retrying in 60 seconds...")
+                    time.sleep(60)
+            else:
+                print("No serial port found. Retrying in 60 seconds...")
+                time.sleep(60)
+    except KeyboardInterrupt:
+        print("Program interrupted. Saving data...")
+        save_location = get_save_location()
+        save_data_to_csv(data_list, save_location)
+        print(f"Data saved to {save_location}")
+        print("Process terminated.")

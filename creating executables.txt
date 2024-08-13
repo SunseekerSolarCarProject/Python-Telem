@@ -1,0 +1,4 @@
+if creating executables from python use auto-py-to-exe.
+the format that will work the best and get a pop up screen when this is entered
+in the terminal of vscode "python -m auto_py_to_exe"
+that is what is needed to get popup and convert the python script to an executable. 
