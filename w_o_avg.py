@@ -43,7 +43,7 @@ def hex_to_float(hex_data):
     :param hex_data: A string containing the hex representation (e.g., '40490FDB')
     :return: The corresponding floating-point value, or 0.0 if the data is invalid
 
-    0xhhhhhhhh, 0xhhhhhhhh
+    o0xhhhhhhhh
     """
     try:
         # Remove the '0x' prefix if present
