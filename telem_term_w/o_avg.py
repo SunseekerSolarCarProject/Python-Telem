@@ -1,3 +1,5 @@
+# filename: serial_data_processor_terminal.py
+
 import struct
 import serial
 import serial.tools.list_ports
@@ -40,15 +42,17 @@ def hex_to_float(hex_data):
 
     :param hex_data: A string containing the hex representation (e.g., '40490FDB')
     :return: The corresponding floating-point value, or 0.0 if the data is invalid
+
+    0xhhhhhhhh, 0xhhhhhhhh
     """
     try:
         # Remove the '0x' prefix if present
         if hex_data.startswith("0x"):
             hex_data = hex_data[2:]
-        
-        if 'HHHHHHHH' in hex_data:
-            return 0.0
 
+        if "HHHHHHHH" in hex_data:
+            return 0.0
+        
         # Ensure the hex string is 8 characters long
         if len(hex_data) != 8:
             raise ValueError(f"Invalid hex length: {hex_data}")
@@ -79,9 +83,8 @@ def process_serial_data(line):
         float1 = hex_to_float(hex1)
         float2 = hex_to_float(hex2)
         
-        if float1 is not None and float2 is not None:
-            averaged_value = (float1 + float2) / 2.0
-            processed_data[key] = averaged_value
+        processed_data[f"{key}_Value1"] = float1
+        processed_data[f"{key}_Value2"] = float2
     
     return processed_data
 
@@ -121,8 +124,7 @@ def read_and_process_data(data_list, ser):
 def display_data(data):
     for key, value in data.items():
         if key != 'timestamp':
-            # Display as a decimal with appropriate units
-            print(f"{key}: {value:.2f} {units.get(key, '')}")
+            print(f"{key}: {value:.2f} {units.get(key.split('_')[0], '')}")
     print(f"Timestamp: {data['timestamp']}")
     print("-" * 40)
 
