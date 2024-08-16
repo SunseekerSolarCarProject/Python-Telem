@@ -8,16 +8,6 @@ def create_tabs(root, tab_control, units):
     tab_axes = {}
     tables = {}
 
-    table_font = font.Font(family="Helvetica", size=10)
-    style = ttk.Style()
-    style.configure("Treeview", font=table_font)
-
-    combined_tab = ttk.Frame(tab_control)
-    tab_control.add(combined_tab, text="Combined Data")
-    combined_fig, combined_ax = plt.subplots(figsize=(12, 4))
-    combined_canvas = FigureCanvasTkAgg(combined_fig, master=combined_tab)
-    combined_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=1)
-
     for key in units.keys():
         tab = ttk.Frame(tab_control)
         tab_control.add(tab, text=key)
@@ -25,7 +15,7 @@ def create_tabs(root, tab_control, units):
         fig, ax = plt.subplots(figsize=(10, 4))
         canvas = FigureCanvasTkAgg(fig, master=tab)
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=1)
-        tab_axes[key] = ax
+        tab_axes[key] = ax  # Use the unit key as the dictionary key
 
         table_frame = ttk.Frame(tab)
         table_frame.pack(fill=tk.X, expand=True)
@@ -33,9 +23,9 @@ def create_tabs(root, tab_control, units):
         table.heading("Time", text="Time")
         table.heading("Value", text=f"Value ({units[key]})")
         table.pack(fill=tk.X, expand=True)
-        tables[key] = table
+        tables[key] = table  # Use the unit key as the dictionary key
 
-    return tab_axes, combined_ax, tables
+    return tab_axes, tables
 
 def update_plots_and_tables(tab_axes, combined_ax, tables, timestamps, plot_data, units, table_max_rows):
     for key, ax in tab_axes.items():
@@ -47,18 +37,19 @@ def update_plots_and_tables(tab_axes, combined_ax, tables, timestamps, plot_data
         ax.set_xticks(timestamps)
         ax.figure.canvas.draw()
 
-        table = tables[key]
+        table = tables[key]  # Now correctly accessed by the key
         if len(table.get_children()) >= table_max_rows:
             table.delete(table.get_children()[0])
 
         table.insert('', 'end', values=(timestamps[-1], plot_data[key][-1]))
 
-    combined_ax.clear()
-    for key, data in plot_data.items():
-        combined_ax.plot(timestamps, data, marker='o', label=key)
-    combined_ax.legend(loc='upper left')
-    combined_ax.set_title("Combined Data")
-    combined_ax.set_xlabel("Time")
-    combined_ax.set_ylabel("Values")
-    combined_ax.set_xticks(timestamps)
-    combined_ax.figure.canvas.draw()
+    if combined_ax is not None:
+        combined_ax.clear()
+        for key, data in plot_data.items():
+            combined_ax.plot(timestamps, data, marker='o', label=key)
+        combined_ax.legend(loc='upper left')
+        combined_ax.set_title("Combined Data")
+        combined_ax.set_xlabel("Time")
+        combined_ax.set_ylabel("Values")
+        combined_ax.set_xticks(timestamps)
+        combined_ax.figure.canvas.draw()

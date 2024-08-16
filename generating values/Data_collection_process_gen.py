@@ -1,3 +1,4 @@
+#Data_collection_process.py
 import serial
 import serial.tools.list_ports
 
@@ -15,7 +16,8 @@ units = {
     'BP_TMX': '°C',
     'BP_ISH': 'A',
     'BP_PVS': 'V',
-    'Battery mAh': 'mAh'
+    'Battery Ah': 'Ah',
+    'Battery Wh': 'Wh'
 }
 
 plot_window_size = 15  # Display only the last 15 data points
