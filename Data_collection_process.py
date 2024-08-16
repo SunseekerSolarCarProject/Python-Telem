@@ -1,4 +1,3 @@
-# data_processing.py
 import struct
 import serial
 import serial.tools.list_ports
@@ -45,23 +44,41 @@ def hex_to_float(hex_data):
         return 0.0
 
 def process_serial_data(line):
-    processed_data = {}
-    parts = line.split(',')
+    """
+    Process a single line of serial data using a dictionary-based approach.
 
-    if parts[0] != 'TL_TIM':
-        key = parts[0]
-        hex1 = parts[1].strip()
-        hex2 = parts[2].strip()
-        float1 = hex_to_float(hex1)
-        float2 = hex_to_float(hex2)
-        
-        processed_data[f"{key}_Value1"] = float1
-        processed_data[f"{key}_Value2"] = float2
+    :param line: A line of serial data
+    :return: Processed data as a dictionary
+    """
+    processed_data = {}
+    
+    # Split the line into key-value pairs
+    parts = line.split(',')
+    
+    # Check for the expected format: key, hex_value1, hex_value2
+    if len(parts) < 3:
+        print(f"Malformed line: '{line}' with parts: {parts}")  # Log the problematic line for debugging
+        return processed_data
+
+    key = parts[0]
+    if key in units:
+        try:
+            hex1 = parts[1].strip()
+            hex2 = parts[2].strip()
+            float1 = hex_to_float(hex1)
+            float2 = hex_to_float(hex2)
+
+            # Map the processed values to the corresponding unit in the dictionary
+            processed_data[f"{key}_Value1"] = float1
+            processed_data[f"{key}_Value2"] = float2
+        except Exception as e:
+            print(f"Error processing key '{key}' with line: '{line}'. Error: {e}")
+    else:
+        print(f"Unexpected key '{key}' in line: '{line}'")
     
     return processed_data
 
 def list_serial_ports():
-    """List all available serial ports on the system."""
     ports = serial.tools.list_ports.comports()
     return [port.device for port in ports]
 
@@ -85,7 +102,6 @@ def read_from_serial(ser):
     return None
 
 def search_and_connect(baudrate=9600, timeout=1):
-    """Continually search for an available serial port and connect."""
     while True:
         ports = list_serial_ports()
         if ports:

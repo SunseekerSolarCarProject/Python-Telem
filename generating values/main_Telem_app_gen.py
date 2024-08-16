@@ -3,10 +3,10 @@ import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
 from Data_collection_process_gen import process_serial_data, units, plot_data, timestamps
-from Table_Graph import create_tabs, update_plots_and_tables
-from Save_data import save_data_to_csv, get_save_location
+from Table_Graph_gen import create_tabs, update_plots_and_tables
+from Save_data_gen import save_data_to_csv, get_save_location
 from random_gen import generate_random_data
-from battery_calculator import calculate_battery_capacity, calculate_remaining_capacity, calculate_remaining_time, calculate_watt_hours  
+from battery_calculator_gen import calculate_battery_capacity, calculate_remaining_capacity, calculate_remaining_time, calculate_watt_hours  
 
 table_max_rows = 10
 
