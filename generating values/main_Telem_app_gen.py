@@ -18,6 +18,7 @@ def read_and_process_data(data_list, tab_axes, tables, root):
 
     def update_data():
         nonlocal interval_data, used_Ah, battery_capacity_Ah, battery_voltage
+
         hex_lines = generate_random_data()
         for line in hex_lines:
             line = line.strip()
@@ -25,20 +26,11 @@ def read_and_process_data(data_list, tab_axes, tables, root):
             if processed_data:
                 interval_data.update(processed_data)
 
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        
         # Ensure that the data list and timestamp list are in sync
         data_list.append(interval_data.copy())
-        timestamps.append(timestamp)
 
         for key in units.keys():
             plot_data[key].append(interval_data.get(f"{key}_Value1", 0))
-
-        # Ensure timestamps and plot data are the same length
-        min_length = min(len(timestamps), len(plot_data['Battery Ah']))
-        timestamps = timestamps[-min_length:]
-        plot_data['Battery Ah'] = plot_data['Battery Ah'][-min_length:]
-        plot_data['Battery Wh'] = plot_data['Battery Wh'][-min_length:]
 
         # Get the current battery configuration from the user inputs
         try:
@@ -78,28 +70,28 @@ def read_and_process_data(data_list, tab_axes, tables, root):
         remaining_time_label.config(text=f"Remaining Time (h): {remaining_time_hours:.2f}")
         remaining_wh_label.config(text=f"Remaining Capacity (Wh): {remaining_wh:.2f}")
 
-        # Update the Ah and Wh graphs
-        plot_data['Battery Ah'].append(remaining_Ah)
-        plot_data['Battery Wh'].append(remaining_wh)
-
-        # Again, ensure the lengths are equal before plotting
-        min_length = min(len(timestamps), len(plot_data['Battery Ah']))
-        timestamps = timestamps[-min_length:]
-        plot_data['Battery Ah'] = plot_data['Battery Ah'][-min_length:]
-        plot_data['Battery Wh'] = plot_data['Battery Wh'][-min_length:]
-
+        # Update the Ah and Wh graphs with hours on the x-axis
         ah_ax = tab_axes.get('Battery Ah')
         wh_ax = tab_axes.get('Battery Wh')
 
-        if ah_ax is not None:
-            ah_ax.clear()
-            ah_ax.plot(timestamps, plot_data['Battery Ah'], label="Remaining Ah")
-            ah_ax.legend(loc="upper right")
+        if remaining_time_hours and remaining_Ah:  # Ensure there is valid data to plot
+            if ah_ax is not None:
+                ah_ax.clear()
+                ah_ax.plot([remaining_time_hours], [remaining_Ah], marker='o', label="Remaining Ah")
+                ah_ax.set_xlim(left=0)  # Ensure the x-axis starts at 0
+                ah_ax.set_title("Remaining Ah vs Time")
+                ah_ax.set_xlabel("Remaining Time (hours)")
+                ah_ax.set_ylabel("Remaining Capacity (Ah)")
+                ah_ax.legend(loc="upper right")
 
-        if wh_ax is not None:
-            wh_ax.clear()
-            wh_ax.plot(timestamps, plot_data['Battery Wh'], label="Remaining Wh")
-            wh_ax.legend(loc="upper right")
+            if wh_ax is not None:
+                wh_ax.clear()
+                wh_ax.plot([remaining_time_hours], [remaining_wh], marker='o', label="Remaining Wh")
+                wh_ax.set_xlim(left=0)  # Ensure the x-axis starts at 0
+                wh_ax.set_title("Remaining Wh vs Time")
+                wh_ax.set_xlabel("Remaining Time (hours)")
+                wh_ax.set_ylabel("Remaining Capacity (Wh)")
+                wh_ax.legend(loc="upper right")
 
         update_plots_and_tables(tab_axes, None, tables, timestamps, plot_data, units, table_max_rows)
 
@@ -107,7 +99,7 @@ def read_and_process_data(data_list, tab_axes, tables, root):
         root.after(1000, update_data)
 
     update_data()
-    
+
 if __name__ == '__main__':
     data_list = []
 
