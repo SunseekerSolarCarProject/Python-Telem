@@ -1,3 +1,5 @@
+#battery_calculator.py
+
 def calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings):
     try:
         parallel_strings = quantity // series_strings

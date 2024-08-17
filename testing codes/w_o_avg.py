@@ -158,10 +158,10 @@ if __name__ == '__main__':
                     if connection_lost:
                         continue  # Try reconnecting by going back to find_serial_port()
                 else:
-                    print("Failed to configure serial port. Retrying in 60 seconds...")
+                    print("Failed to configure serial port. Retrying in 20 seconds...")
                     time.sleep(20)
             else:
-                print("No serial port found. Retrying in 60 seconds...")
+                print("No serial port found. Retrying in 20 seconds...")
                 time.sleep(20)
     except KeyboardInterrupt:
         print("Program interrupted. Saving data...")
