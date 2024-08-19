@@ -15,9 +15,10 @@ def read_and_process_data(data_list, tab_axes, tables, root):
     used_Ah = 0.0  # Track used capacity in Ah
     battery_capacity_Ah = 0.0
     battery_voltage = 0.0
+    total_time_hours = 0  # Track the total running time in hours
 
     def update_data():
-        nonlocal interval_data, used_Ah, battery_capacity_Ah, battery_voltage
+        nonlocal interval_data, used_Ah, battery_capacity_Ah, battery_voltage, total_time_hours
 
         hex_lines = generate_random_data()
         for line in hex_lines:
@@ -26,11 +27,17 @@ def read_and_process_data(data_list, tab_axes, tables, root):
             if processed_data:
                 interval_data.update(processed_data)
 
-        # Ensure that the data list and timestamp list are in sync
+        # Increment time by 5 seconds (converted to hours)
+        total_time_hours += 5 / 3600
+        
+        # Ensure that the data list is in sync
         data_list.append(interval_data.copy())
 
         for key in units.keys():
             plot_data[key].append(interval_data.get(f"{key}_Value1", 0))
+
+        # Add a timestamp to match the plot data
+        timestamps.append(total_time_hours)
 
         # Get the current battery configuration from the user inputs
         try:
@@ -58,10 +65,10 @@ def read_and_process_data(data_list, tab_axes, tables, root):
 
         # Calculate used capacity and update it
         shunt_current = interval_data.get('BP_ISH_Value1', 0)  # Assuming this is in Amps
-        used_Ah += (shunt_current / 3600)  # Update used capacity in Ah
+        used_Ah += (shunt_current * 5) / 3600  # Update used capacity in Ah over 5 seconds
 
         # Calculate remaining capacity, time, and watt-hours
-        remaining_Ah = calculate_remaining_capacity(used_Ah, battery_capacity_Ah, shunt_current, 1)  # 1 second interval
+        remaining_Ah = calculate_remaining_capacity(used_Ah, battery_capacity_Ah, shunt_current, 5)  # 5 second interval
         remaining_time_hours = calculate_remaining_time(remaining_Ah, shunt_current)
         remaining_wh = calculate_watt_hours(remaining_Ah, battery_voltage)
 
@@ -70,33 +77,10 @@ def read_and_process_data(data_list, tab_axes, tables, root):
         remaining_time_label.config(text=f"Remaining Time (h): {remaining_time_hours:.2f}")
         remaining_wh_label.config(text=f"Remaining Capacity (Wh): {remaining_wh:.2f}")
 
-        # Update the Ah and Wh graphs with hours on the x-axis
-        ah_ax = tab_axes.get('Battery Ah')
-        wh_ax = tab_axes.get('Battery Wh')
-
-        if remaining_time_hours and remaining_Ah:  # Ensure there is valid data to plot
-            if ah_ax is not None:
-                ah_ax.clear()
-                ah_ax.plot([remaining_time_hours], [remaining_Ah], marker='o', label="Remaining Ah")
-                ah_ax.set_xlim(left=0)  # Ensure the x-axis starts at 0
-                ah_ax.set_title("Remaining Ah vs Time")
-                ah_ax.set_xlabel("Remaining Time (hours)")
-                ah_ax.set_ylabel("Remaining Capacity (Ah)")
-                ah_ax.legend(loc="upper right")
-
-            if wh_ax is not None:
-                wh_ax.clear()
-                wh_ax.plot([remaining_time_hours], [remaining_wh], marker='o', label="Remaining Wh")
-                wh_ax.set_xlim(left=0)  # Ensure the x-axis starts at 0
-                wh_ax.set_title("Remaining Wh vs Time")
-                wh_ax.set_xlabel("Remaining Time (hours)")
-                wh_ax.set_ylabel("Remaining Capacity (Wh)")
-                wh_ax.legend(loc="upper right")
-
         update_plots_and_tables(tab_axes, None, tables, timestamps, plot_data, units, table_max_rows)
 
         interval_data.clear()
-        root.after(1000, update_data)
+        root.after(5000, update_data)  # Set update interval to 5000 milliseconds (5 seconds)
 
     update_data()
 
@@ -142,12 +126,8 @@ if __name__ == '__main__':
     remaining_wh_label = ttk.Label(display_frame, text="Remaining Capacity (Wh): 0.00")
     remaining_wh_label.grid(row=2, column=0, sticky=tk.W)
 
-    # Create Tabs and Graphs
+    # Create Tabs and Graphs (for other data types)
     tab_axes, tables = create_tabs(root, tab_control, units)
-
-    # No need for combined_ax, directly use the correct keys
-    ah_ax = tab_axes.get('Battery Ah')
-    wh_ax = tab_axes.get('Battery Wh')
 
     # Start monitoring immediately
     root.after(0, lambda: read_and_process_data(data_list, tab_axes, tables, root))
