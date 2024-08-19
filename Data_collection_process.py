@@ -3,6 +3,7 @@ from collections import deque
 from datetime import datetime
 import serial
 import struct
+import serial.tools.list_ports
 
 # Unit definitions
 units = {
@@ -44,7 +45,7 @@ def hex_to_float(hex_data):
         if hex_data.startswith("0x"):
             hex_data = hex_data[2:]
 
-        if"HHHHHHHH"in hex_data:
+        if "HHHHHHHH" in hex_data:
             return 0.0
         
         if len(hex_data) != 8:
@@ -85,7 +86,7 @@ def read_and_process_data(data_list, ser, update_callback):
         while True:
             if ser.inWaiting() > 0:
                 buffer += ser.read(ser.inWaiting()).decode('utf-8')
-                if'\n'in buffer:
+                if '\n' in buffer:
                     lines = buffer.split('\n')
                     for line in lines[:-1]:
                         line = line.strip()
@@ -93,9 +94,9 @@ def read_and_process_data(data_list, ser, update_callback):
                             processed_data = process_serial_data(line)
                             if processed_data:
                                 interval_data.update(processed_data)
-                        buffer = lines[-1]
+                    buffer = lines[-1]
 
-                    if'TL_TIM'in line:
+                    if 'TL_TIM' in line:
                         timestamp = line.split(',')[1].strip()
                         current_time = datetime.now().strftime('%H:%M:%S')
                         interval_data['timestamp'] = timestamp
