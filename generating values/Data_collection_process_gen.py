@@ -5,6 +5,7 @@ import serial.tools.list_ports
 import struct
 from collections import deque
 from datetime import datetime
+from time import time
 
 units = {
     'MC1 Velocity': 'm/s',
@@ -20,6 +21,7 @@ units = {
     'Battery Wh': 'Wh'
 }
 
+start_time = time()
 plot_window_size = 15  # Display only the last 15 data points
 plot_data = {key: deque(maxlen=plot_window_size) for key in units.keys()}
 timestamps = deque(maxlen=plot_window_size)
@@ -35,8 +37,8 @@ def hex_to_float(hex_data):
         if len(hex_data) != 8:
             raise ValueError(f"Invalid hex length: {hex_data}")
         
-        byte_data = bytes.fromhex(hex_data)
-        float_value = struct.unpack('<f', byte_data)[0]
+        byte_data = bytes.fromhex(hex_data)                 # Convert hex to bytes
+        float_value = struct.unpack('<f', byte_data)[0]     # Convert to float in little endian order
         
         if not (float('-inf') < float_value < float('inf')):
             raise ValueError(f"Unreasonable float value: {float_value}")
@@ -59,5 +61,11 @@ def process_serial_data(line):
         
         processed_data[f"{key}_Value1"] = float1
         processed_data[f"{key}_Value2"] = float2
+
+        processed_data['time'] = get_current_time_seconds
     
     return processed_data
+
+def get_current_time_seconds():
+    return time() - start_time
+
