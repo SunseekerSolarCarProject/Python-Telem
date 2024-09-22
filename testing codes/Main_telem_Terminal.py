@@ -5,11 +5,12 @@ import time
 import csv
 from datetime import datetime
 
+# Define units for the sensors
 units = {
-    'MC1 Velocity': 'm/s',
-    'MC2 Velocity': 'm/s',
-    'MC1 Bus': 'A',
-    'MC2 Bus': 'A',
+    'MC1BUS': 'A',
+    'MC2BUS': 'A',
+    'MC1VEL': 'm/s',
+    'MC2VEL': 'm/s',
     'BP_VMX': 'V',
     'BP_VMN': 'V',
     'BP_TMX': '°C',
@@ -37,51 +38,48 @@ def configure_serial(port, baudrate=9600, timeout=1):
 def hex_to_float(hex_data):
     """
     Convert a hex string representing IEEE 754 single-precision floating-point to a float.
-
-    :param hex_data: A string containing the hex representation (e.g., '40490FDB')
-    :return: The corresponding floating-point value, or 0.0 if the data is invalid
+    Returns 0.0 if the hex string is invalid or contains 'HHHHHHHH'.
     """
     try:
+        # Treat 'HHHHHHHH' or invalid data as zero
+        if hex_data == 'HHHHHHHH':
+            return 0.0
+
         # Remove the '0x' prefix if present
         if hex_data.startswith("0x"):
             hex_data = hex_data[2:]
-        
-        if 'HHHHHHHH' in hex_data:
-            return 0.0
 
         # Ensure the hex string is 8 characters long
         if len(hex_data) != 8:
-            raise ValueError(f"Invalid hex length: {hex_data}")
-        
-        # Convert hex string to bytes (check for byte order)
+            return 0.0
+
+        # Convert hex string to bytes
         byte_data = bytes.fromhex(hex_data)
-        
+
         # Unpack to float using IEEE 754 format
-        float_value = struct.unpack('<f', byte_data)[0]  # Use '!f' for network (big-endian) order
-        
-        # Verify the result is within a reasonable range
-        if not (float('-inf') < float_value < float('inf')):
-            raise ValueError(f"Unreasonable float value: {float_value}")
-        
+        float_value = struct.unpack('<f', byte_data)[0]  # Use '<f' for little-endian order
+
         return float_value
-    except (ValueError, struct.error) as e:
-        print(f"Error converting hex to float for data '{hex_data}': {e}")
+    except (ValueError, struct.error):
+        # Return 0.0 for any errors
         return 0.0
 
 def process_serial_data(line):
+    """
+    Process each line of serial data and convert the hex values to floats.
+    """
     processed_data = {}
     parts = line.split(',')
 
-    if parts[0] != 'TL_TIM':
+    if len(parts) >= 3 and parts[0] in units:
         key = parts[0]
         hex1 = parts[1].strip()
         hex2 = parts[2].strip()
         float1 = hex_to_float(hex1)
         float2 = hex_to_float(hex2)
         
-        if float1 is not None and float2 is not None:
-            averaged_value = (float1 + float2) / 2.0
-            processed_data[key] = averaged_value
+        processed_data[f"{key}_Value1"] = float1
+        processed_data[f"{key}_Value2"] = float2
     
     return processed_data
 
@@ -112,31 +110,43 @@ def read_and_process_data(data_list, ser):
     except serial.SerialException as e:
         print(f"Serial exception: {e}")
     except KeyboardInterrupt:
-        print("Stopping serial read.")
+        print("\nKeyboard Interrupt detected, stopping data collection...")
+        raise  # Re-raise the exception to trigger the save process
     finally:
         if ser.isOpen():
             ser.close()
             print("Serial port closed.")
 
 def display_data(data):
+    """
+    Display the data, converting float values and adding units.
+    """
     for key, value in data.items():
         if key != 'timestamp':
-            # Display as a decimal with appropriate units
-            print(f"{key}: {value:.2f} {units.get(key, '')}")
+            unit = units.get(key.split('_')[0], '')
+            print(f"{key}: {value:.2f} {unit}")
+    
     print(f"Timestamp: {data['timestamp']}")
     print("-" * 40)
 
 def save_data_to_csv(data_list, filename):
+    """
+    Save the collected data to a CSV file.
+    """
     if not data_list:
         return
     
-    keys = data_list[0].keys()
+    keys = list(data_list[0].keys())
     with open(filename, 'w', newline='') as output_file:
         dict_writer = csv.DictWriter(output_file, keys)
         dict_writer.writeheader()
         dict_writer.writerows(data_list)
+    print(f"Data successfully saved to {filename}.")
 
 def get_save_location():
+    """
+    Get the location where to save the CSV file.
+    """
     save_location = input("Enter the path to save the CSV file (including file name): ")
     if not save_location:
         save_location = 'serial_data.csv'
@@ -152,10 +162,10 @@ if __name__ == '__main__':
             try:
                 read_and_process_data(data_list, serial_port)
             except KeyboardInterrupt:
+                # Ask for save location or save by default
                 save_location = get_save_location()
                 save_data_to_csv(data_list, save_location)
-                print(f"Data saved to {save_location}")
-                print("Process terminated.")
+                print("Process terminated and data saved.")
         else:
             print("Failed to configure serial port.")
     else:
