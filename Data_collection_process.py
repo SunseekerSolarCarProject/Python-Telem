@@ -8,15 +8,22 @@ import serial.tools.list_ports
 # Unit definitions
 units = {
     'MC1 Velocity': 'm/s',
+    'MC1 RPM': 'RPM',
     'MC2 Velocity': 'm/s',
-    'MC1 Bus': 'A',
-    'MC2 Bus': 'A',
+    'MC2 RPM': 'RPM',
+    'MC1 Bus': 'V',
+    'MC1 Current': 'A',
+    'MC2 Bus': 'V',
+    'MC2 Current': 'A',
     'BP_VMX': 'V',
+    'BP_VMX_ID': '#',
     'BP_VMN': 'V',
+    'BP_VMN_ID': '#',
     'BP_TMX': '°C',
+    'BP_TMX_ID': '#',
     'BP_ISH': 'A',
     'BP_PVS': 'V',
-    'Battery Ah': 'Ah'
+    'BP_AH': 'Ah',
 }
 
 # Plot window size

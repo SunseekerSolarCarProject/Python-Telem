@@ -51,7 +51,7 @@ def hex_to_float(hex_data):
 
         # Ensure the hex string is 8 characters long
         if len(hex_data) != 8:
-            return 0.0
+            raise ValueError(f"Invalid hex length: {hex_data}")
 
         # Convert hex string to bytes
         byte_data = bytes.fromhex(hex_data)
