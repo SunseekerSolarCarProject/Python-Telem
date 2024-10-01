@@ -5,18 +5,26 @@ import time
 import csv
 from datetime import datetime
 
-# Define units for the sensors
+# Updated units and key descriptions
 units = {
-    'MC1BUS': 'A',
-    'MC2BUS': 'A',
-    'MC1VEL': 'm/s',
-    'MC2VEL': 'm/s',
-    'BP_VMX': 'V',
-    'BP_VMN': 'V',
-    'BP_TMX': '°C',
-    'BP_ISH': 'A',
-    'BP_PVS': 'V',
-    'Battery mAh': 'mAh'
+    'MC1BUS_Voltage': 'V',
+    'MC1BUS_Current': 'A',
+    'MC2BUS_Voltage': 'V',
+    'MC2BUS_Current': 'A',
+    'MC1VEL_Velocity': 'm/s',
+    'MC1VEL_RPM': 'RPM',
+    'MC2VEL_Velocity': 'm/s',
+    'MC2VEL_RPM': 'RPM',
+    'BP_VMX_ID': '#',
+    'BP_VMX_Voltage': 'V',
+    'BP_VMN_ID': '#',
+    'BP_VMN_Voltage': 'V',
+    'BP_TMX_ID': '#',
+    'BP_TMX_Temperature': '°C',
+    'BP_PVS_Voltage': 'V',
+    'BP_PVS_Ah': 'mA/s',
+    'BP_ISH_milliamp': 'mA',
+    'BP_ISH_SOC': '%'
 }
 
 def find_serial_port():
@@ -51,7 +59,7 @@ def hex_to_float(hex_data):
 
         # Ensure the hex string is 8 characters long
         if len(hex_data) != 8:
-            raise ValueError(f"Invalid hex length: {hex_data}")
+            return 0.0
 
         # Convert hex string to bytes
         byte_data = bytes.fromhex(hex_data)
@@ -71,15 +79,42 @@ def process_serial_data(line):
     processed_data = {}
     parts = line.split(',')
 
-    if len(parts) >= 3 and parts[0] in units:
+    if len(parts) >= 3:
         key = parts[0]
         hex1 = parts[1].strip()
         hex2 = parts[2].strip()
         float1 = hex_to_float(hex1)
         float2 = hex_to_float(hex2)
-        
-        processed_data[f"{key}_Value1"] = float1
-        processed_data[f"{key}_Value2"] = float2
+
+        # Process each sensor based on its type and format
+        match key:
+            case 'MC1BUS':
+                processed_data[f"{key}_Voltage"] = float1
+                processed_data[f"{key}_Current"] = float2
+            case 'MC2BUS':
+                processed_data[f"{key}_Voltage"] = float1
+                processed_data[f"{key}_Current"] = float2
+            case 'MC1VEL':
+                processed_data[f"{key}_Velocity"] = float1
+                processed_data[f"{key}_RPM"] = float2
+            case 'MC2VEL':
+                processed_data[f"{key}_Velocity"] = float1
+                processed_data[f"{key}_RPM"] = float2
+            case 'BP_VMX':
+                processed_data[f"{key}_ID"] = float1
+                processed_data[f"{key}_Voltage"] = float2
+            case 'BP_VMN':
+                processed_data[f"{key}_ID"] = float1
+                processed_data[f"{key}_Voltage"] = float2
+            case 'BP_TMX':
+                processed_data[f"{key}_ID"] = float1
+                processed_data[f"{key}_Temperature"] = float2
+            case 'BP_ISH':
+                processed_data[f"{key}_milliamp"] = float1
+                processed_data[f"{key}_SOC"] = float2
+            case 'BP_PVS':
+                processed_data[f"{key}_Voltage"] = float1
+                processed_data[f"{key}_milliamp/s"] = float2
     
     return processed_data
 
@@ -123,7 +158,7 @@ def display_data(data):
     """
     for key, value in data.items():
         if key != 'timestamp':
-            unit = units.get(key.split('_')[0], '')
+            unit = units.get(key, '')
             print(f"{key}: {value:.2f} {unit}")
     
     print(f"Timestamp: {data['timestamp']}")
