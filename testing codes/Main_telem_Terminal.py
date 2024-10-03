@@ -110,8 +110,8 @@ def process_serial_data(line):
                 processed_data[f"{key}_ID"] = float1
                 processed_data[f"{key}_Temperature"] = float2
             case 'BP_ISH':
-                processed_data[f"{key}_milliamp"] = float1
-                processed_data[f"{key}_SOC"] = float2
+                processed_data[f"{key}_SOC"] = float1
+                processed_data[f"{key}_milliamp"] = float2
             case 'BP_PVS':
                 processed_data[f"{key}_Voltage"] = float1
                 processed_data[f"{key}_milliamp/s"] = float2
@@ -136,10 +136,21 @@ def read_and_process_data(data_list, ser):
                     buffer = lines[-1]
 
                     if 'TL_TIM' in line:
+                        # Device timestamp
                         timestamp = line.split(',')[1].strip()
-                        interval_data['timestamp'] = timestamp
+                        interval_data['device_timestamp'] = timestamp
+
+                        # Local system time
+                        system_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        interval_data['system_time'] = system_time
+
+                        # Add to the data list
                         data_list.append(interval_data.copy())
+                        
+                        # Display data
                         display_data(interval_data)
+                        
+                        # Clear interval data for next reading
                         interval_data.clear()
 
     except serial.SerialException as e:
@@ -162,6 +173,7 @@ def display_data(data):
             print(f"{key}: {value:.2f} {unit}")
     
     print(f"Timestamp: {data['timestamp']}")
+    print(f"System Time: {data['system_time']}")
     print("-" * 40)
 
 def save_data_to_csv(data_list, filename):
