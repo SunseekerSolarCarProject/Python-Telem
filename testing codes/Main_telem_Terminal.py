@@ -230,10 +230,11 @@ def read_and_process_data(data_list, ser):
                         data_list.append(interval_data.copy())
                         
                         # Display data
-                        display_data(interval_data)
+                       # display_data(interval_data)
                         
                         # Clear interval data for next reading
                         interval_data.clear()
+                    ser.reset_input_buffer()
 
     except serial.SerialException as e:
         print(f"Serial exception: {e}")
