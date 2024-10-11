@@ -1,10 +1,13 @@
 import struct
 import serial
 import serial.tools.list_ports
-import threading
 import time
+import threading
 import csv
 from datetime import datetime
+
+# This will store the incoming data
+data_list = []
 
 # Updated units and key descriptions
 units = {
@@ -23,7 +26,7 @@ units = {
     'BP_TMX_ID': '#',
     'BP_TMX_Temperature': '°C',
     'BP_PVS_Voltage': 'V',
-    'BP_PVS_milliamp/s': 'mA/s',
+    'BP_PVS_Ah': 'mA/s',
     'BP_ISH_milliamp': 'mA',
     'BP_ISH_SOC': '%'
 }
@@ -57,7 +60,7 @@ def find_serial_port():
         return port.device
     return None
 
-def configure_serial(port, baudrate=9600, timeout=1):
+def configure_serial(port, baudrate=9600, timeout=.1):
     try:
         ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
         if ser.isOpen():
@@ -169,44 +172,46 @@ def process_serial_data(line):
             float1 = hex_to_float(hex1)
             float2 = hex_to_float(hex2)
 
-        # Process each sensor based on its type and format
-        match key:
-            case 'MC1BUS':
-                processed_data[f"{key}_Voltage"] = float1
-                processed_data[f"{key}_Current"] = float2
-            case 'MC2BUS':
-                processed_data[f"{key}_Voltage"] = float1
-                processed_data[f"{key}_Current"] = float2
-            case 'MC1VEL':
-                processed_data[f"{key}_Velocity"] = float1
-                processed_data[f"{key}_RPM"] = float2
-            case 'MC2VEL':
-                processed_data[f"{key}_Velocity"] = float1
-                processed_data[f"{key}_RPM"] = float2
-            case 'BP_VMX':
-                processed_data[f"{key}_ID"] = float1
-                processed_data[f"{key}_Voltage"] = float2
-            case 'BP_VMN':
-                processed_data[f"{key}_ID"] = float1
-                processed_data[f"{key}_Voltage"] = float2
-            case 'BP_TMX':
-                processed_data[f"{key}_ID"] = float1
-                processed_data[f"{key}_Temperature"] = float2
-            case 'BP_ISH':
-                processed_data[f"{key}_SOC"] = float1
-                processed_data[f"{key}_milliamp"] = float2
-            case 'BP_PVS':
-                processed_data[f"{key}_Voltage"] = float1
-                processed_data[f"{key}_milliamp/s"] = float2
+            # Process each sensor based on its type and format
+            match key:
+                case 'MC1BUS':
+                    processed_data[f"{key}_Voltage"] = float1
+                    processed_data[f"{key}_Current"] = float2
+                case 'MC2BUS':
+                    processed_data[f"{key}_Voltage"] = float1
+                    processed_data[f"{key}_Current"] = float2
+                case 'MC1VEL':
+                    processed_data[f"{key}_Velocity"] = float1
+                    processed_data[f"{key}_RPM"] = float2
+                case 'MC2VEL':
+                    processed_data[f"{key}_Velocity"] = float1
+                    processed_data[f"{key}_RPM"] = float2
+                case 'BP_VMX':
+                    processed_data[f"{key}_ID"] = float1
+                    processed_data[f"{key}_Voltage"] = float2
+                case 'BP_VMN':
+                    processed_data[f"{key}_ID"] = float1
+                    processed_data[f"{key}_Voltage"] = float2
+                case 'BP_TMX':
+                    processed_data[f"{key}_ID"] = float1
+                    processed_data[f"{key}_Temperature"] = float2
+                case 'BP_ISH':
+                    processed_data[f"{key}_SOC"] = float1
+                    processed_data[f"{key}_milliamp"] = float2
+                case 'BP_PVS':
+                    processed_data[f"{key}_Voltage"] = float1
+                    processed_data[f"{key}_milliamp/s"] = float2
     
     return processed_data
 
-def read_and_process_data(data_list, ser):
-    try:
-        buffer = ""
-        interval_data = {}
-        while True:
-            if ser.inWaiting() > 0:
+def read_serial_data(ser):
+    """
+    Continuously read serial data in a separate thread.
+    """
+    buffer = ""
+    while True:
+        if ser.inWaiting() > 0:
+            try:
                 buffer += ser.read(ser.inWaiting()).decode('utf-8')
                 if '\n' in buffer:
                     lines = buffer.split('\n')
@@ -215,37 +220,31 @@ def read_and_process_data(data_list, ser):
                         if line and line not in ["ABCDEF", "UVWXYZ"]:
                             processed_data = process_serial_data(line)
                             if processed_data:
+                                interval_data = {}
                                 interval_data.update(processed_data)
+
+                                # Check for 'TL_TIM' to use as device timestamp
+                                if 'TL_TIM' in line:
+                                    timestamp = line.split(',')[1].strip()
+                                    interval_data['device_timestamp'] = timestamp
+                                else:
+                                    interval_data['device_timestamp'] = 'No Timestamp'
+
+                                interval_data['system_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                                # Print to terminal
+                                display_data(interval_data)
+
+                                # Add to data list
+                                data_list.append(interval_data)
+
                     buffer = lines[-1]
-
-                    if 'TL_TIM' in line:
-                        # Device timestamp
-                        timestamp = line.split(',')[1].strip()
-                        interval_data['device_timestamp'] = timestamp
-
-                        # Local system time
-                        system_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        interval_data['system_time'] = system_time
-
-                        # Add to the data list
-                        data_list.append(interval_data.copy())
-                        
-                        # Display data
-                        display_data(interval_data)
-                        
-                        # Clear interval data for next reading
-                        interval_data.clear()
-                    ser.reset_input_buffer()
-
-    except serial.SerialException as e:
-        print(f"Serial exception: {e}")
-    except KeyboardInterrupt:
-        print("\nKeyboard Interrupt detected, stopping data collection...")
-        raise  # Re-raise the exception to trigger the save process
-    finally:
-        if ser.isOpen():
-            ser.close()
-            print("Serial port closed.")
+            except serial.SerialException as e:
+                print(f"Serial exception: {e}")
+                break
+            except Exception as e:
+                print(f"Error reading serial data: {e}")
+                break
 
 def display_data(data):
     """
@@ -254,7 +253,7 @@ def display_data(data):
     for key, value in data.items():
         if key not in ['timestamp', 'system_time']:
             if isinstance(value, dict):
-                #display motor controller information
+                # Display motor controller information
                 print(f"\n{key} Motor Controller Data:")
                 print(f"  CAN Receive Error Count: {value['CAN Receive Error Count']}")
                 print(f"  CAN Transmit Error Count: {value['CAN Transmit Error Count']}")
@@ -262,29 +261,24 @@ def display_data(data):
                 print(f"  Errors: {', '.join(value['Errors']) if value['Errors'] else 'None'}")
                 print(f"  Limits: {', '.join(value['Limits']) if value['Limits'] else 'None'}")
             else:
-                #sensor data with units
+                # Display sensor data with units
                 unit = units.get(key, '')
                 if isinstance(value, (int, float)):
                     print(f"{key}: {value:.2f} {unit}")
                 else:
                     print(f"{key}: {value} {unit}")
 
-
     if 'device_timestamp' in data:
         print(f"Device Timestamp: {data['device_timestamp']}")
-    if 'system_time' in data:
-        print(f"System Time: {data['system_time']}")
     print("-" * 40)
- 
-    
-def save_data_to_csv(data_list, filename):
+
+def save_data_to_csv(filename):
     """
     Save the collected data to a CSV file.
     """
     if not data_list:
         return
 
-   #Included device timestamp and system time 
     keys = list(data_list[0].keys())
     with open(filename, 'w', newline='') as output_file:
         dict_writer = csv.DictWriter(output_file, keys)
@@ -302,22 +296,26 @@ def get_save_location():
     return save_location
 
 if __name__ == '__main__':
-    data_list = []
-
     port = find_serial_port()
     if port:
         serial_port = configure_serial(port)
         if serial_port:
-            #read_thread = threading.Thread(target=read_and_process_data, args=(serial_port,))
-            #read_thread.daemon = True
-            #read_thread.start()
-            
+             # Create and start the thread for reading serial data
+            read_thread = threading.Thread(target=read_serial_data, args=(serial_port,))
+            read_thread.daemon = True
+            read_thread.start()
+
             try:
-                read_and_process_data(data_list, serial_port)
+                while True:
+                    # Display the latest data every 5 seconds
+                    if data_list:
+                        latest_data = data_list[-1]
+                        display_data(latest_data)
+                    time.sleep(5)  # Sleep for 5 seconds
             except KeyboardInterrupt:
-                # Ask for save location or save by default
+                # Save data to CSV when stopped
                 save_location = get_save_location()
-                save_data_to_csv(data_list, save_location)
+                save_data_to_csv(save_location)
                 print("Process terminated and data saved.")
         else:
             print("Failed to configure serial port.")
