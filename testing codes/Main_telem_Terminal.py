@@ -51,6 +51,26 @@ limit_flags_desc = [
     "IPM/Motor Temperature"
 ]
 
+def find_virtual_serial_port():
+    """
+    This function will filter out real hardware ports and return only virtual serial ports.
+    """
+    ports = serial.tools.list_ports.comports()
+    virtual_ports = []
+
+    for port in ports:
+        # Filter for virtual ports based on common identifiers (depends on your virtual port driver)
+        # Here we are filtering based on known patterns from 'com0com' and similar emulators
+        if "virtual" in port.description.lower() or "com0com" in port.description.lower():
+            virtual_ports.append(port.device)
+
+    if virtual_ports:
+        print(f"Available virtual ports: {virtual_ports}")
+        return virtual_ports[1]  # Return the first virtual port
+    else:
+        print("No virtual ports found.")
+        return None
+    
 def find_serial_port():
     ports = serial.tools.list_ports.comports()
     for port in ports:
@@ -305,6 +325,7 @@ if __name__ == '__main__':
     data_list = []
 
     port = find_serial_port()
+    #port = find_virtual_serial_port()
     if port:
         serial_port = configure_serial(port)
         if serial_port:
