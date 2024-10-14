@@ -1,23 +1,19 @@
 import struct
 import serial
 import serial.tools.list_ports
-import time
 import threading
+import time
 import csv
 from datetime import datetime
 
-data_list = []  # This will store the incoming data
-data_lock = threading.Lock()  # A lock to prevent race conditions when accessing data_list
-data_received = threading.Event()  # Event to signal when new data is available
-stop_threads = False  # Flag to stop the threads gracefully
-
+# Updated units and key descriptions
 units = {
     'MC1BUS_Voltage': 'V',
     'MC1BUS_Current': 'A',
-    'MC2BUS_Voltage': 'V',
-    'MC2BUS_Current': 'A',
     'MC1VEL_Velocity': 'm/s',
     'MC1VEL_RPM': 'RPM',
+    'MC2BUS_Voltage': 'V',
+    'MC2BUS_Current': 'A',
     'MC2VEL_Velocity': 'm/s',
     'MC2VEL_RPM': 'RPM',
     'BP_VMX_ID': '#',
@@ -32,43 +28,53 @@ units = {
     'BP_PVS_milliamp/s': 'mA/s'
 }
 
+# Error and limit flag descriptions
 error_flags_desc = [
-    "Hardware over current", "Software over current", "DC Bus over voltage", "Bad motor position hall sequence",
-    "Watchdog caused last reset", "Config read error", "15V Rail UVLO", "Desaturation Fault", "Motor Over Speed"
+    "Hardware over current",
+    "Software over current",
+    "DC Bus over voltage",
+    "Bad motor position hall sequence",
+    "Watchdog caused last reset",
+    "Config read error",
+    "15V Rail UVLO",
+    "Desaturation Fault",
+    "Motor Over Speed"
 ]
 
 limit_flags_desc = [
-    "Output Voltage PWM", "Motor Current", "Velocity", "Bus Current", "Bus Voltage Upper Limit", 
-    "Bus Voltage Lower Limit", "IPM/Motor Temperature"
+    "Output Voltage PWM",
+    "Motor Current",
+    "Velocity",
+    "Bus Current",
+    "Bus Voltage Upper Limit",
+    "Bus Voltage Lower Limit",
+    "IPM/Motor Temperature"
 ]
 
+data_lock = threading.Lock()  # Lock to handle shared data access
+stop_threads = False  # Flag to stop the threads gracefully
+
 def find_virtual_serial_port():
-    """
-    This function will filter out real hardware ports and return only virtual serial ports.
-    """
     ports = serial.tools.list_ports.comports()
     virtual_ports = []
-
     for port in ports:
-        # Filter for virtual ports based on common identifiers (depends on your virtual port driver)
-        # Here we are filtering based on known patterns from 'com0com' and similar emulators
         if "virtual" in port.description.lower() or "com0com" in port.description.lower():
             virtual_ports.append(port.device)
 
     if virtual_ports:
         print(f"Available virtual ports: {virtual_ports}")
-        return virtual_ports[1]  # Return the first virtual port
+        return virtual_ports[1]
     else:
         print("No virtual ports found.")
         return None
-
+    
 def find_serial_port():
     ports = serial.tools.list_ports.comports()
     for port in ports:
         return port.device
     return None
 
-def configure_serial(port, baudrate=9600, timeout=.1):
+def configure_serial(port, baudrate=9600, timeout=1):
     try:
         ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
         if ser.isOpen():
@@ -80,32 +86,29 @@ def configure_serial(port, baudrate=9600, timeout=.1):
 
 def hex_to_float(hex_data):
     try:
-        # Handle invalid hex data like 'HHHHHHHH' or strings that are not proper hex
-        if hex_data == 'HHHHHHHH' or not hex_data.startswith("0x"):
+        if hex_data == 'HHHHHHHH':
             return 0.0
-        
-        # Remove the "0x" prefix from the hex string
-        hex_data = hex_data[2:]
-        
-        # Ensure that the length of the hex string is exactly 8 characters (32 bits for a float)
+        if hex_data.startswith("0x"):
+            hex_data = hex_data[2:]
         if len(hex_data) != 8:
             return 0.0
-        
-        # Convert the hex string to a float using struct.unpack
         byte_data = bytes.fromhex(hex_data)
         return struct.unpack('<f', byte_data)[0]  # Little-endian float
-    
     except (ValueError, struct.error):
-        # Return 0.0 if conversion fails
         return 0.0
-
 
 def hex_to_bits(hex_data):
     return f"{int(hex_data, 16):064b}"
 
 def parse_error_and_limit_flags(error_bits, limit_bits):
-    errors = [error_flags_desc[i] for i in range(9) if error_bits[15 - i] == '1']
-    limits = [limit_flags_desc[i] for i in range(7) if limit_bits[15 - i] == '1']
+    errors = []
+    limits = []
+    for i in range(9):
+        if error_bits[15 - i] == '1':
+            errors.append(error_flags_desc[i])
+    for i in range(7):
+        if limit_bits[15 - i] == '1':
+            limits.append(limit_flags_desc[i])
     return errors, limits
 
 def parse_motor_controller_data(hex1, hex2):
@@ -126,28 +129,19 @@ def parse_motor_controller_data(hex1, hex2):
     }
 
 def process_serial_data(line):
-    """
-    Process a line of serial data. Ensure that all related sensor data 
-    is grouped together in one entry, and the timestamp is captured correctly.
-    """
     processed_data = {}
     parts = line.split(',')
-    
     if len(parts) >= 3:
         key = parts[0]
         hex1 = parts[1].strip()
         hex2 = parts[2].strip()
-        
-        # Handle motor controller data differently based on the key
         if key.startswith('MC1LIM') or key.startswith('MC2LIM'):
             motor_data = parse_motor_controller_data(hex1, hex2)
-            processed_data[key] = motor_data
+            processed_data[key] = motor_data 
         else:
-            # Use the updated hex_to_float function for conversion
             float1 = hex_to_float(hex1)
             float2 = hex_to_float(hex2)
-            
-            # Match keys and assign the corresponding data
+
             match key:
                 case 'MC1BUS':
                     processed_data[f"{key}_Voltage"] = float1
@@ -177,25 +171,13 @@ def process_serial_data(line):
                     processed_data[f"{key}_Voltage"] = float1
                     processed_data[f"{key}_milliamp/s"] = float2
 
-        # Check if the TL_TIM timestamp exists and apply it to the processed data
-        if 'TL_TIM' in line:
-            timestamp = parts[1].strip()  # Assuming TL_TIM is the second item
-            processed_data['device_timestamp'] = timestamp
-        else:
-            processed_data['device_timestamp'] = 'No Timestamp'
-
     return processed_data
 
-
-def read_serial_data(ser):
-    """
-    Read from the serial port and store data in data_list.
-    Ensure the new data is grouped and processed.
-    """
-    buffer = ""
-    while not stop_threads:
-        try:
-            # Non-blocking read with a short timeout
+def read_serial_data(ser, data_list):
+    try:
+        buffer = ""
+        interval_data = {}
+        while not stop_threads:
             if ser.inWaiting() > 0:
                 buffer += ser.read(ser.inWaiting()).decode('utf-8')
                 if '\n' in buffer:
@@ -205,107 +187,86 @@ def read_serial_data(ser):
                         if line and line not in ["ABCDEF", "UVWXYZ"]:
                             processed_data = process_serial_data(line)
                             if processed_data:
-                                with data_lock:
-                                    data_list.append(processed_data)
+                                interval_data.update(processed_data)
+
                     buffer = lines[-1]
+                    if 'TL_TIM' in line:
+                        timestamp = line.split(',')[1].strip()
+                        interval_data['device_timestamp'] = timestamp
+                        interval_data['system_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        with data_lock:
+                            data_list.append(interval_data.copy())
+                        interval_data.clear()
+                    ser.reset_input_buffer()
             else:
-                # Allow the thread to check for the stop flag regularly
-                time.sleep(0.1)
-        except serial.SerialException as e:
-            print(f"Serial exception: {e}")
-            break
-        except Exception as e:
-            print(f"Error reading serial data: {e}")
-            break
+                time.sleep(1)  # Reduced sleep to make it more responsive
+    except serial.SerialException as e:
+        print(f"Serial exception: {e}")
+    except KeyboardInterrupt:
+        raise
+    finally:
+        if ser.isOpen():
+            ser.close()
 
-def display_data():
-    """
-    Continuously display the latest data in a unified format.
-    Device timestamp and system time will be displayed once per data group.
-    """
+def display_data(data_list):
     while not stop_threads:
-        # Wait for the event to be set (new data available)
-        data_received.wait()
-        data_received.clear()  # Clear the event flag
-
         with data_lock:
             if data_list:
                 latest_data = data_list[-1]
-                
-                # Display sensor data first, excluding timestamps
                 for key, value in latest_data.items():
-                    if key not in ['device_timestamp', 'system_time']:
+                    if isinstance(value, dict):
+                        print(f"\n{key} Motor Controller Data:")
+                        print(f"  CAN Receive Error Count: {value['CAN Receive Error Count']}")
+                        print(f"  CAN Transmit Error Count: {value['CAN Transmit Error Count']}")
+                        print(f"  Active Motor Info: {value['Active Motor Info']}")
+                        print(f"  Errors: {', '.join(value['Errors']) if value['Errors'] else 'None'}")
+                        print(f"  Limits: {', '.join(value['Limits']) if value['Limits'] else 'None'}")
+                    else:
                         unit = units.get(key, '')
-                        
-                        # Check if the value is a dictionary (e.g., motor controller data)
-                        if isinstance(value, dict):
-                            print(f"\n{key} Motor Controller Data:")
-                            print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count', 'N/A')}")
-                            print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count', 'N/A')}")
-                            print(f"  Active Motor Info: {value.get('Active Motor Info', 'N/A')}")
-                            print(f"  Errors: {', '.join(value['Errors']) if value['Errors'] else 'None'}")
-                            print(f"  Limits: {', '.join(value['Limits']) if value['Limits'] else 'None'}")
+                        if isinstance(value, (int, float)):
+                            print(f"{key}: {value:.2f} {unit}")
                         else:
-                            # If the value is not a dictionary, print it normally
-                            if isinstance(value, (int, float)):
-                                print(f"{key}: {value:.2f} {unit}")
-                            else:
-                                print(f"{key}: {value}")
-
-                # Now display the device and system timestamps once at the end
+                            print(f"{key}: {value} {unit}")
                 print(f"Device Timestamp: {latest_data.get('device_timestamp', 'No Timestamp')}")
-                print(f"System Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                print()  # Print a blank line to separate different data groups
+                print(f"System Time: {latest_data.get('system_time', 'No Timestamp')}")
+                print("----------------------------------------")
+        time.sleep(5)  # Reduced sleep time for faster refresh
 
-def save_data_to_csv(filename):
-    with data_lock:
-        if data_list:
-            # Ensure the data is saved in a sorted and consistent format
-            keys = sorted(data_list[0].keys())  # Sort the keys for uniform CSV structure
-            with open(filename, 'w', newline='') as output_file:
-                dict_writer = csv.DictWriter(output_file, keys)
-                dict_writer.writeheader()
-                dict_writer.writerows(data_list)
-            print(f"Data successfully saved to {filename}.")
-        else:
-            print("No data to save.")
+def save_data_to_csv(data_list, filename):
+    if not data_list:
+        return
+    keys = list(data_list[0].keys())
+    with open(filename, 'w', newline='') as output_file:
+        dict_writer = csv.DictWriter(output_file, keys)
+        dict_writer.writeheader()
+        dict_writer.writerows(data_list)
+    print(f"Data successfully saved to {filename}.")
 
 def get_save_location():
-    # Prompt for file name and fall back to a default if no input is provided
-    save_location = input("Enter the path to save the CSV file (including file name, e.g., data.csv): ")
+    save_location = input("Enter the path to save the CSV file (including file name): ")
     if not save_location:
         save_location = 'serial_data.csv'
     return save_location
 
 if __name__ == '__main__':
-    try:
-        port = find_virtual_serial_port()
-        if port:
-            serial_port = configure_serial(port)
-            if serial_port:
-                read_thread = threading.Thread(target=read_serial_data, args=(serial_port,))
+    data_list = []
+    port = find_serial_port()
+    if port:
+        serial_port = configure_serial(port)
+        if serial_port:
+            try:
+                read_thread = threading.Thread(target=read_serial_data, args=(serial_port, data_list))
+                display_thread = threading.Thread(target=display_data, args=(data_list,))
                 read_thread.start()
-
-                display_thread = threading.Thread(target=display_data)
                 display_thread.start()
+                read_thread.join()
+                display_thread.join()
+            except KeyboardInterrupt:
+                save_location = get_save_location()
+                save_data_to_csv(data_list, save_location)
+                print("Process terminated and data saved.")
+        else:
+            print("Failed to configure serial port.")
+    else:
+        print("No serial port found.")
 
-                # Keep the program alive and display data
-                while True:
-                    time.sleep(1)
-
-    except KeyboardInterrupt:
-        # Catch keyboard interrupt to save the data before exiting
-        print("Keyboard Interrupt detected. Stopping threads and saving data...")
-
-        # Set stop_threads flag to stop reading and displaying data
-        stop_threads = True
-
-        # Wait for threads to terminate
-        read_thread.join()
-        display_thread.join()
-
-        # Get save location and write to CSV
-        save_location = get_save_location()
-        save_data_to_csv(save_location)
-
-        print("Process terminated and data saved.")
