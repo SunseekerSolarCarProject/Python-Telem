@@ -71,10 +71,27 @@ def find_virtual_serial_port():
         print("No virtual ports found.")
         return None
     
+import serial
+import serial.tools.list_ports
+
 def find_serial_port():
+    """
+    Find the first available serial port that is not in use.
+    Returns the device name of an available port or None if all ports are in use.
+    """
     ports = serial.tools.list_ports.comports()
+    
     for port in ports:
-        return port.device
+        try:
+            # Try to open the serial port
+            ser = serial.Serial(port.device)
+            ser.close()  # Close it if we successfully opened it
+            print(f"Found available port: {port.device}")
+            return port.device
+        except serial.SerialException:
+            print(f"Port {port.device} is in use or unavailable.")
+    
+    print("No available serial ports found.")
     return None
 
 def configure_serial(port, baudrate=9600, timeout=1):
