@@ -8,6 +8,10 @@ from datetime import datetime
 
 # Updated units and key descriptions
 units = {
+    'DC_DRV_Motor_Velocity_setpoint': '#',
+    'DC_DRV_Motor_Currrent_setpoint': '#',
+    'DC_SWC_Values': '#',
+    'DC_SWC_Values1': '#',
     'MC1BUS_Voltage': 'V',
     'MC1BUS_Current': 'A',
     'MC2BUS_Voltage': 'V',
@@ -24,7 +28,7 @@ units = {
     'BP_TMX_Temperature': '°C',
     'BP_PVS_Voltage': 'V',
     'BP_PVS_milliamp/s': 'mA/s',
-    'BP_ISH_milliamp': 'mA',
+    'BP_ISH_Amps': 'A',
     'BP_ISH_SOC': '%'
 }
 
@@ -94,11 +98,15 @@ def find_serial_port():
     print("No available serial ports found.")
     return None
 
-def configure_serial(port, baudrate=9600, timeout=1):
+def configure_serial(port, baudrate=9600, timeout=1, buffer_size=2097152):
     try:
         ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
+        
+        # Set the input (RX) and output (TX) buffer sizes to 2MB
+        ser.set_buffer_size(rx_size=buffer_size, tx_size=buffer_size)
+        
         if ser.isOpen():
-            print(f"Serial port {port} opened successfully.")
+            print(f"Serial port {port} opened successfully with 2MB buffer.")
         return ser
     except serial.SerialException as e:
         print(f"Error opening serial port {port}: {e}")
@@ -215,8 +223,8 @@ def process_serial_data(line):
                 processed_data[f"{key}_Voltage"] = float1
                 processed_data[f"{key}_Current"] = float2
             case 'MC1VEL':
-                processed_data[f"{key}_Velocity"] = float1
-                processed_data[f"{key}_RPM"] = float2
+                processed_data[f"{key}_RPM"] = float1
+                processed_data[f"{key}_Velocity"] = float2
             case 'MC2VEL':
                 processed_data[f"{key}_Velocity"] = float1
                 processed_data[f"{key}_RPM"] = float2
@@ -231,10 +239,16 @@ def process_serial_data(line):
                 processed_data[f"{key}_Temperature"] = float2
             case 'BP_ISH':
                 processed_data[f"{key}_SOC"] = float1
-                processed_data[f"{key}_milliamp"] = float2
+                processed_data[f"{key}_Amps"] = float2
             case 'BP_PVS':
                 processed_data[f"{key}_Voltage"] = float1
                 processed_data[f"{key}_milliamp/s"] = float2
+            case 'DC_DRV':
+                processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
+                processed_data[f"{key}_Motor_Current_setpoint"] = float2
+            case 'DC_SWC':
+                processed_data[f"{key}_Values"] = float1
+                processed_data[f"{key}_Values1"] = float2
     
     return processed_data
 
@@ -344,7 +358,7 @@ if __name__ == '__main__':
     port = find_serial_port()
     #port = find_virtual_serial_port()
     if port:
-        serial_port = configure_serial(port)
+        serial_port = configure_serial(port, buffer_size=2 * 1024 * 1024)
         if serial_port:
             #read_thread = threading.Thread(target=read_and_process_data, args=(serial_port,))
             #read_thread.daemon = True

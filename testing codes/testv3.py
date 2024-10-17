@@ -74,15 +74,18 @@ def find_serial_port():
         return port.device
     return None
 
-def configure_serial(port, baudrate=9600, timeout=1):
+def configure_serial(port, baudrate=9600, timeout=1, buffer_size=2097152):
     try:
         ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
+        
+        # Set the input (RX) and output (TX) buffer sizes to 2MB
+        ser.set_buffer_size(rx_size=buffer_size, tx_size=buffer_size)
+        
         if ser.isOpen():
-            print(f"Serial port {port} opened successfully.")
+            print(f"Serial port {port} opened successfully with 2MB buffer.")
         return ser
     except serial.SerialException as e:
         print(f"Error opening serial port {port}: {e}")
-        return None
 
 def hex_to_float(hex_data):
     try:
@@ -252,7 +255,7 @@ if __name__ == '__main__':
     data_list = []
     port = find_serial_port()
     if port:
-        serial_port = configure_serial(port)
+        serial_port = configure_serial(port, buffer_size=2 * 1024 * 1024)
         if serial_port:
             try:
                 read_thread = threading.Thread(target=read_serial_data, args=(serial_port, data_list))
