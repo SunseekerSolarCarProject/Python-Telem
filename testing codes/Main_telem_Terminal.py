@@ -18,8 +18,10 @@ units = {
     'MC2BUS_Voltage': 'V',
     'MC2BUS_Current': 'A',
     'MC1VEL_Velocity': 'm/s',
+    'MC1VEL_Speed': 'MPH',
     'MC1VEL_RPM': 'RPM',
     'MC2VEL_Velocity': 'm/s',
+    'MC2VEL_Speed': 'MPH',
     'MC2VEL_RPM': 'RPM',
     'BP_VMX_ID': '#',
     'BP_VMX_Voltage': 'V',
@@ -29,6 +31,7 @@ units = {
     'BP_TMX_Temperature': '°C',
     'BP_PVS_Voltage': 'V',
     'BP_PVS_milliamp/s': 'mA/s',
+    'BP_PVS_Ah': 'Ah',
     'BP_ISH_Amps': 'A',
     'BP_ISH_SOC': '%'
 }
@@ -224,6 +227,13 @@ def parse_motor_controller_data(hex1, hex2):
         "Limits": limits
     }
 
+def convert_mps_to_mph(mps):
+    return mps * 2.23964
+
+def convert_mA_s_to_Ah(mA_s):
+    return mA_s / 3600
+
+
 def process_serial_data(line):
     """
     Process each line of serial data and convert the hex values to floats.
@@ -263,9 +273,11 @@ def process_serial_data(line):
             case 'MC1VEL':
                 processed_data[f"{key}_RPM"] = float1
                 processed_data[f"{key}_Velocity"] = float2
+                processed_data[f"{key}_Speed"] = convert_mps_to_mph(float2)
             case 'MC2VEL':
                 processed_data[f"{key}_Velocity"] = float1
                 processed_data[f"{key}_RPM"] = float2
+                processed_data[f"{key}_Speed"] = convert_mps_to_mph(float2)
             case 'BP_VMX':
                 processed_data[f"{key}_ID"] = float1
                 processed_data[f"{key}_Voltage"] = float2
@@ -281,6 +293,7 @@ def process_serial_data(line):
             case 'BP_PVS':
                 processed_data[f"{key}_Voltage"] = float1
                 processed_data[f"{key}_milliamp/s"] = float2
+                processed_data[f"{key}_Ah"] = convert_mA_s_to_Ah(float2)
             case 'DC_DRV':
                 processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
                 processed_data[f"{key}_Motor_Current_setpoint"] = float2
