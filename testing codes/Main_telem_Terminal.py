@@ -3,6 +3,7 @@ import serial
 import serial.tools.list_ports
 import threading
 import time
+import platform
 import csv
 from datetime import datetime
 
@@ -55,6 +56,14 @@ limit_flags_desc = [
     "IPM/Motor Temperature"
 ]
 
+steering_wheel_desc=[
+    "Left Turn",
+    "Right Turn",
+    "Horn",
+    "Regen",
+    "Turtle Mode"
+]
+
 def find_virtual_serial_port():
     """
     This function will filter out real hardware ports and return only virtual serial ports.
@@ -75,28 +84,46 @@ def find_virtual_serial_port():
         print("No virtual ports found.")
         return None
     
-import serial
-import serial.tools.list_ports
-
 def find_serial_port():
     """
-    Find the first available serial port that is not in use.
-    Returns the device name of an available port or None if all ports are in use.
+    Find the first available USB serial port, adapting to Windows or macOS.
+    On macOS: filters out Bluetooth devices and looks for usbserial or usbmodem.
+    On Windows: looks for COM ports and filters out Bluetooth devices.
     """
     ports = serial.tools.list_ports.comports()
-    
-    for port in ports:
-        try:
-            # Try to open the serial port
-            ser = serial.Serial(port.device)
-            ser.close()  # Close it if we successfully opened it
-            print(f"Found available port: {port.device}")
-            return port.device
-        except serial.SerialException:
-            print(f"Port {port.device} is in use or unavailable.")
-    
-    print("No available serial ports found.")
-    return None
+    system_os = platform.system()
+
+    if system_os == "Darwin":  # macOS
+        for port in ports:
+            # macOS: Filter out Bluetooth and look for usbserial or usbmodem in the device name
+            if 'Bluetooth' not in port.description and ('usbserial' in port.device or 'usbmodem' in port.device):
+                try:
+                    # Try to open the serial port to ensure it's available
+                    ser = serial.Serial(port.device)
+                    ser.close()  # Close it after confirming it's available
+                    print(f"Found available USB serial port on macOS: {port.device}")
+                    return port.device
+                except serial.SerialException:
+                    print(f"Port {port.device} is in use or unavailable.")
+        print("No available USB serial ports found on macOS.")
+
+    elif system_os == "Windows":  # Windows
+        for port in ports:
+            # Windows: Filter for COM ports and exclude Bluetooth devices
+            if 'Bluetooth' not in port.description and port.device.startswith('COM'):
+                try:
+                    # Try to open the serial port to ensure it's available
+                    ser = serial.Serial(port.device)
+                    ser.close()  # Close it after confirming it's available
+                    print(f"Found available USB serial port on Windows: {port.device}")
+                    return port.device
+                except serial.SerialException:
+                    print(f"Port {port.device} is in use or unavailable.")
+        print("No available USB serial ports found on Windows.")
+
+    else:
+        print(f"Unsupported operating system: {system_os}")
+        return None
 
 def configure_serial(port, baudrate=9600, timeout=1, buffer_size=2097152):
     try:
@@ -143,9 +170,9 @@ def hex_to_float(hex_data):
 
 def hex_to_bits(hex_data):
     """
-    Convert a hex string to a 64-bit integer, and return the bit representation.
+    Convert a hex string to a 32-bit integer, and return the bit representation.
     """
-    return f"{int(hex_data, 16):064b}"
+    return f"{int(hex_data, 16):032b}"
 
 def parse_error_and_limit_flags(error_bits, limit_bits):
     """
@@ -166,14 +193,18 @@ def parse_error_and_limit_flags(error_bits, limit_bits):
 
     return errors, limits
 
+def parse_stearing_wheel_bits(hex1, hex2):
+    bits1 = hex_to_bits(hex1)
+    bits2 = hex_to_bits(hex2)
+
 def parse_motor_controller_data(hex1, hex2):
     """
     Parse the first and second hex strings for motor controller data.
     First hex: CAN receive/transmit errors and active motor.
     Second hex: Error flags and limit flags.
     """
-    bits1 = hex_to_bits(hex1)  # Convert hex1 to 64 bits
-    bits2 = hex_to_bits(hex2)  # Convert hex2 to 64 bits
+    bits1 = hex_to_bits(hex1)  # Convert hex1 to 32 bits
+    bits2 = hex_to_bits(hex2)  # Convert hex2 to 32 bits
 
     # First string (hex1) parsing
     can_receive_error_count = int(bits1[0:8], 2)
@@ -181,8 +212,8 @@ def parse_motor_controller_data(hex1, hex2):
     active_motor_info = int(bits1[16:32], 2)
 
     # Second string (hex2) parsing for error and limit flags
-    error_bits = bits2[32:48]  # Error flags (bits 31-16)
-    limit_bits = bits2[48:64]  # Limit flags (bits 15-0)
+    error_bits = bits2[0:16]  # Error flags (bits 31-16)
+    limit_bits = bits2[16:32]  # Limit flags (bits 15-0)
     errors, limits = parse_error_and_limit_flags(error_bits, limit_bits)
 
     return {
@@ -207,6 +238,13 @@ def process_serial_data(line):
             hex2 = parts[2].strip()
             motor_data = parse_motor_controller_data(hex1, hex2)
             processed_data[key] = motor_data 
+        if key.startswith('DC_SWC'):
+            hex1 = parts[1].strip()
+            hex2 = parts[2].strip()
+            bits1 = hex_to_bits(hex1)  # Convert hex1 to 64 bits
+            bits2 = hex_to_bits(hex2)  # Convert hex2 to 64 bits
+            processed_data[f"{key}_Values"] = bits1
+            processed_data[f"{key}_Values1"] = bits2
         else:
             hex1 = parts[1].strip()
             hex2 = parts[2].strip()
@@ -246,10 +284,6 @@ def process_serial_data(line):
             case 'DC_DRV':
                 processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
                 processed_data[f"{key}_Motor_Current_setpoint"] = float2
-            case 'DC_SWC':
-                processed_data[f"{key}_Values"] = float1
-                processed_data[f"{key}_Values1"] = float2
-    
     return processed_data
 
 def read_and_process_data(data_list, ser):
