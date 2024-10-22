@@ -59,12 +59,13 @@ limit_flags_desc = [
     "IPM/Motor Temperature"
 ]
 
-steering_wheel_desc=[
-    "Left Turn",
-    "Right Turn",
-    "Horn",
-    "Regen",
-    "Turtle Mode"
+# Steering wheel control description
+steering_wheel_desc = [
+    "Horn",  # Bit 0
+    "Left Turn",  # Bit 1
+    "Right Turn",  # Bit 2
+    "Regen",  # Bit 3
+    "Cruise"  # Bit 4
 ]
 
 def find_virtual_serial_port():
@@ -99,7 +100,7 @@ def find_serial_port():
     if system_os == "Darwin":  # macOS
         for port in ports:
             # macOS: Filter out Bluetooth and look for usbserial or usbmodem in the device name
-            if 'Bluetooth' not in port.description and ('usbserial' in port.device or 'usbmodem' in port.device):
+            if 'Bluetooth' not in port.description and ('tty.serial' in port.device or 'usbserial' in port.device or 'usbmodem' in port.device):
                 try:
                     # Try to open the serial port to ensure it's available
                     ser = serial.Serial(port.device)
@@ -177,6 +178,35 @@ def hex_to_bits(hex_data):
     """
     return f"{int(hex_data, 16):032b}"
 
+def calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings):
+    try:
+        parallel_strings = quantity // series_strings
+        total_capacity_ah = capacity_ah * parallel_strings
+        total_voltage = voltage * series_strings
+        total_capacity_wh = total_capacity_ah * total_voltage
+
+        return {
+            'total_capacity_wh': total_capacity_wh,
+            'total_capacity_ah': total_capacity_ah,
+            'total_voltage': total_voltage,
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+def calculate_remaining_capacity(used_Ah, battery_capacity_Ah, shunt_current, time_interval):
+    used_capacity = (shunt_current * time_interval) / 3600  # Convert to Ah
+    remaining_Ah = battery_capacity_Ah - used_capacity - used_Ah
+    return remaining_Ah
+
+def calculate_remaining_time(remaining_Ah, shunt_current):
+    if shunt_current == 0:
+        return float('inf')  # Infinite time if no current draw
+    remaining_time = remaining_Ah / shunt_current  # Time in hours
+    return remaining_time
+
+def calculate_watt_hours(remaining_Ah, battery_voltage):
+    return remaining_Ah * battery_voltage
+
 def parse_error_and_limit_flags(error_bits, limit_bits):
     """
     Parse error flags and limit flags from the bit strings.
@@ -196,9 +226,31 @@ def parse_error_and_limit_flags(error_bits, limit_bits):
 
     return errors, limits
 
-def parse_stearing_wheel_bits(hex1, hex2):
-    bits1 = hex_to_bits(hex1)
+def parse_steering_wheel_bits(bits1):
+    """
+    Parse the steering wheel control (SWC) bits from positions 0 to 4.
+    """
+    swc_states = {}
+    
+    for i in range(5):  # We're interested in bits 0 to 4
+        swc_states[steering_wheel_desc[i]] = bool(int(bits1[31 - i]))  # Reverse bit order
+    
+    return swc_states
+
+def parse_swc_data(hex1, hex2):
+    """
+    Parse the SWC data from two sources:
+    - hex1: The first 32-bit hexadecimal string (for SWC bits 0-4).
+    - swc_value: The second 32-bit raw SWC value.
+    """
+    bits1 = hex_to_bits(hex1)  # Convert hex1 to 32-bit binary
     bits2 = hex_to_bits(hex2)
+    swc_states = parse_steering_wheel_bits(bits1)  # Parse the SWC bits
+
+    return {
+        "SWC_States": swc_states,
+        "SWC_Value": bits2  # Assuming this is directly a 32-bit integer
+    }
 
 def parse_motor_controller_data(hex1, hex2):
     """
@@ -231,7 +283,7 @@ def convert_mps_to_mph(mps):
     return mps * 2.23964
 
 def convert_mA_s_to_Ah(mA_s):
-    return mA_s / 3600
+    return (mA_s/1000) / 3600
 
 
 def process_serial_data(line):
@@ -248,13 +300,11 @@ def process_serial_data(line):
             hex2 = parts[2].strip()
             motor_data = parse_motor_controller_data(hex1, hex2)
             processed_data[key] = motor_data 
-        if key.startswith('DC_SWC'):
-            hex1 = parts[1].strip()
-            hex2 = parts[2].strip()
-            bits1 = hex_to_bits(hex1)  # Convert hex1 to 64 bits
-            bits2 = hex_to_bits(hex2)  # Convert hex2 to 64 bits
-            processed_data[f"{key}_Values"] = bits1
-            processed_data[f"{key}_Values1"] = bits2
+        elif key.startswith('DC_SWC'):
+            # Parse SWC data
+            swc_data = parse_swc_data(hex1,hex2)
+            processed_data[key] = swc_data
+            
         else:
             hex1 = parts[1].strip()
             hex2 = parts[2].strip()
@@ -299,7 +349,7 @@ def process_serial_data(line):
                 processed_data[f"{key}_Motor_Current_setpoint"] = float2
     return processed_data
 
-def read_and_process_data(data_list, ser):
+def read_and_process_data(data_list, ser, battery_info):
     try:
         buffer = ""
         interval_data = {}
@@ -325,11 +375,17 @@ def read_and_process_data(data_list, ser):
                         system_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         interval_data['system_time'] = system_time
 
+                        # Assume 'BP_ISH_Amps' represents the shunt current for battery usage
+                        shunt_current = interval_data.get('BP_ISH_Amp', 0)
+
+                        # Update the total used Ah
+                        used_Ah += (shunt_current * 1) / 3600  # Update Ah based on the current reading
+
                         # Add to the data list
                         data_list.append(interval_data.copy())
                         
-                        # Display data
-                        display_data(interval_data)
+                        # Calculate remaining capacity and update display
+                        display_data(interval_data, battery_info, used_Ah, shunt_current)
                         
                         # Clear interval data for next reading
                         interval_data.clear()
@@ -345,7 +401,7 @@ def read_and_process_data(data_list, ser):
             ser.close()
             print("Serial port closed.")
 
-def display_data(data):
+def display_data(data, battery_info, used_Ah, shunt_current):
     """
     Display the data, converting float values and adding units.
     """
@@ -367,6 +423,15 @@ def display_data(data):
                 else:
                     print(f"{key}: {value} {unit}")
 
+    # Display battery status
+    if 'total_capacity_ah' in battery_info and 'total_voltage' in battery_info:
+        remaining_Ah = calculate_remaining_capacity(used_Ah, battery_info['total_capacity_ah'], shunt_current, 1)
+        remaining_time = calculate_remaining_time(remaining_Ah, shunt_current)
+        remaining_wh = calculate_watt_hours(remaining_Ah, battery_info['total_voltage'])
+        
+        print(f"Remaining Capacity (Ah): {remaining_Ah:.2f}")
+        print(f"Remaining Capacity (Wh): {remaining_wh:.2f}")
+        print(f"Remaining Time (hours): {remaining_time:.2f}")
 
     if 'device_timestamp' in data:
         print(f"Device Timestamp: {data['device_timestamp']}")
@@ -374,7 +439,22 @@ def display_data(data):
         print(f"System Time: {data['system_time']}")
     print("-" * 40)
  
+def get_user_battery_input():
+    print("Please enter the following battery information:")
+    capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
+    voltage = float(input("Battery Voltage (V) per cell: "))
+    quantity = int(input("Number of cells: "))
+    series_strings = int(input("Number of series strings: "))
+
+    battery_info = calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
     
+    if 'error' in battery_info:
+        print(f"Error calculating battery info: {battery_info['error']}")
+        return None
+    
+    #display_battery_info(battery_info)
+    return battery_info
+
 def save_data_to_csv(data_list, filename):
     """
     Save the collected data to a CSV file.
@@ -402,23 +482,25 @@ def get_save_location():
 if __name__ == '__main__':
     data_list = []
 
-    port = find_serial_port()
-    #port = find_virtual_serial_port()
-    if port:
-        serial_port = configure_serial(port, buffer_size=2 * 1024 * 1024)
-        if serial_port:
-            #read_thread = threading.Thread(target=read_and_process_data, args=(serial_port,))
-            #read_thread.daemon = True
-            #read_thread.start()
+    battery_info = get_user_battery_input()
+    if battery_info:
+        port = find_serial_port()
+        #port = find_virtual_serial_port()
+        if port:
+            serial_port = configure_serial(port, buffer_size=2 * 1024 * 1024)
+            if serial_port:
+                #read_thread = threading.Thread(target=read_and_process_data, args=(serial_port,))
+                #read_thread.daemon = True
+                #read_thread.start()
             
-            try:
-                read_and_process_data(data_list, serial_port)
-            except KeyboardInterrupt:
-                # Ask for save location or save by default
-                save_location = get_save_location()
-                save_data_to_csv(data_list, save_location)
-                print("Process terminated and data saved.")
+                try:
+                    read_and_process_data(data_list, serial_port)
+                except KeyboardInterrupt:
+                    # Ask for save location or save by default
+                    save_location = get_save_location()
+                    save_data_to_csv(data_list, save_location)
+                    print("Process terminated and data saved.")
+            else:
+                print("Failed to configure serial port.")
         else:
-            print("Failed to configure serial port.")
-    else:
-        print("No serial port found.")
+            print("No serial port found.")
