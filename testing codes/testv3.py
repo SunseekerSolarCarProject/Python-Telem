@@ -68,198 +68,250 @@ steering_wheel_desc=[
     "Turtle Mode"
 ]
 
-def find_virtual_serial_port():
-    """
-    This function will filter out real hardware ports and return only virtual serial ports.
-    """
-    ports = serial.tools.list_ports.comports()
-    virtual_ports = []
-
-    for port in ports:
-        # Filter for virtual ports based on common identifiers (depends on your virtual port driver)
-        # Here we are filtering based on known patterns from 'com0com' and similar emulators
-        if "virtual" in port.description.lower() or "com0com" in port.description.lower():
-            virtual_ports.append(port.device)
-
-    if virtual_ports:
-        print(f"Available virtual ports: {virtual_ports}")
-        return virtual_ports[1]  # Return the first virtual port
-    else:
-        print("No virtual ports found.")
-        return None
+#  Cross-platform serial port reader thread
+class SerialReaderThread(threading.Thread):
+    def __init__(self, port, baudrate, data_queue):
+        super().__init__(daemon=True)
+        self.port = port
+        self.baudrate = baudrate
+        self.data_queue = data_queue
+        self.serial_conn = None
+        self._stop_event = threading.Event()
     
-def find_serial_port():
-    """
-    Find the first available USB serial port, adapting to Windows or macOS.
-    On macOS: filters out Bluetooth devices and looks for usbserial or usbmodem.
-    On Windows: looks for COM ports and filters out Bluetooth devices.
-    """
-    ports = serial.tools.list_ports.comports()
-    system_os = platform.system()
+    def run(self):
+        try:
+            self.serial_conn = serial.Serial(self.port, self.baudrate, timeout=1)
+            while not self._stop_event.is_set():
+                if self.serial_conn.in_waiting > 0:
+                    data = self.serial_conn.readline()
+                    self.data_queue.put(data)
+                time.sleep(0.1)
+        except serial.SerialException as e:
+            print(f"Serial error: {e}")
+        finally:
+            if self.serial_conn and self.serial_conn.is_open:
+                self.serial_conn.close()
 
-    if system_os == "Darwin":  # macOS
-        for port in ports:
-            # macOS: Filter out Bluetooth and look for usbserial or usbmodem in the device name
-            if 'Bluetooth' not in port.description and ('usbserial' in port.device or 'usbmodem' in port.device):
-                try:
-                    # Try to open the serial port to ensure it's available
-                    ser = serial.Serial(port.device)
-                    ser.close()  # Close it after confirming it's available
-                    print(f"Found available USB serial port on macOS: {port.device}")
-                    return port.device
-                except serial.SerialException:
-                    print(f"Port {port.device} is in use or unavailable.")
-        print("No available USB serial ports found on macOS.")
+    def stop(self):
+        self._stop_event.set()
 
-    elif system_os == "Windows":  # Windows
-        for port in ports:
-            # Windows: Filter for COM ports and exclude Bluetooth devices
-            if 'Bluetooth' not in port.description and port.device.startswith('COM'):
-                try:
-                    # Try to open the serial port to ensure it's available
-                    ser = serial.Serial(port.device)
-                    ser.close()  # Close it after confirming it's available
-                    print(f"Found available USB serial port on Windows: {port.device}")
-                    return port.device
-                except serial.SerialException:
-                    print(f"Port {port.device} is in use or unavailable.")
-        print("No available USB serial ports found on Windows.")
+# Main telemetry application
+class TelemetryApplication:
+    def __init__(self, baudrate):
+        self.baudrate = baudrate
+        self.data_queue = Queue()
+        self.serial_reader_thread = None
 
-    else:
-        print(f"Unsupported operating system: {system_os}")
-        return None
+    def select_port(self):
+        ports = list(serial.tools.list_ports.comports())
+        if not ports:
+            print("No serial ports found. Please connect a device.")
+            return None
+        print("Available serial ports:")
+        for i, port in enumerate(ports):
+            print(f"{i}: {port.device}")
+        choice = int(input("Select the port number: "))
+        return ports[choice].device if 0 <= choice < len(ports) else None
 
-def configure_serial(port, baudrate=9600, timeout=1, buffer_size=2097152):
-    try:
-        ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
+    def start(self):
+        port = self.select_port()
+        if not port:
+            print("Invalid port selection. Exiting.")
+            return
+
+        # Initialize the serial reader thread with selected port
+        self.serial_reader_thread = SerialReaderThread(port, self.baudrate, self.data_queue)
+        self.serial_reader_thread.start()
+        print(f"Telemetry application started on {port} at {self.baudrate} baud. Reading data...")
         
-        # Set the input (RX) and output (TX) buffer sizes to 2MB
-        ser.set_buffer_size(rx_size=buffer_size, tx_size=buffer_size)
-        
-        if ser.isOpen():
-            print(f"Serial port {port} opened successfully with 2MB buffer.")
-        return ser
-    except serial.SerialException as e:
-        print(f"Error opening serial port {port}: {e}")
-        return None
+        try:
+            while True:
+                # Process data from the queue if available
+                if not self.data_queue.empty():
+                    data = self.data_queue.get()
+                    self.process_data(data)
+                time.sleep(0.05)  # Small delay for main loop
+        except KeyboardInterrupt:
+            print("Shutting down...")
+        finally:
+            if self.serial_reader_thread:
+                self.serial_reader_thread.stop()
+                self.serial_reader_thread.join()
+            print("Telemetry application stopped.")
 
-def hex_to_float(hex_data):
-    """
-    Convert a hex string representing IEEE 754 single-precision floating-point to a float.
-    Returns 0.0 if the hex string is invalid or contains 'HHHHHHHH'.
-    """
-    try:
+    def hex_to_float(self, hex_data):
+        """
+        Convert a hex string representing IEEE 754 single-precision floating-point to a float.
+        Returns 0.0 if the hex string is invalid or contains 'HHHHHHHH'.
+        """
+        try:
         # Treat 'HHHHHHHH' or invalid data as zero
-        if hex_data == 'HHHHHHHH':
-            return 0.0
+            if hex_data == 'HHHHHHHH':
+                return 0.0
 
         # Remove the '0x' prefix if present
-        if hex_data.startswith("0x"):
-            hex_data = hex_data[2:]
+            if hex_data.startswith("0x"):
+                hex_data = hex_data[2:]
 
         # Ensure the hex string is 8 characters long
-        if len(hex_data) != 8:
-            return 0.0
+            if len(hex_data) != 8:
+                return 0.0
 
         # Convert hex string to bytes
-        byte_data = bytes.fromhex(hex_data)
+            byte_data = bytes.fromhex(hex_data)
 
         # Unpack to float using IEEE 754 format
-        float_value = struct.unpack('<f', byte_data)[0]  # Use '<f' for little-endian order
+            float_value = struct.unpack('<f', byte_data)[0]  # Use '<f' for little-endian order
 
-        return float_value
-    except (ValueError, struct.error):
-        # Return 0.0 for any errors
-        return 0.0
+            return float_value
+        except (ValueError, struct.error):
+            # Return 0.0 for any errors
+            return 0.0
 
-def hex_to_bits(hex_data):
-    """
-    Convert a hex string to a 32-bit integer, and return the bit representation.
-    """
-    return f"{int(hex_data, 16):032b}"
+    def hex_to_bits(self, hex_data):
+        """
+        Convert a hex string to a 32-bit integer, and return the bit representation.
+        """
+        return f"{int(hex_data, 16):032b}"
 
-def parse_error_and_limit_flags(error_bits, limit_bits):
-    """
-    Parse error flags and limit flags from the bit strings.
-    """
-    errors = []
-    limits = []
+    def calculate_battery_capacity(self, capacity_ah, voltage, quantity, series_strings):
+        try:
+            parallel_strings = quantity // series_strings
+            total_capacity_ah = capacity_ah * parallel_strings
+            total_voltage = voltage * series_strings
+            total_capacity_wh = total_capacity_ah * total_voltage
 
-    # Parse error flags (bits 0-8)
-    for i in range(9):
-        if error_bits[15 - i] == '1':  # Error flags start at bit 8 in the lower half
-            errors.append(error_flags_desc[i])
+            return {
+                'total_capacity_wh': total_capacity_wh,
+                'total_capacity_ah': total_capacity_ah,
+                'total_voltage': total_voltage,
+            }
+        except Exception as e:
+            return {'error': str(e)}
 
-    # Parse limit flags (bits 0-6)
-    for i in range(7):
-        if limit_bits[15 - i] == '1':  # Limit flags start at bit 0
-            limits.append(limit_flags_desc[i])
+    def calculate_remaining_capacity(self, used_Ah, battery_capacity_Ah, shunt_current, time_interval):
+        used_capacity = (shunt_current * time_interval) / 3600  # Convert to Ah
+        remaining_Ah = battery_capacity_Ah - used_capacity - used_Ah
+        return remaining_Ah
 
-    return errors, limits
+    def calculate_remaining_time(remaining_Ah, shunt_current):
+        if shunt_current == 0:
+            return float('inf')  # Infinite time if no current draw
+        remaining_time = remaining_Ah / shunt_current  # Time in hours
+        return remaining_time
 
-def parse_stearing_wheel_bits(hex1, hex2):
-    bits1 = hex_to_bits(hex1)
-    bits2 = hex_to_bits(hex2)
+    def calculate_watt_hours(remaining_Ah, battery_voltage):
+        return remaining_Ah * battery_voltage
 
-def parse_motor_controller_data(hex1, hex2):
-    """
-    Parse the first and second hex strings for motor controller data.
-    First hex: CAN receive/transmit errors and active motor.
-    Second hex: Error flags and limit flags.
-    """
-    bits1 = hex_to_bits(hex1)  # Convert hex1 to 32 bits
-    bits2 = hex_to_bits(hex2)  # Convert hex2 to 32 bits
+    def parse_error_and_limit_flags(error_bits, limit_bits):
+        """
+        Parse error flags and limit flags from the bit strings.
+        """
+        errors = []
+        limits = []
 
-    # First string (hex1) parsing
-    can_receive_error_count = int(bits1[0:8], 2)
-    can_transmit_error_count = int(bits1[8:16], 2)
-    active_motor_info = int(bits1[16:32], 2)
+        # Parse error flags (bits 0-8)
+        for i in range(9):
+            if error_bits[15 - i] == '1':  # Error flags start at bit 8 in the lower half
+                errors.append(error_flags_desc[i])
 
-    # Second string (hex2) parsing for error and limit flags
-    error_bits = bits2[0:16]  # Error flags (bits 31-16)
-    limit_bits = bits2[16:32]  # Limit flags (bits 15-0)
-    errors, limits = parse_error_and_limit_flags(error_bits, limit_bits)
+        # Parse limit flags (bits 0-6)
+        for i in range(7):
+            if limit_bits[15 - i] == '1':  # Limit flags start at bit 0
+                limits.append(limit_flags_desc[i])
 
-    return {
-        "CAN Receive Error Count": can_receive_error_count,
-        "CAN Transmit Error Count": can_transmit_error_count,
-        "Active Motor Info": active_motor_info,
-        "Errors": errors,
-        "Limits": limits
-    }
-def convert_mps_to_mph(mps):
-    return mps * 2.23964
+        return errors, limits
 
-def convert_mA_s_to_Ah(mA_s):
-    return mA_s / 3600
+    def parse_steering_wheel_bits(bits1):
+        """
+        Parse the steering wheel control (SWC) bits from positions 0 to 4.
+        """
+        swc_states = {}
+    
+        for i in range(5):  # We're interested in bits 0 to 4
+            swc_states[steering_wheel_desc[i]] = bool(int(bits1[31 - i]))  # Reverse bit order
+    
+        return swc_states
 
-def process_serial_data(line):
-    """
-    Process each line of serial data and convert the hex values to floats.
-    """
-    processed_data = {}
-    parts = line.split(',')
+    def parse_swc_data(self, hex1, hex2):
+        """
+        Parse the SWC data from two sources:
+        - hex1: The first 32-bit hexadecimal string (for SWC bits 0-4).
+        - swc_value: The second 32-bit raw SWC value.
+        """
+        bits1 = self.hex_to_bits(hex1)  # Convert hex1 to 32-bit binary
+        bits2 = self.hex_to_bits(hex2)
+        swc_states = self.parse_steering_wheel_bits(bits1)  # Parse the SWC bits
 
-    if len(parts) >= 3:
-        key = parts[0]
-        if key.startswith('MC1LIM') or key.startswith('MC2LIM'):
-            hex1 = parts[1].strip()
-            hex2 = parts[2].strip()
-            motor_data = parse_motor_controller_data(hex1, hex2)
-            processed_data[key] = motor_data 
-        elif key.startswith('DC_SWC'):
-            hex1 = parts[1].strip()
-            hex2 = parts[2].strip()
-            bits1 = hex_to_bits(hex1)
-            bits2 = hex_to_bits(hex2)
-            processed_data[f"{key}_Values"] = bits1
-            processed_data[f"{key}_Values1"] = bits2
-        else:
-            hex1 = parts[1].strip()
-            hex2 = parts[2].strip()
-            float1 = hex_to_float(hex1)
-            float2 = hex_to_float(hex2)
+        return {
+            "SWC_States": swc_states,
+            "SWC_Value": bits2  # Assuming this is directly a 32-bit integer
+        }
 
+    def parse_motor_controller_data(self, hex1, hex2):
+        """
+        Parse the first and second hex strings for motor controller data.
+        First hex: CAN receive/transmit errors and active motor.
+        Second hex: Error flags and limit flags.
+        """
+        bits1 = self.hex_to_bits(hex1)  # Convert hex1 to 32 bits
+        bits2 = self.hex_to_bits(hex2)  # Convert hex2 to 32 bits
+
+        # First string (hex1) parsing
+        can_receive_error_count = int(bits1[0:8], 2)
+        can_transmit_error_count = int(bits1[8:16], 2)
+        active_motor_info = int(bits1[16:32], 2)
+
+        # Second string (hex2) parsing for error and limit flags
+        error_bits = bits2[0:16]  # Error flags (bits 31-16)
+        limit_bits = bits2[16:32]  # Limit flags (bits 15-0)
+        errors, limits = self.parse_error_and_limit_flags(error_bits, limit_bits)
+
+        return {
+            "CAN Receive Error Count": can_receive_error_count,
+            "CAN Transmit Error Count": can_transmit_error_count,
+            "Active Motor Info": active_motor_info,
+            "Errors": errors,
+            "Limits": limits
+        }
+
+    def convert_mps_to_mph(mps):
+        return mps * 2.23964
+
+    def convert_mA_s_to_Ah(mA_s):
+        return (mA_s / 1000) / 3600
+
+
+    def process_serial_data(self, line):
+        """
+        Process each line of serial data and convert the hex values to floats or bits.
+        This is based on the First part of the serial which is the names to each value
+        that is being determined.
+        """
+        processed_data = {}
+        parts = line.split(',')
+
+        if len(parts) >= 3:
+            key = parts[0]
+            if key.startswith('MC1LIM') or key.startswith('MC2LIM'):
+                hex1 = parts[1].strip()
+                hex2 = parts[2].strip()
+                motor_data = self.parse_motor_controller_data(hex1, hex2)
+                processed_data[key] = motor_data 
+            elif key.startswith('DC_SWC'):
+                # Parse SWC data
+                hex1 = parts[1].strip()
+                hex2 = parts[2].strip()
+                swc_data = self.parse_swc_data(hex1,hex2)
+                processed_data[key] = swc_data
+            else:
+                hex1 = parts[1].strip()
+                hex2 = parts[2].strip()
+                # Convert hex to float
+                float1 = self.hex_to_float(hex1)
+                float2 = self.hex_to_float(hex2)
+
+            # Process each sensor based on its type and format
             match key:
                 case 'MC1BUS':
                     processed_data[f"{key}_Voltage"] = float1
@@ -270,11 +322,11 @@ def process_serial_data(line):
                 case 'MC1VEL':
                     processed_data[f"{key}_RPM"] = float1
                     processed_data[f"{key}_Velocity"] = float2
-                    processed_data[f"{key}_Speed"] = convert_mps_to_mph(float2)
+                    processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
                 case 'MC2VEL':
                     processed_data[f"{key}_Velocity"] = float1
                     processed_data[f"{key}_RPM"] = float2
-                    processed_data[f"{key}_Speed"] = convert_mps_to_mph(float2)
+                    processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
                 case 'BP_VMX':
                     processed_data[f"{key}_ID"] = float1
                     processed_data[f"{key}_Voltage"] = float2
@@ -290,165 +342,144 @@ def process_serial_data(line):
                 case 'BP_PVS':
                     processed_data[f"{key}_Voltage"] = float1
                     processed_data[f"{key}_milliamp/s"] = float2
-                    processed_data[f"{key}_Ah"] = convert_mA_s_to_Ah(float2)
+                    processed_data[f"{key}_Ah"] = self.convert_mA_s_to_Ah(float2)
                 case 'DC_DRV':
                     processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
                     processed_data[f"{key}_Motor_Current_setpoint"] = float2
+        return processed_data
 
-    return processed_data
+    def read_and_process_data(self,data_list, ser, battery_info):
+        try:
+            buffer = ""
+            interval_data = {}
+            while True:
+                if ser.inWaiting() > 0:
+                    buffer += ser.read(ser.inWaiting()).decode('utf-8')
+                    if '\n' in buffer:
+                        lines = buffer.split('\n')
+                        for line in lines[:-1]:
+                            line = line.strip()
+                            if line and line not in ["ABCDEF", "UVWXYZ"]:
+                                processed_data = self.process_serial_data(line)
+                                if processed_data:
+                                    interval_data.update(processed_data)
+                        buffer = lines[-1]
 
-def read_and_process_data(data_list, ser):
-    try:
-        buffer = ""
-        interval_data = {}
-        while True:
-            if ser.inWaiting() > 0:
-                buffer += ser.read(ser.inWaiting()).decode('utf-8')
-                if '\n' in buffer:
-                    lines = buffer.split('\n')
-                    for line in lines[:-1]:
-                        line = line.strip()
-                        if line and line not in ["ABCDEF", "UVWXYZ"]:
-                            processed_data = process_serial_data(line)
-                            if processed_data:
-                                interval_data.update(processed_data)
-                    buffer = lines[-1]
+                        if 'TL_TIM' in line:
+                            # Device timestamp
+                            timestamp = line.split(',')[1].strip()
+                            interval_data['device_timestamp'] = timestamp
 
-                    if 'TL_TIM' in line:
-                        # Device timestamp
-                        timestamp = line.split(',')[1].strip()
-                        interval_data['device_timestamp'] = timestamp
+                            # Local system time
+                            system_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            interval_data['system_time'] = system_time
 
-                        # Local system time
-                        system_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        interval_data['system_time'] = system_time
+                            # Assume 'BP_ISH_Amps' represents the shunt current for battery usage
+                            shunt_current = interval_data.get('BP_ISH_Amp', 0)
 
-                        # Add to the data list
-                        data_list.append(interval_data.copy())
+                            # Update the total used Ah
+                            used_Ah += (shunt_current * 1) / 3600  # Update Ah based on the current reading
+
+                            # Add to the data list
+                            data_list.append(interval_data.copy())
                         
-                        # Display data
-                        display_data(interval_data)
+                            # Calculate remaining capacity and update display
+                            self.display_data(interval_data, battery_info, used_Ah, shunt_current)
                         
-                        # Clear interval data for next reading
-                        interval_data.clear()
-                    ser.reset_input_buffer()
+                            # Clear interval data for next reading
+                            interval_data.clear()
+                        ser.reset_input_buffer()
 
-    except serial.SerialException as e:
-        print(f"Serial exception: {e}")
-    except KeyboardInterrupt:
-        print("\nKeyboard Interrupt detected, stopping data collection...")
-        raise  # Re-raise the exception to trigger the save process
-    finally:
-        if ser.isOpen():
-            ser.close()
-            print("Serial port closed.")
+        except serial.SerialException as e:
+            print(f"Serial exception: {e}")
+        except KeyboardInterrupt:
+            print("\nKeyboard Interrupt detected, stopping data collection...")
+            raise  # Re-raise the exception to trigger the save process
+        finally:
+            if ser.isOpen():
+                ser.close()
+                print("Serial port closed.")
 
-def display_and_save_data(data_queue, data_list, save_file):
-    """
-    This function reads data from the queue (shared between threads),
-    displays it, and saves it to the CSV file.
-    """
-    while True:
-        if not data_queue.empty():
-            data = data_queue.get()
-
-            # Display the data
-            display_data(data)
-
-            # Add data to the list for saving
-            data_list.append(data)
-
-            # Save the data to the CSV file
-            save_data_to_csv(data_list, save_file)
-
-def display_data(data):
-    """
-    Display the data, converting float values and adding units.
-    """
-    for key, value in data.items():
-        if key not in ['timestamp', 'system_time']:
-            if isinstance(value, dict):
-                print(f"\n{key} Motor Controller Data:")
-                print(f"  CAN Receive Error Count: {value['CAN Receive Error Count']}")
-                print(f"  CAN Transmit Error Count: {value['CAN Transmit Error Count']}")
-                print(f"  Active Motor Info: {value['Active Motor Info']}")
-                print(f"  Errors: {', '.join(value['Errors']) if value['Errors'] else 'None'}")
-                print(f"  Limits: {', '.join(value['Limits']) if value['Limits'] else 'None'}")
-            else:
-                unit = units.get(key, '')
-                if isinstance(value, (int, float)):
-                    print(f"{key}: {value:.2f} {unit}")
+    def display_data(self, data, battery_info, used_Ah, shunt_current):
+        """
+        Display the data, converting float values and adding units.
+        """
+        for key, value in data.items():
+            if key not in ['timestamp', 'system_time']:
+                if isinstance(value, dict):
+                    #display motor controller information
+                    print(f"\n{key} Motor Controller Data:")
+                    print(f"  CAN Receive Error Count: {value['CAN Receive Error Count']}")
+                    print(f"  CAN Transmit Error Count: {value['CAN Transmit Error Count']}")
+                    print(f"  Active Motor Info: {value['Active Motor Info']}")
+                    print(f"  Errors: {', '.join(value['Errors']) if value['Errors'] else 'None'}")
+                    print(f"  Limits: {', '.join(value['Limits']) if value['Limits'] else 'None'}")
                 else:
-                    print(f"{key}: {value} {unit}")
+                    #sensor data with units
+                    unit = units.get(key, '')
+                    if isinstance(value, (int, float)):
+                        print(f"{key}: {value:.2f} {unit}")
+                    else:
+                        print(f"{key}: {value} {unit}")
 
-    if 'device_timestamp' in data:
-        print(f"Device Timestamp: {data['device_timestamp']}")
-    if 'system_time' in data:
-        print(f"System Time: {data['system_time']}")
-    print("-" * 40)
+        # Display battery status
+        if 'total_capacity_ah' in battery_info and 'total_voltage' in battery_info:
+            remaining_Ah = self.calculate_remaining_capacity(used_Ah, battery_info['total_capacity_ah'], shunt_current, 1)
+            remaining_time = self.calculate_remaining_time(remaining_Ah, shunt_current)
+            remaining_wh = self.calculate_watt_hours(remaining_Ah, battery_info['total_voltage'])
+        
+            print(f"Remaining Capacity (Ah): {remaining_Ah:.2f}")
+            print(f"Remaining Capacity (Wh): {remaining_wh:.2f}")
+            print(f"Remaining Time (hours): {remaining_time:.2f}")
 
-def save_data_to_csv(data_list, filename):
-    """
-    Save the collected data to a CSV file.
-    """
-    if not data_list:
-        return
+        if 'device_timestamp' in data:
+            print(f"Device Timestamp: {data['device_timestamp']}")
+        if 'system_time' in data:
+            print(f"System Time: {data['system_time']}")
+        print("-" * 40)
+ 
+    def get_user_battery_input(self):
+        print("Please enter the following battery information:")
+        capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
+        voltage = float(input("Battery Voltage (V) per cell: "))
+        quantity = int(input("Number of cells: "))
+        series_strings = int(input("Number of series strings: "))
 
-    keys = list(data_list[0].keys())
-    with open(filename, 'w', newline='') as output_file:
-        dict_writer = csv.DictWriter(output_file, keys)
-        dict_writer.writeheader()
-        dict_writer.writerows(data_list)
-    print(f"Data successfully saved to {filename}.")
+        battery_info = self.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
+    
+        if 'error' in battery_info:
+            print(f"Error calculating battery info: {battery_info['error']}")
+            return None
+    
+        #display_battery_info(battery_info)
+        return battery_info
 
-def get_save_location():
-    """
-    Get the location where to save the CSV file.
-    """
-    save_location = input("Enter the path to save the CSV file (including file name): ")
-    if not save_location:
-        save_location = 'serial_data.csv'
-    return save_location
+    def save_data_to_csv(self, data_list, filename):
+        """
+        Save the collected data to a CSV file.
+        """
+        if not data_list:
+            return
 
-if __name__ == '__main__':
-    data_list = []
+    #Included device timestamp and system time 
+        keys = list(data_list[0].keys())
+        with open(filename, 'w', newline='') as output_file:
+            dict_writer = csv.DictWriter(output_file, keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(data_list)
+        print(f"Data successfully saved to {filename}.")
 
-    port = find_serial_port()
-    if port:
-        serial_port = configure_serial(port, buffer_size=2 * 1024 * 1024)
-        if serial_port:
-            data_queue = Queue()  # Queue for thread communication
-            stop_threads = threading.Event()  # Event to signal when threads should stop
-            save_file = get_save_location()  # Get custom file name from user
+    def get_save_location(self):
+        """
+        Get the location where to save the CSV file.
+        """
+        save_location = input("Enter the path to save the CSV file (including file name): ")
+        if not save_location:
+            save_location = 'serial_data.csv'
+        return save_location
 
-            try:
-                # Create threads
-                reader_thread = threading.Thread(target=read_and_process_data, args=(serial_port, data_queue, stop_threads))
-                saver_thread = threading.Thread(target=display_and_save_data, args=(data_queue, data_list, save_file, stop_threads))
-
-                # Start threads
-                reader_thread.start()
-                saver_thread.start()
-
-                # Keep the main thread alive until a keyboard interrupt
-                while reader_thread.is_alive() and saver_thread.is_alive():
-                    time.sleep(0.1)
-
-            except KeyboardInterrupt:
-                print("\nKeyboard interrupt received. Stopping threads...")
-
-                # Signal threads to stop
-                stop_threads.set()
-
-                # Wait for threads to finish
-                reader_thread.join()
-                saver_thread.join()
-
-
-                save_file = get_save_location()  # Get custom file name from user
-
-                print("Data collection stopped and saved to CSV.")
-        else:
-            print("Failed to configure serial port.")
-    else:
-        print("No serial port found.")
+# Instantiate and start the application
+if __name__ == "__main__":
+    baudrate = 9600  # Set your baud rate, or prompt user if preferred
+    app = TelemetryApplication(baudrate)
+    app.start()

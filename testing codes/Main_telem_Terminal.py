@@ -17,11 +17,11 @@ units = {
     'MC1BUS_Current': 'A',
     'MC2BUS_Voltage': 'V',
     'MC2BUS_Current': 'A',
-    'MC1VEL_Velocity': 'm/s',
-    'MC1VEL_Speed': 'MPH',
+    'MC1VEL_Velocity': 'M/s',
+    'MC1VEL_Speed': 'Mph',
     'MC1VEL_RPM': 'RPM',
-    'MC2VEL_Velocity': 'm/s',
-    'MC2VEL_Speed': 'MPH',
+    'MC2VEL_Velocity': 'M/s',
+    'MC2VEL_Speed': 'Mph',
     'MC2VEL_RPM': 'RPM',
     'BP_VMX_ID': '#',
     'BP_VMX_Voltage': 'V',
@@ -59,15 +59,23 @@ limit_flags_desc = [
     "IPM/Motor Temperature"
 ]
 
-# Steering wheel control description
-steering_wheel_desc = [
-    "Horn",  # Bit 0
-    "Left Turn",  # Bit 1
-    "Right Turn",  # Bit 2
-    "Regen",  # Bit 3
-    "Cruise"  # Bit 4
-]
+# Steering wheel control description based on Hex maps
+steering_wheel_desc = {
+    '0x08000000': 'regen',
+    '0x00040100': 'left turn',
+    '0x00040000': 'left turn',
+    '0x00080000': 'right turn',
+    '0x00080200': 'right turn',
+    '0x00010000': 'horn',
+    '0x00020300': 'hazards',
+    '0x00020000': 'hazards',
+    '0x00000000': 'none'
+}
 
+"""
+virtual ports is meant to use virtual comm ports form applications like com0com apllication
+or the expensive application for virtual com ports though the com0com is a bit difficult for the software to recognize.
+"""
 def find_virtual_serial_port():
     """
     This function will filter out real hardware ports and return only virtual serial ports.
@@ -93,6 +101,8 @@ def find_serial_port():
     Find the first available USB serial port, adapting to Windows or macOS.
     On macOS: filters out Bluetooth devices and looks for usbserial or usbmodem.
     On Windows: looks for COM ports and filters out Bluetooth devices.
+    most on mac needs to look for the tty.serial part as that is what our modems 
+    recognize on mac.
     """
     ports = serial.tools.list_ports.comports()
     system_os = platform.system()
@@ -100,7 +110,7 @@ def find_serial_port():
     if system_os == "Darwin":  # macOS
         for port in ports:
             # macOS: Filter out Bluetooth and look for usbserial or usbmodem in the device name
-            if 'Bluetooth' not in port.description and ('tty.serial' in port.device or 'usbserial' in port.device or 'usbmodem' in port.device):
+            if 'Bluetooth' not in port.description and ('tty.serial' in port.device): # or 'usbserial' in port.device or 'usbmodem' in port.device):
                 try:
                     # Try to open the serial port to ensure it's available
                     ser = serial.Serial(port.device)
@@ -129,15 +139,18 @@ def find_serial_port():
         print(f"Unsupported operating system: {system_os}")
         return None
 
-def configure_serial(port, baudrate=9600, timeout=1, buffer_size=2097152):
+'''
+if any of the changes to how serial communication happens this is where to change the values.
+'''
+def configure_serial(port, baudrate=9600, timeout=1, buffer_size=4194304):
     try:
         ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
         
-        # Set the input (RX) and output (TX) buffer sizes to 2MB
+        # Set the input (RX) and output (TX) buffer sizes to 4MB
         ser.set_buffer_size(rx_size=buffer_size, tx_size=buffer_size)
         
         if ser.isOpen():
-            print(f"Serial port {port} opened successfully with 2MB buffer.")
+            print(f"Serial port {port} opened successfully with 4MB buffer.")
         return ser
     except serial.SerialException as e:
         print(f"Error opening serial port {port}: {e}")
@@ -226,29 +239,17 @@ def parse_error_and_limit_flags(error_bits, limit_bits):
 
     return errors, limits
 
-def parse_steering_wheel_bits(bits1):
-    """
-    Parse the steering wheel control (SWC) bits from positions 0 to 4.
-    """
-    swc_states = {}
-    
-    for i in range(5):  # We're interested in bits 0 to 4
-        swc_states[steering_wheel_desc[i]] = bool(int(bits1[31 - i]))  # Reverse bit order
-    
-    return swc_states
-
 def parse_swc_data(hex1, hex2):
     """
     Parse the SWC data from two sources:
     - hex1: The first 32-bit hexadecimal string (for SWC bits 0-4).
     - swc_value: The second 32-bit raw SWC value.
     """
-    bits1 = hex_to_bits(hex1)  # Convert hex1 to 32-bit binary
     bits2 = hex_to_bits(hex2)
-    swc_states = parse_steering_wheel_bits(bits1)  # Parse the SWC bits
+    swc_description = steering_wheel_desc.get(hex1, "unknown") # Parse the SWC bits
 
     return {
-        "SWC_States": swc_states,
+        "SWC_States": swc_description,
         "SWC_Value": bits2  # Assuming this is directly a 32-bit integer
     }
 
@@ -283,15 +284,18 @@ def convert_mps_to_mph(mps):
     return mps * 2.23964
 
 def convert_mA_s_to_Ah(mA_s):
-    return (mA_s/1000) / 3600
+    return (mA_s / 1000) / 3600
 
 
 def process_serial_data(line):
     """
-    Process each line of serial data and convert the hex values to floats.
+    Process each line of serial data and convert the hex values to floats or bits.
+    This is based on the First part of the serial which is the names to each value
+    that is being determined.
     """
     processed_data = {}
     parts = line.split(',')
+
 
     if len(parts) >= 3:
         key = parts[0]
@@ -302,9 +306,10 @@ def process_serial_data(line):
             processed_data[key] = motor_data 
         elif key.startswith('DC_SWC'):
             # Parse SWC data
+            hex1 = parts[1].strip()
+            hex2 = parts[2].strip()
             swc_data = parse_swc_data(hex1,hex2)
             processed_data[key] = swc_data
-            
         else:
             hex1 = parts[1].strip()
             hex2 = parts[2].strip()
@@ -349,7 +354,7 @@ def process_serial_data(line):
                 processed_data[f"{key}_Motor_Current_setpoint"] = float2
     return processed_data
 
-def read_and_process_data(data_list, ser, battery_info):
+def read_and_process_data(data_list, ser, battery_info, used_Ah):
     try:
         buffer = ""
         interval_data = {}
@@ -364,6 +369,19 @@ def read_and_process_data(data_list, ser, battery_info):
                             processed_data = process_serial_data(line)
                             if processed_data:
                                 interval_data.update(processed_data)
+                    interval_data.update(battery_info)
+
+                    if 'total_capacity_ah' in battery_info and 'total_voltage' in battery_info:
+                        shunt_current = interval_data.get('BP_ISH_Amps', 0)  # Example field
+                        remaining_Ah = calculate_remaining_capacity(used_Ah, battery_info['total_capacity_ah'], shunt_current, 1)
+                        remaining_time = calculate_remaining_time(remaining_Ah, shunt_current)
+                        remaining_wh = calculate_watt_hours(remaining_Ah, battery_info['total_voltage'])
+
+                        # Add calculated values to interval_data
+                        interval_data['remaining_Ah'] = remaining_Ah
+                        interval_data['remaining_time'] = remaining_time
+                        interval_data['remaining_wh'] = remaining_wh
+
                     buffer = lines[-1]
 
                     if 'TL_TIM' in line:
@@ -407,14 +425,18 @@ def display_data(data, battery_info, used_Ah, shunt_current):
     """
     for key, value in data.items():
         if key not in ['timestamp', 'system_time']:
-            if isinstance(value, dict):
+            if key == 'DC_SWC':
+                #display SWC state based on hex mapping
+                swc_description = value.get("SWC_States", "Unkown")
+                print(f"{key}: {swc_description}")
+            elif isinstance(value, dict):
                 #display motor controller information
                 print(f"\n{key} Motor Controller Data:")
-                print(f"  CAN Receive Error Count: {value['CAN Receive Error Count']}")
-                print(f"  CAN Transmit Error Count: {value['CAN Transmit Error Count']}")
-                print(f"  Active Motor Info: {value['Active Motor Info']}")
-                print(f"  Errors: {', '.join(value['Errors']) if value['Errors'] else 'None'}")
-                print(f"  Limits: {', '.join(value['Limits']) if value['Limits'] else 'None'}")
+                print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count')}")
+                print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count')}")
+                print(f"  Active Motor Info: {value.get('Active Motor Info')}")
+                print(f"  Errors: {', '.join(value.get('Errors', [])) if value.get('Errors') else 'None'}")
+                print(f"  Limits: {', '.join(value.get('Limits', [])) if value.get('Limits') else 'None'}")
             else:
                 #sensor data with units
                 unit = units.get(key, '')
@@ -479,22 +501,24 @@ def get_save_location():
         save_location = 'serial_data.csv'
     return save_location
 
+#uncomment the vitual serial port and comment out serial port if wanting to find virtual serial 
 if __name__ == '__main__':
     data_list = []
 
     battery_info = get_user_battery_input()
+    used_Ah = 0
     if battery_info:
         port = find_serial_port()
         #port = find_virtual_serial_port()
         if port:
-            serial_port = configure_serial(port, buffer_size=2 * 1024 * 1024)
+            serial_port = configure_serial(port, buffer_size=4 * 1024 * 1024)
             if serial_port:
                 #read_thread = threading.Thread(target=read_and_process_data, args=(serial_port,))
                 #read_thread.daemon = True
                 #read_thread.start()
             
                 try:
-                    read_and_process_data(data_list, serial_port)
+                    read_and_process_data(data_list, serial_port, battery_info, used_Ah)
                 except KeyboardInterrupt:
                     # Ask for save location or save by default
                     save_location = get_save_location()
