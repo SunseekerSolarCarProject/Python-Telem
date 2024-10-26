@@ -28,7 +28,7 @@ units = {
     'BP_VMN_ID': '#',
     'BP_VMN_Voltage': 'V',
     'BP_TMX_ID': '#',
-    'BP_TMX_Temperature': '°C',
+    'BP_TMX_Temperature': '°F',
     'BP_PVS_Voltage': 'V',
     'BP_PVS_milliamp/s': 'mA/s',
     'BP_PVS_Ah': 'Ah',
