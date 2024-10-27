@@ -10,8 +10,8 @@ from data_processor import DataProcessor
 units = {
     'DC_DRV_Motor_Velocity_setpoint': '#',
     'DC_DRV_Motor_Currrent_setpoint': '#',
-    'DC_SWC_Values': '#',
-    'DC_SWC_Values1': '#',
+    'DC_SWC_Position': ' ',
+    'DC_SWC_Value1': '#',
     'MC1BUS_Voltage': 'V',
     'MC1BUS_Current': 'A',
     'MC2BUS_Voltage': 'V',
@@ -33,19 +33,6 @@ units = {
     'BP_PVS_Ah': 'Ah',
     'BP_ISH_Amps': 'A',
     'BP_ISH_SOC': '%'
-}
-
-# Steering wheel control description based on Hex maps
-steering_wheel_desc = {
-    '0x08000000': 'regen',
-    '0x00040100': 'left turn',
-    '0x00040000': 'left turn',
-    '0x00080000': 'right turn',
-    '0x00080200': 'right turn',
-    '0x00010000': 'horn',
-    '0x00020300': 'hazards',
-    '0x00020000': 'hazards',
-    '0x00000000': 'none'
 }
 
 class TelemetryApplication:
@@ -155,6 +142,7 @@ class TelemetryApplication:
                     writer.writerow([timestamp, key, ', '.join(value)])
                 else:
                     writer.writerow([timestamp, key, value])
+                    
     def finalize_csv(self):
         custom_filename = input("Enter a filename to save the CSV data (without extension): ")
         custom_filename = f"{custom_filename}.csv"

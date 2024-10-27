@@ -11,7 +11,7 @@ from datetime import datetime
 units = {
     'DC_DRV_Motor_Velocity_setpoint': '#',
     'DC_DRV_Motor_Currrent_setpoint': '#',
-    'DC_SWC_Values': '#',
+    'DC_SWC_Position': ' ',
     'DC_SWC_Values1': '#',
     'MC1BUS_Voltage': 'V',
     'MC1BUS_Current': 'A',
