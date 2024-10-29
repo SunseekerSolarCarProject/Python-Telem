@@ -350,6 +350,7 @@ class TelemetryApplication:
         remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
         remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, battery_info['total_voltage'])
         
+         
         print(f"Remaining Capacity (Ah): {remaining_Ah:.2f}")
         print(f"Remaining Capacity (Wh): {remaining_wh:.2f}")
         print(f"Remaining Time (hours): {remaining_time:.2f}")

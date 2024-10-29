@@ -2,6 +2,8 @@
 
 import time
 import csv
+import serial
+import serial.tools.list_ports
 from datetime import datetime
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
@@ -36,13 +38,18 @@ units = {
 }
 
 class TelemetryApplication:
-    def __init__(self, baudrate):
+    def __init__(self, baudrate, buffer_timeout=1.0, buffer_size=15):
         self.baudrate = baudrate
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
         self.battery_info = self.get_user_battery_input()
+        self.csv_headers = self.generate_csv_headers()
         self.csv_file = "telemetry_data.csv"
         self.used_Ah = 0.0
+        self.buffer_timeout = buffer_timeout  # Time in seconds to flush buffer
+        self.buffer_size = buffer_size  # Max number of data points before flushing
+        self.data_buffer = []  # Initialize buffer
+        self.last_flush_time = time.time()  # Track last flush timestampe
         self.setup_csv()
 
     def get_user_battery_input(self):
@@ -58,11 +65,43 @@ class TelemetryApplication:
             return None
         return battery_info
 
-    def setup_csv(self):
-        with open(self.csv_file, mode='a', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['Timestamp', 'Data'])
+    def generate_csv_headers(self):
+        """
+        Define all potential CSV columns based on known telemetry fields and battery info.
+        """
+        telemetry_headers = [
+            "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
+            "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_Velocity", "MC2VEL_RPM", "MC2VEL_Speed",
+            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC", "BP_VMX_ID",
+            "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
+            "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah"
+        ]
+        
+        # Add additional calculated fields
+        battery_headers = ["total_capacity_wh", "total_capacity_ah", "total_voltage", 
+                           "remaining_Ah", "remaining_wh", "remaining_time"]
+        
+        # Add timestamp fields
+        timestamp_headers = ["timestamp", "device_timestamp"]
 
+        return timestamp_headers + telemetry_headers + battery_headers
+
+    def setup_csv(self):
+        with open(self.csv_file, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(self.csv_headers)
+
+    def select_port(self):
+        ports = list(serial.tools.list_ports.comports())
+        if not ports:
+            print("No serial ports found.")
+            return None
+        print("Available ports:")
+        for i, port in enumerate(ports):
+            print(f"{i}: {port.device}")
+        choice = int(input("Select port number: "))
+        return ports[choice].device if 0 <= choice < len(ports) else None
+    
     def start(self):
         port = self.select_port()
         if not port:
@@ -87,26 +126,68 @@ class TelemetryApplication:
 
     def process_data(self, data):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if data.startswith("TL_TIM"):
+            device_timestamp = data.split(",")[1].strip()  # Extract time value after comma
+            self.data_buffer.append({"device_timestamp": device_timestamp})
+            return
+        
+        # Parse other telemetry data lines
         processed_data = self.data_processor.parse_data(data)
         if processed_data:
-            shunt_current = processed_data.get('BP_ISH_Amps', 0)
-            self.display_data(processed_data, self.battery_info, self.used_Ah, shunt_current)
-            self.append_to_csv(timestamp, processed_data)
+            processed_data['timestamp'] = timestamp  # Add local timestamp
+            self.data_buffer.append(processed_data)
 
-    def display_data(self, data, battery_info, used_Ah, shunt_current):
+            # Flush buffer if timeout or size reached
+            if len(self.data_buffer) >= self.buffer_size or \
+                    (time.time() - self.last_flush_time) >= self.buffer_timeout:
+                self.flush_buffer()
+
+    def flush_buffer(self):
         """
-        Display the data, converting float values and adding units.
+        Displays and saves buffered data, then clears the buffer.
         """
+        if not self.data_buffer:
+            return
+
+        combined_data = {}
+        for data in self.data_buffer:
+            combined_data.update(data)
+
+        # Display the combined data
+        shunt_current = combined_data.get('BP_ISH_Amps', 0)
+        device_timestamp = combined_data.get('device_timestamp', 'N/A')
+        self.display_data(combined_data, self.battery_info, self.used_Ah, shunt_current, device_timestamp)
+
+        # Save each entry in the buffer to CSV with local and device timestamps
+        for data in self.data_buffer:
+            local_timestamp = data.get('timestamp', 'N/A')
+            device_timestamp = data.get('device_timestamp', 'N/A')
+            self.append_to_csv(local_timestamp, device_timestamp, data)
+
+        # Clear the buffer and reset the last flush time
+        self.data_buffer.clear()
+        self.last_flush_time = time.time()
+
+    def display_data(self, data, battery_info, used_Ah, shunt_current, device_timestamp):
+        """
+        Display battery, telemetry, and timestamp data in a structured format.
+        """
+        # Display battery capacity at the top
+        print(f"total_capacity_wh: {battery_info.get('total_capacity_wh', 0.0):.2f}")
+        print(f"total_capacity_ah: {battery_info.get('total_capacity_ah', 0.0):.2f}")
+        print(f"total_voltage: {battery_info.get('total_voltage', 0.0):.2f}")
+
+        # Display telemetry data in an organized format
         for key, value in data.items():
-            if key not in ['timestamp', 'system_time']:
+            if key not in ['timestamp', 'device_timestamp', 'system_time']:
                 if key == 'DC_SWC':
                     swc_description = value.get("SWC_States", "Unknown")
                     print(f"{key}: {swc_description}")
                 elif isinstance(value, dict):
                     print(f"\n{key} Motor Controller Data:")
-                    print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count')}")
-                    print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count')}")
-                    print(f"  Active Motor Info: {value.get('Active Motor Info')}")
+                    print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count', 'N/A')}")
+                    print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count', 'N/A')}")
+                    print(f"  Active Motor Info: {value.get('Active Motor Info', 'N/A')}")
                     print(f"  Errors: {', '.join(value.get('Errors', [])) if value.get('Errors') else 'None'}")
                     print(f"  Limits: {', '.join(value.get('Limits', [])) if value.get('Limits') else 'None'}")
                 else:
@@ -116,33 +197,33 @@ class TelemetryApplication:
                     else:
                         print(f"{key}: {value} {unit}")
 
-        # Display battery status
-        remaining_Ah = self.data_processor.calculate_remaining_capacity(used_Ah, battery_info['total_capacity_ah'], shunt_current, 1)
-        remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
-        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, battery_info['total_voltage'])
-        
-        print(f"Remaining Capacity (Ah): {remaining_Ah:.2f}")
-        print(f"Remaining Capacity (Wh): {remaining_wh:.2f}")
-        print(f"Remaining Time (hours): {remaining_time:.2f}")
+        # Display remaining battery information and timestamps at the bottom
+        if 'total_capacity_ah' in battery_info and 'total_voltage' in battery_info:
+            remaining_Ah = self.data_processor.calculate_remaining_capacity(
+                used_Ah, battery_info['total_capacity_ah'], shunt_current, 1)
+            remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
+            remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, battery_info['total_voltage'])
 
-        if 'device_timestamp' in data:
-            print(f"Device Timestamp: {data['device_timestamp']}")
-        if 'system_time' in data:
-            print(f"System Time: {data['system_time']}")
+            print(f"Remaining Capacity (Ah): {remaining_Ah:.2f}")
+            print(f"Remaining Capacity (Wh): {remaining_wh:.2f}")
+            print(f"Remaining Time (hours): {remaining_time if remaining_time != float('inf') else 'inf'}")
+
+        # Display timestamps at the end
+        print(f"Device Timestamp: {device_timestamp}")
+        print(f"System Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("-" * 40)
 
-    def append_to_csv(self, timestamp, data):
+
+    def append_to_csv(self, combined_data):
+        """
+        Appends a structured row to the CSV with all available data.
+        """
+        row = [combined_data.get(header, '') for header in self.csv_headers]  # Fill row based on headers
+
         with open(self.csv_file, mode='a', newline='') as file:
             writer = csv.writer(file)
-            for key, value in data.items():
-                if isinstance(value, tuple):
-                    writer.writerow([timestamp, f"{key}_1", value[0]])
-                    writer.writerow([timestamp, f"{key}_2", value[1]])
-                elif isinstance(value, list):
-                    writer.writerow([timestamp, key, ', '.join(value)])
-                else:
-                    writer.writerow([timestamp, key, value])
-                    
+            writer.writerow(row)
+
     def finalize_csv(self):
         custom_filename = input("Enter a filename to save the CSV data (without extension): ")
         custom_filename = f"{custom_filename}.csv"
