@@ -49,6 +49,8 @@ class DataProcessor:
             return 0.0
 
     def hex_to_bits(self, hex_data):
+        if hex_data in ['HHHHHHHH', '0xHHHHHHHH']:
+            return '0' * 32  # Default to a string of 32 zeros if data is invalid
         return f"{int(hex_data, 16):032b}"
 
     def parse_error_and_limit_flags(self, error_bits, limit_bits):

@@ -38,7 +38,7 @@ units = {
 }
 
 class TelemetryApplication:
-    def __init__(self, baudrate, buffer_timeout=1.0, buffer_size=15):
+    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20):
         self.baudrate = baudrate
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
@@ -158,11 +158,11 @@ class TelemetryApplication:
         device_timestamp = combined_data.get('device_timestamp', 'N/A')
         self.display_data(combined_data, self.battery_info, self.used_Ah, shunt_current, device_timestamp)
 
+        combined_data['timestamp'] = combined_data.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        combined_data['device_timestamp'] = combined_data.get('device_timestamp', 'N/A')
+
         # Save each entry in the buffer to CSV with local and device timestamps
-        for data in self.data_buffer:
-            local_timestamp = data.get('timestamp', 'N/A')
-            device_timestamp = data.get('device_timestamp', 'N/A')
-            self.append_to_csv(local_timestamp, device_timestamp, data)
+        self.append_to_csv(combined_data)
 
         # Clear the buffer and reset the last flush time
         self.data_buffer.clear()
