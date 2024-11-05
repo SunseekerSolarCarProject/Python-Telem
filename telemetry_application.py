@@ -90,9 +90,9 @@ class TelemetryApplication:
         return timestamp_headers + telemetry_headers + battery_headers
 
     def setup_csv(self):
-        with open(mode='w', newline='') as file:
+        with open(self.csv_file, mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow()
+            writer.writerow(self.csv_headers)
 
     def select_port(self):
         ports = list(serial.tools.list_ports.comports())

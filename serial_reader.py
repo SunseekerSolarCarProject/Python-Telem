@@ -5,7 +5,7 @@ import threading
 import time
 
 class SerialReaderThread(threading.Thread):
-    def __init__(self, port, baudrate, process_data_callback):
+    def __init__(self, port, baudrate, process_data_callback, process_raw_data_callback):
         super().__init__(daemon=True)
         self.port = port
         self.baudrate = baudrate
