@@ -1,5 +1,5 @@
-***Telemetry Application***
-This is the newer telemetry that I have rebuilt up in python and any one can read for newcommers into coding.
+**Telemetry Application**
+/nThis is the newer telemetry that I have rebuilt up in python and any one can read for newcommers into coding.
 
 **Windows**
 The files for the executable for windows is within the output folder where you can download the application that is needed to just execute.
