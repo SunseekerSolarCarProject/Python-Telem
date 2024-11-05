@@ -45,12 +45,15 @@ class TelemetryApplication:
         self.battery_info = self.get_user_battery_input()
         self.csv_headers = self.generate_csv_headers()
         self.csv_file = "telemetry_data.csv"
+        self.secondary_csv_headers = ["timestamp", "raw_data"]
+        self.secondary_csv_file = "raw_hex_data.csv"
         self.used_Ah = 0.0
         self.buffer_timeout = buffer_timeout  # Time in seconds to flush buffer
         self.buffer_size = buffer_size  # Max number of data points before flushing
         self.data_buffer = []  # Initialize buffer
         self.last_flush_time = time.time()  # Track last flush timestampe
-        self.setup_csv()
+        self.setup_csv(self.csv_file, self.csv_headers)
+        self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
 
     def get_user_battery_input(self):
         print("Please enter the following battery information:")
@@ -87,9 +90,9 @@ class TelemetryApplication:
         return timestamp_headers + telemetry_headers + battery_headers
 
     def setup_csv(self):
-        with open(self.csv_file, mode='w', newline='') as file:
+        with open(mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(self.csv_headers)
+            writer.writerow()
 
     def select_port(self):
         ports = list(serial.tools.list_ports.comports())
@@ -108,7 +111,8 @@ class TelemetryApplication:
             print("Invalid port selection.")
             return
 
-        self.serial_reader_thread = SerialReaderThread(port, self.baudrate, self.process_data)
+        self.serial_reader_thread = SerialReaderThread(port, self.baudrate, process_data_callback=self.process_data,
+        process_raw_data_callback=self.process_raw_data)  # New callback for raw data
         self.serial_reader_thread.start()
         print(f"Telemetry application started on {port}.")
 
@@ -142,6 +146,13 @@ class TelemetryApplication:
                     (time.time() - self.last_flush_time) >= self.buffer_timeout:
                 self.flush_buffer()
 
+    def process_raw_data(self, raw_data):
+        """
+        Logs the raw hex data directly to the secondary CSV with a timestamp.
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.append_to_csv(self.secondary_csv_file, {"timestamp": timestamp, "raw_data": raw_data}, self.secondary_csv_headers)
+
     def flush_buffer(self):
         """
         Displays and saves buffered data, then clears the buffer.
@@ -149,22 +160,42 @@ class TelemetryApplication:
         if not self.data_buffer:
             return
 
+        # Combine data from buffer into a single dictionary
         combined_data = {}
         for data in self.data_buffer:
             combined_data.update(data)
 
-        # Display the combined data
-        shunt_current = combined_data.get('BP_ISH_Amps', 0)
-        device_timestamp = combined_data.get('device_timestamp', 'N/A')
-        self.display_data(combined_data, self.battery_info, self.used_Ah, shunt_current, device_timestamp)
+        # Check if the combined_data contains all required keys
+        if not self.is_buffer_complete(combined_data):
+            # If incomplete, wait for more data to accumulate in buffer
+            return
 
+        # Ensure both timestamps are present
         combined_data['timestamp'] = combined_data.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         combined_data['device_timestamp'] = combined_data.get('device_timestamp', 'N/A')
 
-        # Save each entry in the buffer to CSV with local and device timestamps
+        # Calculate and add battery metrics to combined_data
+        shunt_current = combined_data.get('BP_ISH_Amps', 0)
+        combined_data['total_capacity_wh'] = self.battery_info.get('total_capacity_wh', 0.0)
+        combined_data['total_capacity_ah'] = self.battery_info.get('total_capacity_ah', 0.0)
+        combined_data['total_voltage'] = self.battery_info.get('total_voltage', 0.0)
+
+        # Calculate remaining metrics
+        remaining_Ah = self.data_processor.calculate_remaining_capacity(
+            self.used_Ah, combined_data['total_capacity_ah'], shunt_current, 1)
+        remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
+        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, combined_data['total_voltage'])
+
+        # Add remaining metrics to combined_data
+        combined_data['remaining_Ah'] = remaining_Ah
+        combined_data['remaining_wh'] = remaining_wh
+        combined_data['remaining_time'] = remaining_time
+
+        # Display and save the complete data set
+        self.display_data(combined_data, self.battery_info, self.used_Ah, shunt_current, combined_data['device_timestamp'])
         self.append_to_csv(combined_data)
 
-        # Clear the buffer and reset the last flush time
+        # Clear buffer and reset flush timer
         self.data_buffer.clear()
         self.last_flush_time = time.time()
 
@@ -172,30 +203,69 @@ class TelemetryApplication:
         """
         Display battery, telemetry, and timestamp data in a structured format.
         """
+        ordered_keys = [
+        "total_capacity_wh", "total_capacity_ah", "total_voltage",
+        "MC1BUS_Voltage", "MC1BUS_Current",
+        "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
+        "MC2BUS_Voltage", "MC2BUS_Current",
+        "MC2VEL_Velocity", "MC2VEL_RPM", "MC2VEL_Speed",
+        "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint",
+        "DC_SWC_Position", "DC_SWC_Value1", 
+        "BP_VMX_ID", "BP_VMX_Voltage",
+        "BP_VMN_ID", "BP_VMN_Voltage",
+        "BP_TMX_ID", "BP_TMX_Temperature",
+        "BP_ISH_SOC", "BP_ISH_Amps",
+        "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
+        "MC1LIM Motor Controller Data"
+        "MC2LIM Motor Controller Data"
+        ]
+        
         # Display battery capacity at the top
         print(f"total_capacity_wh: {battery_info.get('total_capacity_wh', 0.0):.2f}")
         print(f"total_capacity_ah: {battery_info.get('total_capacity_ah', 0.0):.2f}")
         print(f"total_voltage: {battery_info.get('total_voltage', 0.0):.2f}")
 
         # Display telemetry data in an organized format
-        for key, value in data.items():
-            if key not in ['timestamp', 'device_timestamp', 'system_time']:
-                if key == 'DC_SWC':
-                    swc_description = value.get("SWC_States", "Unknown")
-                    print(f"{key}: {swc_description}")
-                elif isinstance(value, dict):
-                    print(f"\n{key} Motor Controller Data:")
-                    print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count', 'N/A')}")
-                    print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count', 'N/A')}")
-                    print(f"  Active Motor Info: {value.get('Active Motor Info', 'N/A')}")
-                    print(f"  Errors: {', '.join(value.get('Errors', [])) if value.get('Errors') else 'None'}")
-                    print(f"  Limits: {', '.join(value.get('Limits', [])) if value.get('Limits') else 'None'}")
+        for key in ordered_keys:
+            if key == "DC_SWC_Position":
+                # Interpret DC_SWC_Position from its hex value to a descriptive string
+                swc_hex_value = data.get("DC_SWC_Position", "0x00000000")
+                swc_description = self.data_processor.steering_wheel_desc.get(swc_hex_value, "unknown")
+                print(f"{key}: {swc_description} ({swc_hex_value})")
+
+            elif key == "DC_SWC_Value1":
+                # Show bit value directly for DC_SWC_Value1
+                swc_bit_value = data.get("DC_SWC_Value1", "N/A")
+                print(f"{key}: {swc_bit_value} #")
+
+            elif key == "MC1LIM Motor Controller Data":
+                # Special handling for the MC1LIM motor controller data
+                motor_data = data.get("MC1LIM Motor Controller Data", {})
+                if motor_data:
+                    print("\nMC1LIM Motor Controller Data:")
+                    print(f"  CAN Receive Error Count: {motor_data.get('CAN Receive Error Count', 'N/A')}")
+                    print(f"  CAN Transmit Error Count: {motor_data.get('CAN Transmit Error Count', 'N/A')}")
+                    print(f"  Active Motor Info: {motor_data.get('Active Motor Info', 'N/A')}")
+                    print(f"  Errors: {', '.join(motor_data.get('Errors', [])) if motor_data.get('Errors') else 'None'}")
+            elif key == "MC2LIM Motor Controller Data":
+                # Special handling for the MC2LIM motor controller data
+                motor_data = data.get("MC2LIM Motor Controller Data", {})
+                if motor_data:
+                    print("\nMC1LIM Motor Controller Data:")
+                    print(f"  CAN Receive Error Count: {motor_data.get('CAN Receive Error Count', 'N/A')}")
+                    print(f"  CAN Transmit Error Count: {motor_data.get('CAN Transmit Error Count', 'N/A')}")
+                    print(f"  Active Motor Info: {motor_data.get('Active Motor Info', 'N/A')}")
+                    print(f"  Errors: {', '.join(motor_data.get('Errors', [])) if motor_data.get('Errors') else 'None'}")
+                    print(f"  Limits: {', '.join(motor_data.get('Limits', [])) if motor_data.get('Limits') else 'None'}")
+                    print(f"  Limits: {', '.join(motor_data.get('Limits', [])) if motor_data.get('Limits') else 'None'}")
+            else:
+                # General handling for other fields
+                value = data.get(key, "N/A")
+                unit = units.get(key, '')
+                if isinstance(value, (int, float)):
+                    print(f"{key}: {value:.2f} {unit}")
                 else:
-                    unit = units.get(key, '')
-                    if isinstance(value, (int, float)):
-                        print(f"{key}: {value:.2f} {unit}")
-                    else:
-                        print(f"{key}: {value} {unit}")
+                    print(f"{key}: {value} {unit}")
 
         # Display remaining battery information and timestamps at the bottom
         if 'total_capacity_ah' in battery_info and 'total_voltage' in battery_info:

@@ -10,6 +10,7 @@ class SerialReaderThread(threading.Thread):
         self.port = port
         self.baudrate = baudrate
         self.process_data_callback = process_data_callback
+        self.process_raw_data_callback = process_raw_data_callback
         self.serial_conn = None
         self._stop_event = threading.Event()
     
@@ -20,8 +21,9 @@ class SerialReaderThread(threading.Thread):
             self.serial_conn.set_buffer_size(rx_size=4 * 1024 * 1024, tx_size=4 * 1024 * 1024)
             while not self._stop_event.is_set():
                 if self.serial_conn.in_waiting > 0:
-                    data = self.serial_conn.readline().decode('utf-8').strip()
-                    self.process_data_callback(data)
+                    raw_data = self.serial_conn.readline().decode('utf-8').strip()
+                    self.process_raw_data_callback(raw_data)
+                    self.process_data_callback(raw_data)
                 time.sleep(0.1)
         except serial.SerialException as e:
             print(f"Serial error: {e}")
