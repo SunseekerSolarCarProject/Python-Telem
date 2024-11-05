@@ -394,7 +394,7 @@ def read_and_process_data(data_list, ser, battery_info, used_Ah):
                         interval_data['system_time'] = system_time
 
                         # Assume 'BP_ISH_Amps' represents the shunt current for battery usage
-                        shunt_current = interval_data.get('BP_ISH_Amp', 0)
+                        shunt_current = interval_data.get('BP_ISH_Amps', 0)
 
                         # Update the total used Ah
                         used_Ah += (shunt_current * 1) / 3600  # Update Ah based on the current reading
