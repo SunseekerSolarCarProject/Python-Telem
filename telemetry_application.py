@@ -89,10 +89,10 @@ class TelemetryApplication:
 
         return timestamp_headers + telemetry_headers + battery_headers
 
-    def setup_csv(self):
-        with open(self.csv_file, mode='w', newline='') as file:
+    def setup_csv(self, filename, headers):
+        with open(filename, mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(self.csv_headers)
+            writer.writerow(headers)
 
     def select_port(self):
         ports = list(serial.tools.list_ports.comports())
@@ -284,13 +284,13 @@ class TelemetryApplication:
         print("-" * 40)
 
 
-    def append_to_csv(self, combined_data):
+    def append_to_csv(self, filename, headers, combined_data):
         """
         Appends a structured row to the CSV with all available data.
         """
-        row = [combined_data.get(header, '') for header in self.csv_headers]  # Fill row based on headers
+        row = [combined_data.get(header, '') for header in headers]  # Fill row based on headers
 
-        with open(self.csv_file, mode='a', newline='') as file:
+        with open(filename, mode='a', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(row)
 
