@@ -2,6 +2,7 @@
 
 import time
 import csv
+import os
 import serial
 import serial.tools.list_ports
 from datetime import datetime
@@ -56,18 +57,70 @@ class TelemetryApplication:
         self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
 
     def get_user_battery_input(self):
-        print("Please enter the following battery information:")
-        capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
-        voltage = float(input("Battery Voltage (V) per cell: "))
-        quantity = int(input("Number of cells: "))
-        series_strings = int(input("Number of series strings: "))
+        """
+        Allows the user to select a battery file or enter information manually.
+        """
+        print("Available battery files:")
+        battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
 
-        battery_info = self.data_processor.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
-        if 'error' in battery_info:
-            print(f"Error calculating battery info: {battery_info['error']}")
+        # List available files and prompt user for a choice
+        for i, filename in enumerate(battery_files, start=1):
+            print(f"{i}. {filename}")
+        print(f"{len(battery_files) + 1}. Enter battery information manually")
+
+        # Prompt for file selection or manual input
+        choice = int(input("Select an option by number: "))
+    
+        if 1 <= choice <= len(battery_files):
+            # Load battery info from selected file
+            file_path = battery_files[choice - 1]
+            battery_info = self.load_battery_info_from_file(file_path)
+            if battery_info:
+                return battery_info
+            else:
+                print(f"Error loading battery data from {file_path}.")
+        else:
+            # Manual input if user opts not to select a file
+            print("Please enter the following battery information:")
+            capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
+            voltage = float(input("Battery Voltage (V) per cell: "))
+            quantity = int(input("Number of cells: "))
+            series_strings = int(input("Number of series strings: "))
+
+            battery_info = self.data_processor.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
+            if 'error' in battery_info:
+                print(f"Error calculating battery info: {battery_info['error']}")
+                return None
+            return battery_info
+
+    def load_battery_info_from_file(self, file_path):
+        """
+        Parses a text file to extract battery capacity, nominal voltage, cell count, and string count.
+        File should follow the format:
+        - Battery capacity amps, <value>
+        - Battery nominal voltage, <value>
+        - Amount of battery cells, <value>
+        - Number of battery strings, <value>
+        """
+        try:
+            with open(file_path, 'r') as file:
+                battery_data = {}
+                for line in file:
+                    key, value = line.strip().split(", ")
+                    battery_data[key] = float(value) if "voltage" in key or "amps" in key else int(value)
+
+                # Extract the values required for capacity calculation
+                capacity_ah = battery_data["Battery capacity amps"]
+                voltage = battery_data["Battery nominal voltage"]
+                quantity = battery_data["Amount of battery cells"]
+                series_strings = battery_data["Number of battery strings"]
+
+                return self.data_processor.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
+
+        except (FileNotFoundError, KeyError, ValueError) as e:
+            print(f"Error reading file {file_path}: {e}")
             return None
-        return battery_info
-
+    
     def generate_csv_headers(self):
         """
         Define all potential CSV columns based on known telemetry fields and battery info.
@@ -101,7 +154,7 @@ class TelemetryApplication:
             return None
         print("Available ports:")
         for i, port in enumerate(ports):
-            print(f"{i}: {port.device}")
+            print(f"{i}. {port.device}")
         choice = int(input("Select port number: "))
         return ports[choice].device if 0 <= choice < len(ports) else None
     
