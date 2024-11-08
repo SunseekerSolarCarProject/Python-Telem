@@ -25,20 +25,22 @@ limit_flags_desc = [
     "IPM/Motor Temperature"
 ]
 
-# Steering wheel control description based on Hex maps
-steering_wheel_desc = {
-    '0x08000000': 'regen',
-    '0x00040100': 'left turn',
-    '0x00040000': 'left turn',
-    '0x00080000': 'right turn',
-    '0x00080200': 'right turn',
-    '0x00010000': 'horn',
-    '0x00020300': 'hazards',
-    '0x00020000': 'hazards',
-    '0x00000000': 'none'
-}
-
 class DataProcessor:
+    def __init__(self):
+        # Define steering wheel descriptions within the class
+        self.steering_wheel_desc = {
+            '0x08000000': 'regen',
+            '0x00040100': 'left turn',
+            '0x00040000': 'left turn',
+            '0x00080000': 'right turn',
+            '0x00080200': 'right turn',
+            '0x00010000': 'horn',
+            '0x00020300': 'hazards',
+            '0x00020000': 'hazards',
+            '0x00000000': 'none',
+            '0xHHHHHHHH': 'nonexistent'
+        }
+
     def hex_to_float(self, hex_data):
         try:
             if hex_data == 'HHHHHHHH':
@@ -90,12 +92,13 @@ class DataProcessor:
         - hex1: The first 32-bit hexadecimal string (for SWC bits 0-4).
         - swc_value: The second 32-bit raw SWC value.
         """
-        bits2 = self.hex_to_bits(hex2)
-        swc_description = steering_wheel_desc.get(hex1, "unknown") # Parse the SWC bits
-
+        # Interpret the SWC Position hex as a description
+        swc_description = self.steering_wheel_desc.get(hex1, "unknown")
+        
+        # Format the final dictionary to include both description and hex values
         return {
-            "SWC_States": swc_description,
-            "SWC_Value": bits2  # Assuming this is directly a 32-bit integer
+            "DC_SWC_Position": f"{swc_description} ({hex1})",  # Description with hex
+            "DC_SWC_Value1": hex2  # Direct bit value
         }
     
     def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval):
