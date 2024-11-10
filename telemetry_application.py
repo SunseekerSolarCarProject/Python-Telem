@@ -315,6 +315,18 @@ class TelemetryApplication:
         # Display telemetry data in an organized format
         for key in ordered_keys:
             value = data.get(key, "N/A")
+            if key == 'DC_SWC':
+                #display SWC state based on hex mapping
+                swc_description = value.get("SWC_States", "Unkown")
+                print(f"{key}: {swc_description}")
+            elif isinstance(value, dict):
+                #display motor controller information
+                print(f"\n{key} Motor Controller Data:")
+                print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count')}")
+                print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count')}")
+                print(f"  Active Motor Info: {value.get('Active Motor Info')}")
+                print(f"  Errors: {', '.join(value.get('Errors', [])) if value.get('Errors') else 'None'}")
+                print(f"  Limits: {', '.join(value.get('Limits', [])) if value.get('Limits') else 'None'}")
             unit = units.get(key, '')
             if isinstance(value, (int, float)):
                 print(f"{key}: {value:.2f} {unit}")
@@ -334,8 +346,6 @@ class TelemetryApplication:
         print(f"Device Timestamp: {device_timestamp}")
         print(f"System Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("-" * 40)
-
-
 
     def append_to_csv(self, filename, data, headers):
         """
