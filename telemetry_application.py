@@ -135,7 +135,7 @@ class TelemetryApplication:
         ]
         
         # Add additional calculated fields
-        battery_headers = ["total_capacity_wh", "total_capacity_ah", "total_voltage", 
+        battery_headers = ["Total_Capacity_wh", "Total_Capacity_Ah", "Total_voltage", 
                            "remaining_Ah", "remaining_wh", "remaining_time"]
         
         # Add timestamp fields
@@ -256,6 +256,12 @@ class TelemetryApplication:
             if field not in combined_data:
                 combined_data[field] = "N/A"  # Use "N/A" or another appropriate placeholder
 
+        # Check if motor controller data exists and add if missing
+        if "MC1LIM" not in combined_data:
+            combined_data["MC1LIM"] = self.data_processor.parse_motor_controller_data("0x00000000", "0x00000000")
+        if "MC2LIM" not in combined_data:
+            combined_data["MC2LIM"] = self.data_processor.parse_motor_controller_data("0x00000000", "0x00000000")
+
         # Ensure both timestamps are present
         combined_data['timestamp'] = combined_data.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         combined_data['device_timestamp'] = combined_data.get('device_timestamp', 'N/A')
@@ -268,15 +274,15 @@ class TelemetryApplication:
             except ValueError:
                 shunt_current = 0.0  # Default to 0.0 if conversion fails
 
-        combined_data['total_capacity_wh'] = self.battery_info.get('total_capacity_wh', 0.0)
-        combined_data['total_capacity_ah'] = self.battery_info.get('total_capacity_ah', 0.0)
-        combined_data['total_voltage'] = self.battery_info.get('total_voltage', 0.0)
+        combined_data['Total_Capacity_Wh'] = self.battery_info.get('Total_Capacity_Wh', 0.0)
+        combined_data['Total_Capacity_Ah'] = self.battery_info.get('Total_Capacity_Ah', 0.0)
+        combined_data['Total_Voltage'] = self.battery_info.get('Total_Voltage', 0.0)
 
         # Calculate remaining metrics
         remaining_Ah = self.data_processor.calculate_remaining_capacity(
-            self.used_Ah, combined_data['total_capacity_ah'], shunt_current, 1)
+            self.used_Ah, combined_data['Total_Capacity_Ah'], shunt_current, 1)
         remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
-        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, combined_data['total_voltage'])
+        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, combined_data['Total_Voltage'])
 
         # Add remaining metrics to combined_data
         combined_data['remaining_Ah'] = remaining_Ah
@@ -296,7 +302,7 @@ class TelemetryApplication:
         Display battery, telemetry, and timestamp data in a structured format.
         """
         ordered_keys = [
-        "total_capacity_wh", "total_capacity_ah", "total_voltage",
+        "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
         "MC1BUS_Voltage", "MC1BUS_Current",
         "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
         "MC2BUS_Voltage", "MC2BUS_Current",
@@ -315,29 +321,27 @@ class TelemetryApplication:
         # Display telemetry data in an organized format
         for key in ordered_keys:
             value = data.get(key, "N/A")
-            if key == 'DC_SWC':
-                #display SWC state based on hex mapping
-                swc_description = value.get("SWC_States", "Unkown")
-                print(f"{key}: {swc_description}")
-            elif isinstance(value, dict):
-                #display motor controller information
+            if key in ["MC1LIM", "MC2LIM"] and isinstance(value, dict):
+                # Display motor controller information for MC1LIM or MC2LIM
                 print(f"\n{key} Motor Controller Data:")
-                print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count')}")
-                print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count')}")
-                print(f"  Active Motor Info: {value.get('Active Motor Info')}")
-                print(f"  Errors: {', '.join(value.get('Errors', [])) if value.get('Errors') else 'None'}")
-                print(f"  Limits: {', '.join(value.get('Limits', [])) if value.get('Limits') else 'None'}")
-            unit = units.get(key, '')
-            if isinstance(value, (int, float)):
-                print(f"{key}: {value:.2f} {unit}")
+                print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count', 'N/A')}")
+                print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count', 'N/A')}")
+                print(f"  Active Motor Info: {value.get('Active Motor Info', 'N/A')}")
+                print(f"  Errors: {value.get('Errors')}")
+                print(f"  Limits: {value.get('Limits')}")
             else:
-                print(f"{key}: {value} {unit}")
+                # General handling for other fields
+                unit = units.get(key, '')
+                if isinstance(value, (int, float)):
+                    print(f"{key}: {value:.2f} {unit}")
+                else:
+                    print(f"{key}: {value} {unit}")
 
         # Display remaining battery information and timestamps at the bottom
         remaining_Ah = self.data_processor.calculate_remaining_capacity(
-            used_Ah, battery_info['total_capacity_ah'], shunt_current, 1)
+            used_Ah, battery_info['Total_Capacity_Ah'], shunt_current, 1)
         remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
-        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, battery_info['total_voltage'])
+        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, battery_info['Total_Voltage'])
 
         print(f"Remaining Capacity (Ah): {remaining_Ah:.2f}")
         print(f"Remaining Capacity (Wh): {remaining_wh:.2f}")

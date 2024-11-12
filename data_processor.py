@@ -94,11 +94,12 @@ class DataProcessor:
         """
         # Interpret the SWC Position hex as a description
         swc_description = self.steering_wheel_desc.get(hex1, "unknown")
-        
+        bits2 = self.hex_to_bits(hex2)
+
         # Format the final dictionary to include both description and hex values
         return {
             "DC_SWC_Position": f"{swc_description} ({hex1})",  # Description with hex
-            "DC_SWC_Value1": hex2  # Direct bit value
+            "DC_SWC_Value1": f"{bits2} ({hex2})"  # Direct bit value
         }
     
     def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval):
@@ -117,9 +118,9 @@ class DataProcessor:
             total_voltage = voltage * series_strings
             total_capacity_wh = total_capacity_ah * total_voltage
             return {
-                'total_capacity_wh': total_capacity_wh,
-                'total_capacity_ah': total_capacity_ah,
-                'total_voltage': total_voltage,
+                'Total_Capacity_Wh': total_capacity_wh,
+                'Total_Capacity_Ah': total_capacity_ah,
+                'Total_Voltage': total_voltage,
             }
         except Exception as e:
             return {'error': str(e)}
