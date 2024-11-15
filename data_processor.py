@@ -93,7 +93,7 @@ class DataProcessor:
         - swc_value: The second 32-bit raw SWC value.
         """
         # Interpret the SWC Position hex as a description
-        swc_description = self.steering_wheel_desc.get(hex1, "unknown")
+        swc_description = self.steering_wheel_desc.get(hex1, "NonExistent")
         bits2 = self.hex_to_bits(hex2)
 
         # Format the final dictionary to include both description and hex values

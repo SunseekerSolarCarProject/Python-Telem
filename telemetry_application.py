@@ -131,7 +131,8 @@ class TelemetryApplication:
             "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_Velocity", "MC2VEL_RPM", "MC2VEL_Speed",
             "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC", "BP_VMX_ID",
             "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
-            "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah"
+            "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah", "MC1LIM",
+            "MC2LIM"
         ]
         
         # Add additional calculated fields
@@ -255,12 +256,28 @@ class TelemetryApplication:
         for field in self.csv_headers:
             if field not in combined_data:
                 combined_data[field] = "N/A"  # Use "N/A" or another appropriate placeholder
+                
+        if "DC_SWC_Position" not in combined_data and "DC_SWC_Value1" not in combined_data:
+            swc_data = self.data_processor.parse_swc_data(
+                combined_data.get("DC_SWC_Hex1", "0x00000000"), 
+                combined_data.get("DC_SWC_Hex2", "0x00000000")
+            )
+            combined_data.update(swc_data)
 
         # Check if motor controller data exists and add if missing
-        if "MC1LIM" not in combined_data:
-            combined_data["MC1LIM"] = self.data_processor.parse_motor_controller_data("0x00000000", "0x00000000")
-        if "MC2LIM" not in combined_data:
-            combined_data["MC2LIM"] = self.data_processor.parse_motor_controller_data("0x00000000", "0x00000000")
+        if "MC1LIM Motor Controller Data" not in combined_data:
+            mc1lim_data = self.data_processor.parse_motor_controller_data(
+                combined_data.get("MC1LIM_Hex1", "0x00000000"),
+                combined_data.get("MC1LIM_Hex2", "0x00000000")
+            )
+            combined_data["MC1LIM Motor Controller Data"] = mc1lim_data
+
+        if "MC2LIM Motor Controller Data" not in combined_data:
+            mc2lim_data = self.data_processor.parse_motor_controller_data(
+                combined_data.get("MC2LIM_Hex1", "0x00000000"),
+                combined_data.get("MC2LIM_Hex2", "0x00000000")
+            )
+            combined_data["MC2LIM Motor Controller Data"] = mc2lim_data
 
         # Ensure both timestamps are present
         combined_data['timestamp'] = combined_data.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -321,16 +338,15 @@ class TelemetryApplication:
         # Display telemetry data in an organized format
         for key in ordered_keys:
             value = data.get(key, "N/A")
-            if key in ["MC1LIM", "MC2LIM"] and isinstance(value, dict):
-                # Display motor controller information for MC1LIM or MC2LIM
-                print(f"\n{key} Motor Controller Data:")
+        
+            if key in ["MC1LIM Motor Controller Data", "MC2LIM Motor Controller Data"] and isinstance(value, dict):
+                print(f"\n{key}:")
                 print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count', 'N/A')}")
                 print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count', 'N/A')}")
                 print(f"  Active Motor Info: {value.get('Active Motor Info', 'N/A')}")
-                print(f"  Errors: {value.get('Errors')}")
-                print(f"  Limits: {value.get('Limits')}")
+                print(f"  Errors: {', '.join(value.get('Errors', [])) if value.get('Errors') else 'None'}")
+                print(f"  Limits: {', '.join(value.get('Limits', [])) if value.get('Limits') else 'None'}")
             else:
-                # General handling for other fields
                 unit = units.get(key, '')
                 if isinstance(value, (int, float)):
                     print(f"{key}: {value:.2f} {unit}")
