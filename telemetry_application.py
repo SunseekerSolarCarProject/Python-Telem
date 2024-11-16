@@ -8,6 +8,7 @@ import serial.tools.list_ports
 from datetime import datetime
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
+from Data_Display import DataDisplay
 
 # Updated units and key descriptions
 units = {
@@ -43,6 +44,7 @@ class TelemetryApplication:
         self.baudrate = baudrate
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
+        self.Data_Display = DataDisplay()
         self.battery_info = self.get_user_battery_input()
         self.csv_headers = self.generate_csv_headers()
         self.csv_file = "telemetry_data.csv"
@@ -167,7 +169,7 @@ class TelemetryApplication:
             return
 
         self.serial_reader_thread = SerialReaderThread(port, self.baudrate, process_data_callback=self.process_data,
-        process_raw_data_callback=self.process_raw_data)  # New callback for raw data
+        process_raw_data_callback=self.process_raw_data)  # New callback for raw data with the actuall data
         self.serial_reader_thread.start()
         print(f"Telemetry application started on {port}.")
 
@@ -257,27 +259,20 @@ class TelemetryApplication:
             if field not in combined_data:
                 combined_data[field] = "N/A"  # Use "N/A" or another appropriate placeholder
                 
-        if "DC_SWC_Position" not in combined_data and "DC_SWC_Value1" not in combined_data:
-            swc_data = self.data_processor.parse_swc_data(
-                combined_data.get("DC_SWC_Hex1", "0x00000000"), 
-                combined_data.get("DC_SWC_Hex2", "0x00000000")
-            )
-            combined_data.update(swc_data)
-
         # Check if motor controller data exists and add if missing
-        if "MC1LIM Motor Controller Data" not in combined_data:
+        if "MC1LIM" not in combined_data:
             mc1lim_data = self.data_processor.parse_motor_controller_data(
                 combined_data.get("MC1LIM_Hex1", "0x00000000"),
                 combined_data.get("MC1LIM_Hex2", "0x00000000")
             )
-            combined_data["MC1LIM Motor Controller Data"] = mc1lim_data
+            combined_data["MC1LIM"] = mc1lim_data
 
-        if "MC2LIM Motor Controller Data" not in combined_data:
+        if "MC2LIM" not in combined_data:
             mc2lim_data = self.data_processor.parse_motor_controller_data(
                 combined_data.get("MC2LIM_Hex1", "0x00000000"),
                 combined_data.get("MC2LIM_Hex2", "0x00000000")
             )
-            combined_data["MC2LIM Motor Controller Data"] = mc2lim_data
+            combined_data["MC2LIM"] = mc2lim_data
 
         # Ensure both timestamps are present
         combined_data['timestamp'] = combined_data.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -307,65 +302,18 @@ class TelemetryApplication:
         combined_data['remaining_time'] = remaining_time
 
         # Display and save the complete data set
-        self.display_data(combined_data, self.battery_info, self.used_Ah, shunt_current, combined_data['device_timestamp'])
         self.append_to_csv(self.csv_file, combined_data, self.csv_headers)
 
         # Clear main data buffer and reset flush timer
         self.data_buffer.clear()
         self.last_flush_time = time.time()
 
-    def display_data(self, data, battery_info, used_Ah, shunt_current, device_timestamp):
+    def display_data(self, combined_data):
         """
-        Display battery, telemetry, and timestamp data in a structured format.
+        Delegates data display to the DataDisplay class.
         """
-        ordered_keys = [
-        "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
-        "MC1BUS_Voltage", "MC1BUS_Current",
-        "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
-        "MC2BUS_Voltage", "MC2BUS_Current",
-        "MC2VEL_Velocity", "MC2VEL_RPM", "MC2VEL_Speed",
-        "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint",
-        "DC_SWC_Position", "DC_SWC_Value1", 
-        "BP_VMX_ID", "BP_VMX_Voltage",
-        "BP_VMN_ID", "BP_VMN_Voltage",
-        "BP_TMX_ID", "BP_TMX_Temperature",
-        "BP_ISH_SOC", "BP_ISH_Amps",
-        "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
-        "MC1LIM Motor Controller Data"
-        "MC2LIM Motor Controller Data"
-        ]
-        
-        # Display telemetry data in an organized format
-        for key in ordered_keys:
-            value = data.get(key, "N/A")
-        
-            if key in ["MC1LIM Motor Controller Data", "MC2LIM Motor Controller Data"] and isinstance(value, dict):
-                print(f"\n{key}:")
-                print(f"  CAN Receive Error Count: {value.get('CAN Receive Error Count', 'N/A')}")
-                print(f"  CAN Transmit Error Count: {value.get('CAN Transmit Error Count', 'N/A')}")
-                print(f"  Active Motor Info: {value.get('Active Motor Info', 'N/A')}")
-                print(f"  Errors: {', '.join(value.get('Errors', [])) if value.get('Errors') else 'None'}")
-                print(f"  Limits: {', '.join(value.get('Limits', [])) if value.get('Limits') else 'None'}")
-            else:
-                unit = units.get(key, '')
-                if isinstance(value, (int, float)):
-                    print(f"{key}: {value:.2f} {unit}")
-                else:
-                    print(f"{key}: {value} {unit}")
-
-        # Display remaining battery information and timestamps at the bottom
-        remaining_Ah = self.data_processor.calculate_remaining_capacity(
-            used_Ah, battery_info['Total_Capacity_Ah'], shunt_current, 1)
-        remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
-        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, battery_info['Total_Voltage'])
-
-        print(f"Remaining Capacity (Ah): {remaining_Ah:.2f}")
-        print(f"Remaining Capacity (Wh): {remaining_wh:.2f}")
-        print(f"Remaining Time (hours): {remaining_time if remaining_time != float('inf') else 'inf'}")
-
-        print(f"Device Timestamp: {device_timestamp}")
-        print(f"System Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("-" * 40)
+        display_output = self.Data_Display.display(combined_data)
+        print(display_output)
 
     def append_to_csv(self, filename, data, headers):
         """
