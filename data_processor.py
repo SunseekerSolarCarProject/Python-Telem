@@ -93,13 +93,13 @@ class DataProcessor:
         - swc_value: The second 32-bit raw SWC value.
         """
         # Interpret the SWC Position hex as a description
-        swc_description = self.steering_wheel_desc.get(hex1, "NonExistent")
+        swc_description = self.steering_wheel_desc.get(hex1, "Testing")
         bits2 = self.hex_to_bits(hex2)
 
         # Format the final dictionary to include both description and hex values
         return {
             "DC_SWC_Position": f"{swc_description} ({hex1})",  # Description with hex
-            "DC_SWC_Value1": f"{bits2} ({hex2})"  # Direct bit value
+            "DC_SWC_Value": f"{bits2} ({hex2})"  # Direct bit value
         }
     
     def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval):

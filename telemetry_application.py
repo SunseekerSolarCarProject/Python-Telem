@@ -8,14 +8,15 @@ import serial.tools.list_ports
 from datetime import datetime
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
-from Data_Display import DataDisplay
+from data_display import DataDisplay
+from buffer_data import BufferData
 
 # Updated units and key descriptions
 units = {
     'DC_DRV_Motor_Velocity_setpoint': '#',
     'DC_DRV_Motor_Currrent_setpoint': '#',
     'DC_SWC_Position': ' ',
-    'DC_SWC_Value1': '#',
+    'DC_SWC_Value': '#',
     'MC1BUS_Voltage': 'V',
     'MC1BUS_Current': 'A',
     'MC2BUS_Voltage': 'V',
@@ -47,15 +48,18 @@ class TelemetryApplication:
         self.Data_Display = DataDisplay()
         self.battery_info = self.get_user_battery_input()
         self.csv_headers = self.generate_csv_headers()
-        self.csv_file = "telemetry_data.csv"
         self.secondary_csv_headers = ["timestamp", "raw_data"]
+        self.csv_file = "telemetry_data.csv"
         self.secondary_csv_file = "raw_hex_data.csv"
         self.used_Ah = 0.0
-        self.buffer_timeout = buffer_timeout  # Time in seconds to flush buffer
-        self.buffer_size = buffer_size  # Max number of data points before flushing
-        self.data_buffer = []  # Initialize buffer
-        self.raw_data_buffer = []  # Separate buffer for raw hex data
-        self.last_flush_time = time.time()  # Track last flush timestampe
+        # Initialize BufferData
+        self.buffer = BufferData(
+            csv_headers=self.csv_headers,
+            secondary_csv_headers=self.secondary_csv_headers,
+            buffer_size=buffer_size,
+            buffer_timeout=buffer_timeout
+        )
+
         self.setup_csv(self.csv_file, self.csv_headers)
         self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
 
@@ -186,127 +190,45 @@ class TelemetryApplication:
             print("Application stopped.")
 
     def process_data(self, data):
+        """
+        Process incoming telemetry data and buffer it.
+        """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if data.startswith("TL_TIM"):
-            device_timestamp = data.split(",")[1].strip()  # Extract time value after comma
-            self.data_buffer.append({"device_timestamp": device_timestamp})
-            return
-        
-        # Parse other telemetry data lines
-        processed_data = self.data_processor.parse_data(data)
-        if processed_data:
-            processed_data['timestamp'] = timestamp  # Add local timestamp
-            self.data_buffer.append(processed_data)
 
-            # Flush buffer if timeout or size reached
-            if len(self.data_buffer) >= self.buffer_size or \
-                    (time.time() - self.last_flush_time) >= self.buffer_timeout:
-                self.flush_buffer()
+        if data.startswith("TL_TIM"):
+            # Extract device timestamp from TL_TIM data
+            device_timestamp = data.split(",")[1].strip()
+            # Update the buffer with the device timestamp
+            self.buffer.update_current_entry({"device_timestamp": device_timestamp})
+            return
+
+        # Parse other telemetry data
+        processed_data = self.data_processor.parse_data(data)
+
+        if processed_data:
+            # Add local timestamp to processed data
+            processed_data['timestamp'] = timestamp
+
+            # Add data to the buffer and check if it's ready to flush
+            ready_to_flush = self.buffer.add_data(processed_data)
+
+            if ready_to_flush:
+                combined_data = self.buffer.flush_buffer(
+                    filename=self.csv_file,
+                    data_processor=self.data_processor,
+                    battery_info=self.battery_info,
+                    used_ah=self.used_Ah
+                )
+                if combined_data:
+                    self.display_data(combined_data)
 
     def process_raw_data(self, raw_data):
         """
-        Logs the raw hex data directly to the secondary CSV with a timestamp.
+        Process raw hex data and buffer it.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         raw_data_entry = {"timestamp": timestamp, "raw_data": raw_data}
-
-        # Append raw data entry to the buffer for raw data
-        self.raw_data_buffer.append(raw_data_entry)
-
-        # If raw_data_buffer exceeds buffer size, flush it to the secondary CSV
-        if len(self.raw_data_buffer) >= self.buffer_size:
-            self.flush_raw_data_buffer()
-
-    def is_buffer_complete(self, combined_data):
-        """
-        Checks if `combined_data` contains all expected telemetry fields
-        and battery-related metrics before flushing to CSV.
-        """
-        # Required telemetry and battery fields for a complete data set
-        required_fields = set(self.csv_headers)  # Uses the headers already defined for the CSV
-
-        # Check if combined_data contains all required fields
-        missing_fields = required_fields - combined_data.keys()
-        if missing_fields:
-            print(f"Waiting for additional data. Missing fields: {missing_fields}")
-            return False
-        return True
-
-    def flush_raw_data_buffer(self):
-        """
-        Writes buffered raw hex data to the secondary CSV.
-        """
-        for raw_data_entry in self.raw_data_buffer:
-            self.append_to_csv(self.secondary_csv_file, raw_data_entry, self.secondary_csv_headers)
-
-        # Clear the raw data buffer after writing to CSV
-        self.raw_data_buffer.clear()
-
-    def flush_buffer(self):
-        """
-        Displays and saves buffered data for the primary CSV, then clears the main data buffer.
-        """
-        if not self.data_buffer:
-            return
-
-        # Combine data from buffer into a single dictionary
-        combined_data = {}
-        for data in self.data_buffer:
-            combined_data.update(data)
-
-        # Fill in any missing fields with default values to avoid incomplete data errors
-        for field in self.csv_headers:
-            if field not in combined_data:
-                combined_data[field] = "N/A"  # Use "N/A" or another appropriate placeholder
-                
-        # Check if motor controller data exists and add if missing
-        if "MC1LIM" not in combined_data:
-            mc1lim_data = self.data_processor.parse_motor_controller_data(
-                combined_data.get("MC1LIM_Hex1", "0x00000000"),
-                combined_data.get("MC1LIM_Hex2", "0x00000000")
-            )
-            combined_data["MC1LIM"] = mc1lim_data
-
-        if "MC2LIM" not in combined_data:
-            mc2lim_data = self.data_processor.parse_motor_controller_data(
-                combined_data.get("MC2LIM_Hex1", "0x00000000"),
-                combined_data.get("MC2LIM_Hex2", "0x00000000")
-            )
-            combined_data["MC2LIM"] = mc2lim_data
-
-        # Ensure both timestamps are present
-        combined_data['timestamp'] = combined_data.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        combined_data['device_timestamp'] = combined_data.get('device_timestamp', 'N/A')
-
-        # Calculate and add battery metrics to combined_data
-        shunt_current = combined_data.get('BP_ISH_Amps', 0)
-        if isinstance(shunt_current, str):  # Convert to float if it's a string
-            try:
-                shunt_current = float(shunt_current)
-            except ValueError:
-                shunt_current = 0.0  # Default to 0.0 if conversion fails
-
-        combined_data['Total_Capacity_Wh'] = self.battery_info.get('Total_Capacity_Wh', 0.0)
-        combined_data['Total_Capacity_Ah'] = self.battery_info.get('Total_Capacity_Ah', 0.0)
-        combined_data['Total_Voltage'] = self.battery_info.get('Total_Voltage', 0.0)
-
-        # Calculate remaining metrics
-        remaining_Ah = self.data_processor.calculate_remaining_capacity(
-            self.used_Ah, combined_data['Total_Capacity_Ah'], shunt_current, 1)
-        remaining_time = self.data_processor.calculate_remaining_time(remaining_Ah, shunt_current)
-        remaining_wh = self.data_processor.calculate_watt_hours(remaining_Ah, combined_data['Total_Voltage'])
-
-        # Add remaining metrics to combined_data
-        combined_data['remaining_Ah'] = remaining_Ah
-        combined_data['remaining_wh'] = remaining_wh
-        combined_data['remaining_time'] = remaining_time
-
-        # Display and save the complete data set
-        self.append_to_csv(self.csv_file, combined_data, self.csv_headers)
-
-        # Clear main data buffer and reset flush timer
-        self.data_buffer.clear()
-        self.last_flush_time = time.time()
+        self.buffer.add_raw_data(raw_data_entry)
 
     def display_data(self, combined_data):
         """
@@ -314,21 +236,6 @@ class TelemetryApplication:
         """
         display_output = self.Data_Display.display(combined_data)
         print(display_output)
-
-    def append_to_csv(self, filename, data, headers):
-        """
-        Appends a structured row to the CSV with all available data.
-        Ensures `data` is a dictionary.
-        """
-        if not isinstance(data, dict):
-            print(f"append_to_csv error: Expected data as dictionary, but got {type(data).__name__}")
-            return
-
-        row = [data.get(header, '') for header in headers]  # Fill row based on headers
-
-        with open(filename, mode='a', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(row)
 
     def finalize_csv(self):
         custom_filename = input("Enter a filename to save the CSV data (without extension): ")

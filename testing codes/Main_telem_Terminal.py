@@ -139,6 +139,16 @@ def find_serial_port():
         print(f"Unsupported operating system: {system_os}")
         return None
 
+def select_port():
+        ports = list(serial.tools.list_ports.comports())
+        if not ports:
+            print("No serial ports found.")
+            return None
+        print("Available ports:")
+        for i, port in enumerate(ports):
+            print(f"{i}. {port.device}")
+        choice = int(input("Select port number: "))
+        return ports[choice].device if 0 <= choice < len(ports) else None
 '''
 if any of the changes to how serial communication happens this is where to change the values.
 '''
@@ -508,7 +518,7 @@ if __name__ == '__main__':
     battery_info = get_user_battery_input()
     used_Ah = 0
     if battery_info:
-        port = find_serial_port()
+        port = select_port()
         #port = find_virtual_serial_port()
         if port:
             serial_port = configure_serial(port, buffer_size=4 * 1024 * 1024)
