@@ -5,7 +5,7 @@ import csv
 
 
 class BufferData:
-    def __init__(self, csv_headers, secondary_csv_headers, buffer_size=16, buffer_timeout=2.0):
+    def __init__(self, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
         self.csv_headers = csv_headers
         self.secondary_csv_headers = secondary_csv_headers
         self.buffer_size = buffer_size
