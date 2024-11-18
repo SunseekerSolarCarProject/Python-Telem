@@ -1,1 +1,6 @@
 /Data_process.py
+telemetry_debug.log
+
+telemetry_data.csv
+
+raw_hex_data.csv
