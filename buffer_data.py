@@ -8,6 +8,7 @@ from data_processor import DataProcessor
 
 class BufferData:
     def __init__(self, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
+        self.logger = logging.getLogger(__name__)
         self.dataprocessor = DataProcessor()
         self.csv_headers = csv_headers
         self.secondary_csv_headers = secondary_csv_headers
@@ -17,7 +18,7 @@ class BufferData:
         self.raw_data_buffer = []  # Holds raw hex data entries
         self.last_flush_time = time.time()
         self.combined_data = {}  # Holds the latest values for each telemetry field
-        logging.debug(f"BufferData initialized with buffer_size={buffer_size}, buffer_timeout={buffer_timeout}")
+        self.logger.info(f"BufferData initialized with buffer_size={buffer_size}, buffer_timeout={buffer_timeout}")
 
     def add_data(self, data):
         """

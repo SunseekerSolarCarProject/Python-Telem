@@ -155,7 +155,7 @@ UVWXYZ
 def main():
     """Main function to send data over serial port."""
     # Initialize COM port (replace with your port name and baud rate)
-    port = 'COM4'  # Change as needed
+    port = 'COM6'  # Change as needed
     baud_rate = 115200  # Increased baud rate
     ser = None
 

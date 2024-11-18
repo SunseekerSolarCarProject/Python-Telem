@@ -29,6 +29,7 @@ limit_flags_desc = [
 class DataProcessor:
     def __init__(self):
         # Define steering wheel descriptions within the class
+        self.logger = logging.getLogger(__name__)
         self.steering_wheel_desc = {
             '0x08000000': 'regen',
             '0x00040100': 'left turn',
@@ -41,7 +42,7 @@ class DataProcessor:
             '0x00000000': 'none',
             '0xHHHHHHHH': 'nonexistent'
         }
-        logging.debug("DataProcessor initialized.")
+        self.logger.info("DataProcessor initialized.")
 
     def hex_to_float(self, hex_data):
         """

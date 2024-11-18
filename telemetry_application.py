@@ -41,18 +41,12 @@ units = {
     'BP_ISH_SOC': '%'
 }
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    filename="telemetry_debug.log",
-    filemode="w",
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
 class TelemetryApplication:
-    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20):
+    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO):
+        self.configure_logging(level=log_level)
         self.baudrate = baudrate
         self.serial_reader_thread = None
+        self.logging_enabled = True  # Default logging state
         self.data_processor = DataProcessor()
         self.Data_Display = DataDisplay()
         self.battery_info = self.get_user_battery_input()
@@ -71,7 +65,7 @@ class TelemetryApplication:
 
         self.setup_csv(self.csv_file, self.csv_headers)
         self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
-        logging.info("TelemetryApplication initialized.")
+
 
     def get_user_battery_input(self):
         """
@@ -176,6 +170,41 @@ class TelemetryApplication:
         logging.debug(f"CSV headers generated: {headers}")
         return headers
 
+    def configure_logging(self, level=logging.INFO):
+        """
+        Configures the logging module to log only to a file.
+
+        :param level: The logging level to set (e.g., logging.INFO, logging.DEBUG).
+        """
+        # Remove any existing handlers
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+
+        # Set up file handler
+        log_file = "telemetry.log"
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(level)
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        file_handler.setFormatter(formatter)
+
+        # Add file handler to root logger
+        logging.root.addHandler(file_handler)
+        logging.root.setLevel(level)  # Set the root logging level
+
+    def toggle_logging_level(self, level):
+        """
+        Toggles the logging level dynamically.
+
+        :param level: The desired logging level (e.g., logging.INFO, logging.CRITICAL).
+        """
+        for handler in logging.root.handlers:
+            handler.setLevel(level)
+        logging.root.setLevel(level)
+        if level == logging.INFO:
+            logging.info("Logging level set to INFO.")
+        elif level == logging.CRITICAL:
+            logging.critical("Logging level set to CRITICAL.")
+
     def setup_csv(self, filename, headers):
         try:
             with open(filename, mode='w', newline='') as file:
@@ -245,7 +274,9 @@ class TelemetryApplication:
         Process incoming telemetry data and buffer it.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        logging.debug(f"Raw data received: {data}")
+
+        if self.logging_enabled:  # Check if logging is enabled
+            logging.debug(f"Raw data received: {data}")
 
         if data.startswith("TL_TIM"):
             # Extract device timestamp from TL_TIM data
@@ -253,14 +284,17 @@ class TelemetryApplication:
                 device_timestamp = data.split(",")[1].strip()
                 # Update the buffer with the device timestamp
                 self.buffer.add_data({'device_timestamp': device_timestamp})
-                logging.debug(f"Device timestamp updated: {device_timestamp}")
+                if self.logging_enabled:
+                    logging.debug(f"Device timestamp updated: {device_timestamp}")
             except IndexError as e:
-                logging.error(f"Error parsing device timestamp: {data}, Exception: {e}")
+                if self.logging_enabled:
+                    logging.error(f"Error parsing device timestamp: {data}, Exception: {e}")
             return
 
         # Parse other telemetry data
         processed_data = self.data_processor.parse_data(data)
-        logging.debug(f"Processed data: {processed_data}")
+        if self.logging_enabled:
+            logging.debug(f"Processed data: {processed_data}")
 
         if processed_data:
             # Add timestamps
@@ -269,18 +303,21 @@ class TelemetryApplication:
             # Add data to the buffer and check if it's ready to flush
             try:
                 ready_to_flush = self.buffer.add_data(processed_data)
-                logging.debug(f"Data added to buffer: {processed_data}")
+                if self.logging_enabled:
+                    logging.debug(f"Data added to buffer: {processed_data}")
                 if ready_to_flush:
                     combined_data = self.buffer.flush_buffer(
                         filename=self.csv_file,
                         battery_info=self.battery_info,
                         used_ah=self.used_Ah
                     )
-                    logging.info(f"Combined data after flush: {combined_data}")
+                    if self.logging_enabled:
+                        logging.info(f"Combined data after flush: {combined_data}")
                     if combined_data:
                         self.display_data(combined_data)
             except Exception as e:
-                logging.error(f"Error processing data: {processed_data}, Exception: {e}")
+                if self.logging_enabled:
+                    logging.error(f"Error processing data: {processed_data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
         """

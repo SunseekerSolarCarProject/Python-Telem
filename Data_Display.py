@@ -5,7 +5,8 @@ import logging
 
 class DataDisplay:
     def __init__(self):
-        logging.debug("DataDisplay initialized.")
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("DataDisplay initialized.")
 
     def format_SWC_information(self, data):
         """

@@ -8,13 +8,14 @@ import logging
 class SerialReaderThread(threading.Thread):
     def __init__(self, port, baudrate, process_data_callback, process_raw_data_callback):
         super().__init__(daemon=True)
+        self.logger = logging.getLogger(__name__)
         self.port = port
         self.baudrate = baudrate
         self.process_data_callback = process_data_callback
         self.process_raw_data_callback = process_raw_data_callback
         self.serial_conn = None
         self._stop_event = threading.Event()
-        logging.debug(f"SerialReaderThread initialized on port {port} with baudrate {baudrate}")
+        self.logger.info(f"SerialReaderThread initialized on port {port} with baudrate {baudrate}")
 
     def run(self):
         try:
