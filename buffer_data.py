@@ -1,4 +1,5 @@
 # buffer_data.py
+
 import time
 from datetime import datetime
 import logging
@@ -16,17 +17,22 @@ class BufferData:
         self.raw_data_buffer = []  # Holds raw hex data entries
         self.last_flush_time = time.time()
         self.combined_data = {}  # Holds the latest values for each telemetry field
+        logging.debug(f"BufferData initialized with buffer_size={buffer_size}, buffer_timeout={buffer_timeout}")
 
     def add_data(self, data):
         """
         Add processed telemetry data to the buffer and update combined_data.
         """
         self.data_buffer.append(data)
+        logging.debug(f"Data added to data_buffer: {data}")
         self.update_combined_data(data)
 
         # Determine if buffer is ready to flush based on size or timeout
-        if len(self.data_buffer) >= self.buffer_size or \
-                (time.time() - self.last_flush_time) >= self.buffer_timeout:
+        buffer_ready = len(self.data_buffer) >= self.buffer_size or \
+                (time.time() - self.last_flush_time) >= self.buffer_timeout
+        logging.debug(f"Buffer size: {len(self.data_buffer)}, Time since last flush: {time.time() - self.last_flush_time:.2f}s")
+        if buffer_ready:
+            logging.debug("Buffer is ready to flush.")
             return True  # Ready to flush
 
         return False
@@ -36,13 +42,16 @@ class BufferData:
         Updates the combined_data dictionary with new data.
         """
         self.combined_data.update(new_data)
+        logging.debug(f"Combined data updated with: {new_data}")
 
     def add_raw_data(self, raw_data, filename):
         """
         Add raw hex data to the raw data buffer and flush if needed.
         """
         self.raw_data_buffer.append(raw_data)
+        logging.debug(f"Raw data added to raw_data_buffer: {raw_data}")
         if len(self.raw_data_buffer) >= self.buffer_size:
+            logging.debug("Raw data buffer is full. Flushing raw data buffer.")
             self.flush_raw_data_buffer(filename)
 
     def flush_raw_data_buffer(self, filename):
@@ -50,21 +59,28 @@ class BufferData:
         Flush the raw hex data buffer to the secondary CSV file.
         """
         if not self.raw_data_buffer:
+            logging.debug("Raw data buffer is empty. Nothing to flush.")
             return  # Nothing to flush
 
-        with open(filename, mode='a', newline='') as file:
-            writer = csv.writer(file)
-            for raw_data_entry in self.raw_data_buffer:
-                row = [raw_data_entry.get(header, '') for header in self.secondary_csv_headers]
-                writer.writerow(row)
-
-        self.raw_data_buffer.clear()
+        try:
+            with open(filename, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                for raw_data_entry in self.raw_data_buffer:
+                    row = [raw_data_entry.get(header, '') for header in self.secondary_csv_headers]
+                    writer.writerow(row)
+            logging.debug(f"Flushed raw data buffer to file: {filename}")
+        except Exception as e:
+            logging.error(f"Error flushing raw data buffer to file {filename}: {e}")
+        finally:
+            self.raw_data_buffer.clear()
+            logging.debug("Raw data buffer cleared after flushing.")
 
     def flush_buffer(self, filename, battery_info, used_ah):
         """
         Flush the combined data to the primary CSV file.
         """
         if not self.data_buffer:
+            logging.debug("Data buffer is empty. Nothing to flush.")
             return None  # Nothing to flush
 
         # Fill missing fields with default values
@@ -84,11 +100,16 @@ class BufferData:
         logging.info(f"Combined data with battery info: {self.combined_data}")
 
         # Write to CSV
-        self.append_to_csv(filename, self.combined_data)
+        try:
+            self.append_to_csv(filename, self.combined_data)
+            logging.debug(f"Data appended to CSV file: {filename}")
+        except Exception as e:
+            logging.error(f"Error writing to CSV file {filename}: {e}")
 
         # Clear the data buffer and reset flush time
         self.data_buffer.clear()
         self.last_flush_time = time.time()
+        logging.debug("Data buffer cleared and last_flush_time reset.")
 
         logging.debug(f"Final combined_data after processing: {self.combined_data}")
         return self.combined_data
@@ -98,15 +119,22 @@ class BufferData:
         Append a single row of data to the specified CSV file.
         """
         row = [data.get(header, '') for header in self.csv_headers]
-        with open(filename, mode='a', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(row)
+        try:
+            with open(filename, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(row)
+            logging.debug(f"Appended row to CSV file {filename}: {row}")
+        except Exception as e:
+            logging.error(f"Error appending row to CSV file {filename}: {e}")
 
     def safe_float(self, value, default=0.0):
         """
         Safely convert a value to a float, returning a default if conversion fails.
         """
         try:
-            return float(value)
-        except (ValueError, TypeError):
+            result = float(value)
+            logging.debug(f"Converted value to float: {value} -> {result}")
+            return result
+        except (ValueError, TypeError) as e:
+            logging.warning(f"Unable to convert value to float: {value}. Using default {default}. Exception: {e}")
             return default
