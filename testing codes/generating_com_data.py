@@ -16,26 +16,40 @@ steering_wheel_desc = {
     '0xHHHHHHHH': 'nonexistent'
 }
 
-# Error and limit flag descriptions
-error_flags_desc = [
-    "Hardware over current", "Software over current", "DC Bus over voltage",
-    "Bad motor position hall sequence", "Watchdog caused last reset",
-    "Config read error", "15V Rail UVLO", "Desaturation Fault", "Motor Over Speed"
-]
+# Flag descriptions mapped to bit positions
+error_flags_bits = {
+    "Hardware over current": 0,
+    "Software over current": 1,
+    "DC Bus over voltage": 2,
+    "Bad motor position hall sequence": 3,
+    "Watchdog caused last reset": 4,
+    "Config read error": 5,
+    "15V Rail UVLO": 6,
+    "Desaturation Fault": 7,
+    "Motor Over Speed": 8
+}
 
-limit_flags_desc = [
-    "Output Voltage PWM", "Motor Current", "Velocity", "Bus Current",
-    "Bus Voltage Upper Limit", "Bus Voltage Lower Limit", "IPM/Motor Temperature"
-]
+limit_flags_bits = {
+    "Output Voltage PWM": 0,
+    "Motor Current": 1,
+    "Velocity": 2,
+    "Bus Current": 3,
+    "Bus Voltage Upper Limit": 4,
+    "Bus Voltage Lower Limit": 5,
+    "IPM/Motor Temperature": 6
+}
 
 # Constants for simulation
 MAX_VALUE = 150  # Upper limit for random data generation
 cycle_index = {'steering': 0, 'error': 0, 'limit': 0}  # Indices for cycling
 
-def random_hex_with_limit():
-    """Generate a random 8-digit hex value within a range."""
-    return f"0x{random.randint(0, MAX_VALUE):08X}"
-
+def random_hex_with_limit(min_value=0, max_value=100):
+    """
+    Generate a random 8-digit hexadecimal value.
+    Limits the range to ensure realistic values.
+    """
+    value = random.randint(min_value, max_value)
+    return to_8bit_hex(value)
 
 def generate_active_motor_info():
     """Generate random motor controller info."""
@@ -60,46 +74,41 @@ def next_steering_wheel_desc():
     cycle_index['steering'] += 1
     return key, steering_wheel_desc[key]
 
-def next_error_flags():
-    """Cycle through error flag descriptions."""
-    global cycle_index
-    flag_index = cycle_index['error'] % len(error_flags_desc)
-    cycle_index['error'] += 1
-    return error_flags_desc[flag_index]
-
-def next_limit_flags():
-    """Cycle through limit flag descriptions."""
-    global cycle_index
-    flag_index = cycle_index['limit'] % len(limit_flags_desc)
-    cycle_index['limit'] += 1
-    return limit_flags_desc[flag_index]
-
-def random_hex_with_limit():
+def cycle_flags(flag_bits, cycle_index_key):
     """
-    Generate a random 8-digit hexadecimal value.
-    Ensures the value conforms to the '0xHHHHHHHH' format.
+    Cycle through flags and return their combined binary value as an integer.
+    Only sets one bit at a time for cycling.
     """
-    value = random.randint(-40, MAX_VALUE)
-    return to_8bit_hex(value)
+    global cycle_index
+    flags = list(flag_bits.keys())
+    bit_position = flag_bits[flags[cycle_index[cycle_index_key] % len(flags)]]
+    cycle_index[cycle_index_key] += 1  # Increment the cycle index
+    return 1 << bit_position  # Return the binary value with the bit set
 
 def generate_motor_controller_data():
     """
     Simulate motor controller data.
     Uses cycling for error and limit flags.
     """
-    can_receive_error_count = 0
-    can_transmit_error_count = 0
-    active_motor_info = random.randint(0, MAX_VALUE)
+    can_receive_error_count = random.randint(0, 5)  # Example range for CAN errors
+    can_transmit_error_count = random.randint(0, 5)
+    active_motor_info = random.randint(0, 100)  # Random motor information ID
 
-    error_flag = next_error_flags()
-    limit_flag = next_limit_flags()
+    # Generate error flags as a 16-bit integer
+     # Cycle through error flags (16 bits: 31–16 in the combined structure)
+    error_bits = cycle_flags(error_flags_bits, 'error')
 
-    # Simulate hex representations of error and limit bits
-    error_bits = "0" * 16  # Placeholder, cycling is descriptive
-    limit_bits = "0" * 16  # Placeholder, cycling is descriptive
+    # Cycle through limit flags (16 bits: 15–0 in the combined structure)
+    limit_bits = cycle_flags(limit_flags_bits, 'limit')
 
+    # Combine error and limit flags into a single 32-bit value
+    combined_flags = (error_bits << 16) | limit_bits
+
+    # Convert data to hex values
     hex1 = to_8bit_hex((can_receive_error_count << 24) | (can_transmit_error_count << 16) | active_motor_info)
-    hex2 = to_8bit_hex(int(error_bits + limit_bits, 2))
+    hex2 = to_8bit_hex(combined_flags)
+
+    return hex1, hex2
 
     return hex1, hex2
 def get_runtime(start_time):
@@ -107,38 +116,35 @@ def get_runtime(start_time):
     elapsed_time = int(time.time() - start_time)
     return time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
 
-
 def interpret_dcswc(value_hex):
     """Interpret DC_SWC value into human-readable format."""
     description = steering_wheel_desc.get(value_hex, "Unknown")
     return description
 
-
 def generate_data_block(runtime):
     """
     Generate a formatted data block for telemetry transmission.
-    Ensures all hex values are compressed to the '0xHHHHHHHH' format.
+    Uses realistic ranges for data fields.
     """
     mc1lim_hex1, mc1lim_hex2 = generate_motor_controller_data()
     mc2lim_hex1, mc2lim_hex2 = generate_motor_controller_data()
 
-    # DC_SWC example values
     dc_swc_position, dcswc_description = next_steering_wheel_desc()
     dc_swc_value1 = random.getrandbits(32)
     dc_swc_value1_hex = to_8bit_hex(dc_swc_value1)
 
     return f"""ABCDEF
-MC1BUS,{random_hex_with_limit()},{random_hex_with_limit()}
-MC1VEL,{random_hex_with_limit()},{random_hex_with_limit()}
-MC2BUS,{random_hex_with_limit()},{random_hex_with_limit()}
-MC2VEL,{random_hex_with_limit()},{random_hex_with_limit()}
-DC_DRV,{random_hex_with_limit()},{random_hex_with_limit()}
+MC1BUS,{random_hex_with_limit(0, 600)},{random_hex_with_limit(-300, 300)}
+MC1VEL,{random_hex_with_limit(0, 10000)},{random_hex_with_limit(0, 100)}
+MC2BUS,{random_hex_with_limit(0, 600)},{random_hex_with_limit(-300, 300)}
+MC2VEL,{random_hex_with_limit(0, 10000)},{random_hex_with_limit(0, 100)}
+DC_DRV,{random_hex_with_limit(-300, 300)},{random_hex_with_limit(-300, 300)}
 DC_SWC,{dc_swc_position},{dc_swc_value1_hex}
-BP_VMX,{random_hex_with_limit()},{random_hex_with_limit()}
-BP_VMN,{random_hex_with_limit()},{random_hex_with_limit()}
-BP_TMX,{random_hex_with_limit()},{random_hex_with_limit()}
-BP_ISH,{random_hex_with_limit()},{random_hex_with_limit()}
-BP_PVS,{random_hex_with_limit()},{random_hex_with_limit()}
+BP_VMX,{random_hex_with_limit(0, 50)},{random_hex_with_limit(0, 50)}
+BP_VMN,{random_hex_with_limit(0, 50)},{random_hex_with_limit(0, 50)}
+BP_TMX,{random_hex_with_limit(0, 50)},{random_hex_with_limit(-40, 100)}
+BP_ISH,{random_hex_with_limit(-300, 300)},{random_hex_with_limit(-300, 300)}
+BP_PVS,{random_hex_with_limit(0, 146)},{random_hex_with_limit(0, 1000000000)}
 MC1LIM,{mc1lim_hex1},{mc1lim_hex2}
 MC2LIM,{mc2lim_hex1},{mc2lim_hex2}
 TL_TIM,{runtime}
@@ -150,7 +156,7 @@ def main():
     """Main function to send data over serial port."""
     # Initialize COM port (replace with your port name and baud rate)
     port = 'COM4'  # Change as needed
-    baud_rate = 9600
+    baud_rate = 115200  # Increased baud rate
     ser = None
 
     try:
@@ -158,6 +164,8 @@ def main():
         start_time = time.time()
 
         while True:
+            loop_start_time = time.time()
+
             # Generate data block
             runtime = get_runtime(start_time)
             data_block = generate_data_block(runtime)
@@ -165,8 +173,14 @@ def main():
             # Send data block
             ser.write(data_block.encode('utf-8'))
 
-            # Wait before sending the next block
-            time.sleep(5)
+            # Measure elapsed time
+            elapsed_time = time.time() - loop_start_time
+            sleep_time = 1.0 - elapsed_time
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            else:
+                # Data generation and transmission took longer than 1 second
+                print(f"Warning: Loop is running behind schedule by {-sleep_time:.2f} seconds")
 
     except serial.SerialException as e:
         print(f"Serial error: {e}")
@@ -175,7 +189,6 @@ def main():
     finally:
         if ser:
             ser.close()
-
 
 if __name__ == "__main__":
     main()

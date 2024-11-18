@@ -3,5 +3,6 @@
 from telemetry_application import TelemetryApplication
 
 if __name__ == "__main__":
-    app = TelemetryApplication(baudrate=9600)
+    #baudrate transmission of the rs232 is 9600
+    app = TelemetryApplication(baudrate=115200)
     app.start()

@@ -1,6 +1,7 @@
-#Data_Display.py file
+# data_display.py
 
 import re
+import logging
 
 class DataDisplay:
     def __init__(self):
@@ -19,7 +20,8 @@ class DataDisplay:
             match = re.search(r'\(0x[0-9a-fA-F]+\)', value)
             if match:
                 hex_value = match.group(0).strip('()')
-                return value, hex_value
+                value_text = value.replace(match.group(0), '').strip()
+                return value_text, hex_value
             return value, None
 
         position = data.get('DC_SWC_Position', 'N/A')
@@ -31,10 +33,10 @@ class DataDisplay:
 
         # Construct formatted strings
         position_str = (
-            f"DC_SWC_Position: {position_text}, Hex: {position_hex}" if position_hex else f"DC_SWC_Position: {position}"
+            f"DC_SWC_Position: {position_text} ({position_hex})" if position_hex else f"DC_SWC_Position: {position}"
         )
         value_str = (
-            f"DC_SWC_Value: {value_text}, Hex: {value_hex}" if value_hex else f"DC_SWC_Value: {value}"
+            f"DC_SWC_Value: {value_text} ({value_hex})" if value_hex else f"DC_SWC_Value: {value}"
         )
 
         return f"{position_str}\n{value_str}"
@@ -43,12 +45,18 @@ class DataDisplay:
         """
         Formats motor controller-specific data for display.
         """
+        if not isinstance(data, dict):
+            logging.error(f"Expected a dictionary for {key}, but got {type(data)}")
+            return f"{key}: Data not available"
+
         lines = [f"{key} Motor Controller Data:"]
         lines.append(f"  CAN Receive Error Count: {data.get('CAN Receive Error Count', 'N/A')}")
         lines.append(f"  CAN Transmit Error Count: {data.get('CAN Transmit Error Count', 'N/A')}")
         lines.append(f"  Active Motor Info: {data.get('Active Motor Info', 'N/A')}")
-        lines.append(f"  Errors: {', '.join(data.get('Errors', [])) if data.get('Errors') else 'None'}")
-        lines.append(f"  Limits: {', '.join(data.get('Limits', [])) if data.get('Limits') else 'None'}")
+        errors = ', '.join(data.get('Errors', [])) if data.get('Errors') else 'None'
+        limits = ', '.join(data.get('Limits', [])) if data.get('Limits') else 'None'
+        lines.append(f"  Errors: {errors}")
+        lines.append(f"  Limits: {limits}")
         return "\n".join(lines)
 
     def display(self, data):
@@ -59,27 +67,44 @@ class DataDisplay:
             "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
             "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
             "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed",
-            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC",
-            "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
-            "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah", "BP_ISH_Amps", "BP_ISH_SOC",
+            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint",
+            "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage",
+            "BP_TMX_ID", "BP_TMX_Temperature",
+            "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
+            "BP_ISH_Amps", "BP_ISH_SOC",
+            "DC_SWC_Position",  # Process DC_SWC here
+            # "DC_SWC_Value",    # Remove or comment out to avoid duplication
             "MC1LIM", "MC2LIM",
             "remaining_Ah", "remaining_wh", "remaining_time",
-            "timestamp", "device_timestamp"
+            "device_timestamp", "timestamp"
         ]
 
         lines = []
         for key in order:
             if key in data:
                 value = data[key]
-                if isinstance(value, dict):
-                    if key == "DC_SWC":
-                        # Handle the DC_SWC case specifically
-                        lines.append(self.format_SWC_information(value))
-                    else:
-                        lines.append(self.format_motor_controller_data(key, value))
+                if key == "DC_SWC_Position":
+                    lines.append("")
+                    dc_swc_output = self.format_SWC_information({
+                        'DC_SWC_Position': data.get('DC_SWC_Position', 'N/A'),
+                        'DC_SWC_Value': data.get('DC_SWC_Value', 'N/A')
+                    })
+                    lines.append(dc_swc_output)
+                    logging.debug(f"DC_SWC data received for display: {dc_swc_output}")
+                elif key == "DC_SWC_Value":
+                    continue  # Skip to avoid duplication
+                elif key == "MC1LIM" or key == "MC2LIM":
+                    # Add a blank line before motor controller data for readability
+                    lines.append("")
+                    lines.append(self.format_motor_controller_data(key, value))
+                    logging.debug(f"Data received for display: {value}")
                 else:
+                    # Format and append other data
                     lines.append(f"{key}: {value:.2f}" if isinstance(value, float) else f"{key}: {value}")
+                    logging.debug(f"Data received for display: {value}")
             else:
                 lines.append(f"{key}: N/A")
-        print("-" * 40)
+
+        # Add separator line
+        lines.append("----------------------------------------")
         return "\n".join(lines)

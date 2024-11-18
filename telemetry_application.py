@@ -3,6 +3,7 @@
 import time
 import csv
 import os
+import logging
 import serial
 import serial.tools.list_ports
 from datetime import datetime
@@ -40,6 +41,14 @@ units = {
     'BP_ISH_SOC': '%'
 }
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    filename="telemetry_debug.log",
+    filemode="w",
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20):
         self.baudrate = baudrate
@@ -62,11 +71,13 @@ class TelemetryApplication:
 
         self.setup_csv(self.csv_file, self.csv_headers)
         self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
+        logging.info("TelemetryApplication initialized.")
 
     def get_user_battery_input(self):
         """
         Allows the user to select a battery file or enter information manually.
         """
+        logging.info("Getting user battery input.")
         print("Available battery files:")
         battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
 
@@ -76,38 +87,49 @@ class TelemetryApplication:
         print(f"{len(battery_files) + 1}. Enter battery information manually")
 
         # Prompt for file selection or manual input
-        choice = int(input("Select an option by number: "))
-    
+        try:
+            choice = int(input("Select an option by number: "))
+        except ValueError:
+            logging.error("Invalid input for battery file selection.")
+            print("Invalid input. Please enter a number.")
+            return self.get_user_battery_input()
+
         if 1 <= choice <= len(battery_files):
             # Load battery info from selected file
             file_path = battery_files[choice - 1]
             battery_info = self.load_battery_info_from_file(file_path)
             if battery_info:
+                logging.info(f"Battery info loaded from file: {file_path}")
                 return battery_info
             else:
+                logging.error(f"Error loading battery data from {file_path}.")
                 print(f"Error loading battery data from {file_path}.")
         else:
             # Manual input if user opts not to select a file
             print("Please enter the following battery information:")
-            capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
-            voltage = float(input("Battery Voltage (V) per cell: "))
-            quantity = int(input("Number of cells: "))
-            series_strings = int(input("Number of series strings: "))
+            try:
+                capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
+                voltage = float(input("Battery Voltage (V) per cell: "))
+                quantity = int(input("Number of cells: "))
+                series_strings = int(input("Number of series strings: "))
+            except ValueError as e:
+                logging.error(f"Invalid input for battery information: {e}")
+                print("Invalid input. Please enter numeric values.")
+                return self.get_user_battery_input()
 
             battery_info = self.data_processor.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
-            if 'error' in battery_info:
-                print(f"Error calculating battery info: {battery_info['error']}")
-                return None
-            return battery_info
+            logging.info("Battery info calculated from manual input.")
+
+        if 'error' in battery_info:
+            logging.error(f"Error calculating battery info: {battery_info['error']}")
+            print(f"Error calculating battery info: {battery_info['error']}")
+            return {'Total_Capacity_Wh': 0.0, 'Total_Capacity_Ah': 0.0, 'Total_Voltage': 0.0}
+
+        return battery_info
 
     def load_battery_info_from_file(self, file_path):
         """
         Parses a text file to extract battery capacity, nominal voltage, cell count, and string count.
-        File should follow the format:
-        - Battery capacity amps, <value>
-        - Battery nominal voltage, <value>
-        - Amount of battery cells, <value>
-        - Number of battery strings, <value>
         """
         try:
             with open(file_path, 'r') as file:
@@ -122,12 +144,14 @@ class TelemetryApplication:
                 quantity = int(battery_data["Amount of battery cells"])
                 series_strings = int(battery_data["Number of battery strings"])
 
+                logging.debug(f"Battery data extracted from file: {battery_data}")
                 return self.data_processor.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
 
         except (FileNotFoundError, KeyError, ValueError) as e:
+            logging.error(f"Error reading file {file_path}: {e}")
             print(f"Error reading file {file_path}: {e}")
             return None
-    
+
     def generate_csv_headers(self):
         """
         Define all potential CSV columns based on known telemetry fields and battery info.
@@ -135,58 +159,85 @@ class TelemetryApplication:
         telemetry_headers = [
             "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
             "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_Velocity", "MC2VEL_RPM", "MC2VEL_Speed",
-            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC", "BP_VMX_ID",
-            "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
-            "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah", "MC1LIM",
-            "MC2LIM"
+            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC_Position", "DC_SWC_Value",
+            "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
+            "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
+            "MC1LIM", "MC2LIM"
         ]
-        
+
         # Add additional calculated fields
-        battery_headers = ["Total_Capacity_wh", "Total_Capacity_Ah", "Total_voltage", 
+        battery_headers = ["Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
                            "remaining_Ah", "remaining_wh", "remaining_time"]
-        
+
         # Add timestamp fields
         timestamp_headers = ["timestamp", "device_timestamp"]
 
-        return timestamp_headers + telemetry_headers + battery_headers
+        headers = timestamp_headers + telemetry_headers + battery_headers
+        logging.debug(f"CSV headers generated: {headers}")
+        return headers
 
     def setup_csv(self, filename, headers):
-        with open(filename, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(headers)
+        try:
+            with open(filename, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(headers)
+            logging.info(f"CSV file '{filename}' initialized with headers.")
+        except Exception as e:
+            logging.error(f"Error setting up CSV file '{filename}': {e}")
 
     def select_port(self):
         ports = list(serial.tools.list_ports.comports())
         if not ports:
+            logging.error("No serial ports found.")
             print("No serial ports found.")
             return None
         print("Available ports:")
         for i, port in enumerate(ports):
             print(f"{i}. {port.device}")
-        choice = int(input("Select port number: "))
-        return ports[choice].device if 0 <= choice < len(ports) else None
-    
+        try:
+            choice = int(input("Select port number: "))
+            selected_port = ports[choice].device if 0 <= choice < len(ports) else None
+            logging.info(f"Selected port: {selected_port}")
+            return selected_port
+        except (ValueError, IndexError):
+            logging.error("Invalid port selection.")
+            print("Invalid port selection.")
+            return None
+
     def start(self):
         port = self.select_port()
         if not port:
+            logging.error("No valid port selected. Exiting.")
             print("Invalid port selection.")
             return
 
-        self.serial_reader_thread = SerialReaderThread(port, self.baudrate, process_data_callback=self.process_data,
-        process_raw_data_callback=self.process_raw_data)  # New callback for raw data with the actuall data
-        self.serial_reader_thread.start()
-        print(f"Telemetry application started on {port}.")
+        try:
+            self.serial_reader_thread = SerialReaderThread(
+                port,
+                self.baudrate,
+                process_data_callback=self.process_data,
+                process_raw_data_callback=self.process_raw_data
+            )
+            self.serial_reader_thread.start()
+            logging.info(f"Telemetry application started on {port}.")
+            print(f"Telemetry application started on {port}.")
+        except Exception as e:
+            logging.error(f"Failed to start serial reader thread: {e}")
+            print(f"Failed to start serial reader thread: {e}")
+            return
 
         try:
             while True:
                 time.sleep(0.05)
         except KeyboardInterrupt:
+            logging.info("KeyboardInterrupt received. Shutting down.")
             print("Shutting down.")
         finally:
             if self.serial_reader_thread:
                 self.serial_reader_thread.stop()
                 self.serial_reader_thread.join()
             self.finalize_csv()
+            logging.info("Application stopped.")
             print("Application stopped.")
 
     def process_data(self, data):
@@ -194,33 +245,42 @@ class TelemetryApplication:
         Process incoming telemetry data and buffer it.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logging.debug(f"Raw data received: {data}")
 
         if data.startswith("TL_TIM"):
             # Extract device timestamp from TL_TIM data
-            device_timestamp = data.split(",")[1].strip()
-            # Update the buffer with the device timestamp
-            self.buffer.update_current_entry({"device_timestamp": device_timestamp})
+            try:
+                device_timestamp = data.split(",")[1].strip()
+                # Update the buffer with the device timestamp
+                self.buffer.add_data({'device_timestamp': device_timestamp})
+                logging.debug(f"Device timestamp updated: {device_timestamp}")
+            except IndexError as e:
+                logging.error(f"Error parsing device timestamp: {data}, Exception: {e}")
             return
 
         # Parse other telemetry data
         processed_data = self.data_processor.parse_data(data)
+        logging.debug(f"Processed data: {processed_data}")
 
         if processed_data:
-            # Add local timestamp to processed data
+            # Add timestamps
             processed_data['timestamp'] = timestamp
 
             # Add data to the buffer and check if it's ready to flush
-            ready_to_flush = self.buffer.add_data(processed_data)
-
-            if ready_to_flush:
-                combined_data = self.buffer.flush_buffer(
-                    filename=self.csv_file,
-                    data_processor=self.data_processor,
-                    battery_info=self.battery_info,
-                    used_ah=self.used_Ah
-                )
-                if combined_data:
-                    self.display_data(combined_data)
+            try:
+                ready_to_flush = self.buffer.add_data(processed_data)
+                logging.debug(f"Data added to buffer: {processed_data}")
+                if ready_to_flush:
+                    combined_data = self.buffer.flush_buffer(
+                        filename=self.csv_file,
+                        battery_info=self.battery_info,
+                        used_ah=self.used_Ah
+                    )
+                    logging.info(f"Combined data after flush: {combined_data}")
+                    if combined_data:
+                        self.display_data(combined_data)
+            except Exception as e:
+                logging.error(f"Error processing data: {processed_data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
         """
@@ -228,18 +288,32 @@ class TelemetryApplication:
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         raw_data_entry = {"timestamp": timestamp, "raw_data": raw_data}
-        self.buffer.add_raw_data(raw_data_entry)
+        try:
+            self.buffer.add_raw_data(raw_data_entry, self.secondary_csv_file)
+            logging.debug(f"Raw data added to buffer: {raw_data_entry}")
+        except Exception as e:
+            logging.error(f"Error processing raw data: {raw_data_entry}, Exception: {e}")
 
     def display_data(self, combined_data):
         """
         Delegates data display to the DataDisplay class.
         """
-        display_output = self.Data_Display.display(combined_data)
-        print(display_output)
+        try:
+            display_output = self.Data_Display.display(combined_data)
+            print(display_output)
+            logging.debug("Data displayed successfully.")
+        except Exception as e:
+            logging.error(f"Error displaying data: {combined_data}, Exception: {e}")
 
     def finalize_csv(self):
-        custom_filename = input("Enter a filename to save the CSV data (without extension): ")
-        custom_filename = f"{custom_filename}.csv"
-        with open(self.csv_file, 'r') as original, open(custom_filename, 'w', newline='') as new_file:
-            new_file.write(original.read())
-        print(f"Data successfully saved to {custom_filename}.")
+        try:
+            custom_filename = input("Enter a filename to save the CSV data (without extension): ")
+            custom_filename = f"{custom_filename}.csv"
+            with open(self.csv_file, 'r') as original, open(custom_filename, 'w', newline='') as new_file:
+                new_file.write(original.read())
+            logging.info(f"Data successfully saved to {custom_filename}.")
+            print(f"Data successfully saved to {custom_filename}.")
+        except Exception as e:
+            logging.error(f"Error finalizing CSV file: {e}")
+            print(f"Error saving data to {custom_filename}: {e}")
+

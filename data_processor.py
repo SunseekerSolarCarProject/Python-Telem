@@ -1,6 +1,7 @@
 # data_processor.py
 
 import struct
+import logging
 
 # Error and limit flag descriptions
 error_flags_desc = [
@@ -42,11 +43,16 @@ class DataProcessor:
         }
 
     def hex_to_float(self, hex_data):
+        """
+        Convert a 32-bit hex string to a float.
+        """
         try:
-            if hex_data == 'HHHHHHHH':
+            if hex_data == '0xHHHHHHHH' or len(hex_data) < 8:
                 return 0.0
-            byte_data = bytes.fromhex(hex_data[2:] if hex_data.startswith("0x") else hex_data)
-            return struct.unpack('<f', byte_data)[0]
+            int_value = int(hex_data, 16)
+            if int_value > 0x7FFFFFFF:  # Check for signed values
+                int_value -= 0x100000000
+            return float(int_value)
         except (ValueError, struct.error):
             return 0.0
 
@@ -66,26 +72,31 @@ class DataProcessor:
         First hex: CAN receive/transmit errors and active motor.
         Second hex: Error flags and limit flags.
         """
-        bits1 = self.hex_to_bits(hex1)  # Convert hex1 to 32 bits
-        bits2 = self.hex_to_bits(hex2)  # Convert hex2 to 32 bits
+        try:
+            bits1 = self.hex_to_bits(hex1)  # Convert hex1 to 32 bits
+            bits2 = self.hex_to_bits(hex2)  # Convert hex2 to 32 bits
 
-        # First string (hex1) parsing
-        can_receive_error_count = int(bits1[0:8], 2)
-        can_transmit_error_count = int(bits1[8:16], 2)
-        active_motor_info = int(bits1[16:32], 2)
+            # First string (hex1) parsing
+            can_receive_error_count = int(bits1[0:8], 2)
+            can_transmit_error_count = int(bits1[8:16], 2)
+            active_motor_info = int(bits1[16:32], 2)
 
-        # Second string (hex2) parsing for error and limit flags
-        error_bits = bits2[0:16]  # Error flags (bits 31-16)
-        limit_bits = bits2[16:32]  # Limit flags (bits 15-0)
-        errors, limits = self.parse_error_and_limit_flags(error_bits, limit_bits)
+            # Second string (hex2) parsing for error and limit flags
+            error_bits = bits2[0:16]  # Error flags (bits 31-16)
+            limit_bits = bits2[16:32]  # Limit flags (bits 15-0)
+            errors, limits = self.parse_error_and_limit_flags(error_bits, limit_bits)
 
-        return {
-            "CAN Receive Error Count": can_receive_error_count,
-            "CAN Transmit Error Count": can_transmit_error_count,
-            "Active Motor Info": active_motor_info,
-            "Errors": errors,
-            "Limits": limits
-        }
+            return {
+                "CAN Receive Error Count": can_receive_error_count,
+                "CAN Transmit Error Count": can_transmit_error_count,
+                "Active Motor Info": active_motor_info,
+                "Errors": errors,
+                "Limits": limits
+            }
+        except Exception as e:
+            logging.error(f"Error parsing motor controller data: hex1={hex1}, hex2={hex2}, Exception: {e}")
+        return {}
+    
     def parse_swc_data(self, hex1, hex2):
         """
         Parse the SWC data from two sources:
@@ -102,13 +113,19 @@ class DataProcessor:
             "DC_SWC_Value": f"{bits2} ({hex2})"  # Direct bit value
         }
     
-    def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval):
+    def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval=1):
+        if capacity_Ah is None or current is None:
+            return 0.0  # Default if data is incomplete
         return capacity_Ah - ((current * interval) / 3600) - used_Ah
 
     def calculate_remaining_time(self, remaining_Ah, current):
-        return float('inf') if current == 0 else remaining_Ah / current
+        if current is None or current == 0 or remaining_Ah is None:
+            return float('inf')  # Infinite time if no current or incomplete data
+        return remaining_Ah / current
 
     def calculate_watt_hours(self, remaining_Ah, voltage):
+        if voltage is None or remaining_Ah is None:
+            return 0.0  # Default if data is incomplete
         return remaining_Ah * voltage
 
     def calculate_battery_capacity(self, capacity_ah, voltage, quantity, series_strings):
@@ -138,57 +155,72 @@ class DataProcessor:
         
         processed_data = {}
         key = parts[0]
-        if key.startswith('MC1LIM') or key.startswith('MC2LIM'):
-            hex1 = parts[1].strip()
-            hex2 = parts[2].strip()
-            motor_data = self.parse_motor_controller_data(hex1, hex2)
-            processed_data[key] = motor_data 
-        elif key.startswith('DC_SWC'):
-            # Parse SWC data
-            hex1 = parts[1].strip()
-            hex2 = parts[2].strip()
-            swc_data = self.parse_swc_data(hex1,hex2)
-            processed_data[key] = swc_data
-        else:
-            hex1 = parts[1].strip()
-            hex2 = parts[2].strip()
-            # Convert hex to float
-            float1 = self.hex_to_float(hex1)
-            float2 = self.hex_to_float(hex2)
+        try:
+            hex1 = parts[1].strip() if len(parts) > 1 else "0x00000000"
+            hex2 = parts[2].strip() if len(parts) > 2 else "0x00000000"
 
-        # Process each sensor based on its type and format
-        match key:
-            case 'MC1BUS':
-                processed_data[f"{key}_Voltage"] = float1
-                processed_data[f"{key}_Current"] = float2
-            case 'MC2BUS':
-                processed_data[f"{key}_Voltage"] = float1
-                processed_data[f"{key}_Current"] = float2
-            case 'MC1VEL':
-                processed_data[f"{key}_RPM"] = float1
-                processed_data[f"{key}_Velocity"] = float2
-                processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
-            case 'MC2VEL':
-                processed_data[f"{key}_Velocity"] = float1
-                processed_data[f"{key}_RPM"] = float2
-                processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
-            case 'BP_VMX':
-                processed_data[f"{key}_ID"] = float1
-                processed_data[f"{key}_Voltage"] = float2
-            case 'BP_VMN':
-                processed_data[f"{key}_ID"] = float1
-                processed_data[f"{key}_Voltage"] = float2
-            case 'BP_TMX':
-                processed_data[f"{key}_ID"] = float1
-                processed_data[f"{key}_Temperature"] = float2
-            case 'BP_ISH':
-                processed_data[f"{key}_SOC"] = float1
-                processed_data[f"{key}_Amps"] = float2
-            case 'BP_PVS':
-                processed_data[f"{key}_Voltage"] = float1
-                processed_data[f"{key}_milliamp/s"] = float2
-                processed_data[f"{key}_Ah"] = self.convert_mA_s_to_Ah(float2)
-            case 'DC_DRV':
-                processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
-                processed_data[f"{key}_Motor_Current_setpoint"] = float2
+            # Special cases for data types that should remain hex and be processed separately
+            match key:
+                case 'MC1LIM' | 'MC2LIM':
+                    # Parse motor controller limits
+                    motor_data = self.parse_motor_controller_data(hex1, hex2)
+                    if motor_data:
+                        processed_data[key] = motor_data
+                        logging.debug(f"Processed data keys: {processed_data.keys()}")
+                    else:
+                        logging.error(f"Failed to parse{key} data.")
+                case 'DC_SWC':
+                    # Parse steering wheel controls
+                    swc_data = self.parse_swc_data(hex1, hex2)
+                    if swc_data:
+                        processed_data.update(swc_data)
+                    else:
+                        logging.error(f"Failed to parse{key} data.")
+                case _:
+                    # Generic float conversion for all other data
+                    float1 = self.hex_to_float(hex1) if hex1 != "0xHHHHHHHH" else 0.0
+                    float2 = self.hex_to_float(hex2) if hex2 != "0xHHHHHHHH" else 0.0
+                # Process each sensor based on its type and format
+                    match key:
+                        case 'MC1BUS':
+                            processed_data[f"{key}_Voltage"] = float1
+                            processed_data[f"{key}_Current"] = float2
+                        case 'MC2BUS':
+                            processed_data[f"{key}_Voltage"] = float1
+                            processed_data[f"{key}_Current"] = float2
+                        case 'MC1VEL':
+                            processed_data[f"{key}_RPM"] = float1
+                            processed_data[f"{key}_Velocity"] = float2
+                            processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
+                        case 'MC2VEL':
+                            processed_data[f"{key}_Velocity"] = float1
+                            processed_data[f"{key}_RPM"] = float2
+                            processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
+                        case 'BP_VMX':
+                            processed_data[f"{key}_ID"] = float1
+                            processed_data[f"{key}_Voltage"] = float2
+                        case 'BP_VMN':
+                            processed_data[f"{key}_ID"] = float1
+                            processed_data[f"{key}_Voltage"] = float2
+                        case 'BP_TMX':
+                            processed_data[f"{key}_ID"] = float1
+                            processed_data[f"{key}_Temperature"] = float2
+                        case 'BP_ISH':
+                            processed_data[f"{key}_SOC"] = float1
+                            processed_data[f"{key}_Amps"] = float2
+                        case 'BP_PVS':
+                            processed_data[f"{key}_Voltage"] = float1
+                            processed_data[f"{key}_milliamp/s"] = float2
+                            processed_data[f"{key}_Ah"] = self.convert_mA_s_to_Ah(float2)
+                        case 'DC_DRV':
+                            processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
+                            processed_data[f"{key}_Motor_Current_setpoint"] = float2
+                        case _:
+                            # Generic fallback for unhandled keys
+                            processed_data[key] = {"Value1": float1, "Value2": float2}
+
+        except Exception as e:
+            logging.error(f"Error parsing data: {data_line}, Exception: {e}")
+            processed_data[key] = "Error"
+
         return processed_data
