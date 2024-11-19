@@ -144,7 +144,7 @@ BP_VMX,{random_hex_with_limit(0, 50)},{random_hex_with_limit(0, 50)}
 BP_VMN,{random_hex_with_limit(0, 50)},{random_hex_with_limit(0, 50)}
 BP_TMX,{random_hex_with_limit(0, 50)},{random_hex_with_limit(-40, 100)}
 BP_ISH,{random_hex_with_limit(-300, 300)},{random_hex_with_limit(-300, 300)}
-BP_PVS,{random_hex_with_limit(0, 146)},{random_hex_with_limit(0, 1000000000)}
+BP_PVS,{random_hex_with_limit(0, 146)},{random_hex_with_limit(0, 100000000)}
 MC1LIM,{mc1lim_hex1},{mc1lim_hex2}
 MC2LIM,{mc2lim_hex1},{mc2lim_hex2}
 TL_TIM,{runtime}

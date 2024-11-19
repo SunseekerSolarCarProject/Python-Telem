@@ -102,7 +102,9 @@ class BufferData:
         # Ensure BP_PVS_Ah is safely retrieved from combined_data
         bp_pvs_ah = self.safe_float(self.combined_data.get('BP_PVS_Ah', 0))  # Get the value, not a key or list
         self.combined_data['Used_Ah_Remaining_Ah'] = self.dataprocessor.calculate_remaining_capacity_from_ah(
-            used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah', 0.0)), bp_pvs_ah)
+            used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah')), bp_pvs_ah)
+        self.logger.debug(f"this is the used Ah {bp_pvs_ah}")
+        self.logger.debug(f"this is the used total_Ah {self.combined_data.get('Total_Capacity_Ah')}")
         self.combined_data['Used_Ah_Remaining_Time'] = self.dataprocessor.calculate_remaining_time_from_ah(
         self.combined_data['Used_Ah_Remaining_Ah'], bp_pvs_ah)
 
