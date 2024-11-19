@@ -1,3 +1,4 @@
+<h1 align="center"> Telemetry Application </h1>
 **Telemetry Application**\
 This is the newer telemetry that I have rebuilt up in python and any one can read for newcommers into coding.
 I have added much functionality to the Telemetry Application to make it easily readable in the terminal and two csv's are outputed and all the data is appended to the csv's to handle if the program shutsdown and needs to restart old data is not lost.
