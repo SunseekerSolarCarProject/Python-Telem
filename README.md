@@ -13,6 +13,7 @@ To run on my it is more of an execution within your mac terminal. It should look
 3. then enter this line of code Python3 main_app.py
 This should start the application for the code to run on your mac.
 
+### Devs
 Devs that created a new executable for the telemetry software on windows side goes this way. Make sure auto-py-to-exe is installed with this command 'pip install auto-py-to-exe'. then once it is installed run this command either 'auto-py-to-exe' if you are dealing in another program editor. If entering into VSCode then use this command 'python -m auto_py_to_exe' as this makes it work because the VSCode thinks that there is multiple versions of python in VSCode.
 
 There is a entire debug feature that is implemented into this program for developers that want to see what is happening within the code if some new features break the program and can't figure out where the data is going to.
