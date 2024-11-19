@@ -13,6 +13,7 @@ from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
 from custom_logger import CustomLogger
+from extra_calculations import ExtraCalculations
 
 # Updated units and key descriptions
 units = {
@@ -51,6 +52,7 @@ class TelemetryApplication:
         self.baudrate = baudrate
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
+        self.extra_calculations = ExtraCalculations()
         self.Data_Display = DataDisplay()
         self.battery_info = self.get_user_battery_input()
         self.csv_headers = self.generate_csv_headers()
@@ -113,7 +115,7 @@ class TelemetryApplication:
                 print("Invalid input. Please enter numeric values.")
                 return self.get_user_battery_input()
 
-            battery_info = self.data_processor.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
+            battery_info = self.extra_calculations.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
             logging.info("Battery info calculated from manual input.")
 
         if 'error' in battery_info:
@@ -141,7 +143,7 @@ class TelemetryApplication:
                 series_strings = int(battery_data["Number of battery strings"])
 
                 logging.debug(f"Battery data extracted from file: {battery_data}")
-                return self.data_processor.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
+                return self.extra_calculations.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
 
         except (FileNotFoundError, KeyError, ValueError) as e:
             logging.error(f"Error reading file {file_path}: {e}")
