@@ -5,7 +5,7 @@ import argparse
 from telemetry_application import TelemetryApplication
 
 def main():
-    #current baudrate for faster data processing is 115200
+    #current baudrate for faster data processing is 115200 if needed.
     parser = argparse.ArgumentParser(description='Telemetry Application')
     parser.add_argument('--baudrate', type=int, default=9600, help='Serial baud rate')
     parser.add_argument('--loglevel', type=str, default='INFO', help='Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)')
