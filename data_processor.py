@@ -2,6 +2,7 @@
 
 import struct
 import logging
+from extra_calculations import ExtraCalculations
 
 # Error and limit flag descriptions
 error_flags_desc = [
@@ -30,6 +31,7 @@ class DataProcessor:
     def __init__(self):
         # Define steering wheel descriptions within the class
         self.logger = logging.getLogger(__name__)
+        self.extra_calculations = ExtraCalculations()
         self.steering_wheel_desc = {
             '0x08000000': 'regen',
             '0x00040100': 'left turn',
@@ -139,112 +141,6 @@ class DataProcessor:
             self.logger.error(f"Error parsing SWC data: hex1={hex1}, hex2={hex2}, Exception: {e}")
             return {}
 
-    def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval=1):
-        try:
-            if capacity_Ah is None or current is None:
-                self.logger.warning("Incomplete data for remaining capacity calculation.")
-                return 0.0  # Default if data is incomplete
-            remaining_capacity = capacity_Ah - ((current * interval) / 3600) - used_Ah
-            self.logger.debug(f"Calculated remaining capacity: {remaining_capacity} Ah")
-            return remaining_capacity
-        except Exception as e:
-            self.logger.error(f"Error calculating remaining capacity: Exception: {e}")
-            return 0.0
-        
-    def calculate_remaining_capacity_from_ah(self, used_ah, total_capacity_ah, bp_pvs_ah):
-        """
-        Calculates remaining capacity in Ah using total capacity and consumed capacity.
-    
-        :param total_capacity_ah: Total capacity in Amp-hours (Ah).
-        :param used_ah: Total consumed Amp-hours (Ah).
-        :return: Remaining capacity in Ah.
-        """
-        try:
-            if total_capacity_ah is None or bp_pvs_ah is None:
-                self.logger.warning("Incomplete data for remaining capacity (Ah) calculation.")
-                return 0.0  # Default if data is incomplete
-            self.logger.debug(f"this is the bp_pvs_ah: {bp_pvs_ah}, this is the total_Ah: {total_capacity_ah}, this is used_ah: {used_ah}")
-            remaining_capacity = total_capacity_ah - bp_pvs_ah
-            self.logger.debug(f"Calculated remaining capacity (Ah): {remaining_capacity} Ah")
-            return max(remaining_capacity, 0.0)  # Ensure non-negative result
-        except Exception as e:
-            self.logger.error(f"Error calculating remaining capacity (Ah): {e}")
-            return 0.0
-
-    def calculate_remaining_time(self, remaining_Ah, current):
-        try:
-            if current is None or current == 0 or remaining_Ah is None:
-                self.logger.warning("Incomplete data for remaining time calculation.")
-                return float('inf')  # Infinite time if no current or incomplete data
-            remaining_time = remaining_Ah / current
-            self.logger.debug(f"Calculated remaining time: {remaining_time} hours")
-            return remaining_time
-        except Exception as e:
-            self.logger.error(f"Error calculating remaining time: Exception: {e}")
-            return float('inf')
-
-    def calculate_remaining_time_from_ah(self, remaining_ah, consumption_rate_ah):
-        """
-        Calculates remaining time (hours) using remaining Ah and consumption rate in Ah.
-
-        :param remaining_ah: Remaining capacity in Amp-hours (Ah).
-        :param consumption_rate_ah: Consumption rate in Ah.
-        :return: Remaining time in hours (float), or infinity if consumption rate is 0.
-        """
-        try:
-            if consumption_rate_ah is None or consumption_rate_ah <= 0:
-                self.logger.warning("Consumption rate (Ah) is zero or invalid for remaining time calculation.")
-                return float('inf')  # Infinite time if no consumption
-            if remaining_ah is None:
-                self.logger.warning("Remaining Ah is missing for remaining time calculation.")
-                return 0.0  # No remaining time if remaining Ah is missing
-
-            remaining_time = remaining_ah / consumption_rate_ah
-            self.logger.debug(f"Calculated remaining time (Ah-based): {remaining_time} hours")
-            return max(remaining_time, 0.0)  # Ensure non-negative result
-        except Exception as e:
-            self.logger.error(f"Error calculating remaining time (Ah-based): {e}")
-            return 0.0
-
-    def calculate_watt_hours(self, remaining_Ah, voltage):
-        try:
-            if voltage is None or remaining_Ah is None:
-                self.logger.warning("Incomplete data for watt-hours calculation.")
-                return 0.0  # Default if data is incomplete
-            watt_hours = remaining_Ah * voltage
-            self.logger.debug(f"Calculated watt-hours: {watt_hours} Wh")
-            return watt_hours
-        except Exception as e:
-            self.logger.error(f"Error calculating watt-hours: Exception: {e}")
-            return 0.0
-
-    def calculate_battery_capacity(self, capacity_ah, voltage, quantity, series_strings):
-        try:
-            parallel_strings = quantity // series_strings
-            total_capacity_ah = capacity_ah * parallel_strings
-            total_voltage = voltage * series_strings
-            total_capacity_wh = total_capacity_ah * total_voltage
-            battery_info = {
-                'Total_Capacity_Wh': total_capacity_wh,
-                'Total_Capacity_Ah': total_capacity_ah,
-                'Total_Voltage': total_voltage,
-            }
-            self.logger.debug(f"Calculated battery capacity: {battery_info}")
-            return battery_info
-        except Exception as e:
-            self.logger.error(f"Error calculating battery capacity: Exception: {e}")
-            return {'error': str(e)}
-
-    def convert_mps_to_mph(self, Mps):
-        mph = Mps * 2.23694
-        self.logger.debug(f"Converted {Mps} m/s to {mph} mph")
-        return mph
-
-    def convert_mA_s_to_Ah(self, mA_s):
-        ah = (mA_s / 1000) / 3600
-        self.logger.debug(f"Converted {mA_s} mA·s to {ah} Ah")
-        return ah
-
     def parse_data(self, data_line):
         parts = data_line.strip().split(',')
         if len(parts) < 3:
@@ -291,11 +187,11 @@ class DataProcessor:
                 elif key == 'MC1VEL':
                     processed_data[f"{key}_RPM"] = float1
                     processed_data[f"{key}_Velocity"] = float2
-                    processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
+                    processed_data[f"{key}_Speed"] = self.extra_calculations.convert_mps_to_mph(float2)
                 elif key == 'MC2VEL':
                     processed_data[f"{key}_Velocity"] = float1
                     processed_data[f"{key}_RPM"] = float2
-                    processed_data[f"{key}_Speed"] = self.convert_mps_to_mph(float2)
+                    processed_data[f"{key}_Speed"] = self.extra_calculations.convert_mps_to_mph(float2)
                 elif key == 'BP_VMX':
                     processed_data[f"{key}_ID"] = float1
                     processed_data[f"{key}_Voltage"] = float2
@@ -311,7 +207,7 @@ class DataProcessor:
                 elif key == 'BP_PVS':
                     processed_data[f"{key}_Voltage"] = float1
                     processed_data[f"{key}_milliamp/s"] = float2
-                    processed_data[f"{key}_Ah"] = self.convert_mA_s_to_Ah(float2)
+                    processed_data[f"{key}_Ah"] = self.extra_calculations.convert_mA_s_to_Ah(float2)
                 elif key == 'DC_DRV':
                     processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
                     processed_data[f"{key}_Motor_Current_setpoint"] = float2
