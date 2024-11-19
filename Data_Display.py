@@ -22,14 +22,14 @@ class DataDisplay:
             if match:
                 hex_value = match.group(0).strip('()')
                 value_text = value.replace(match.group(0), '').strip()
-                logging.debug(f"Extracted hex from value: {value} -> value_text: {value_text}, hex_value: {hex_value}")
+                self.logger.debug(f"Extracted hex from value: {value} -> value_text: {value_text}, hex_value: {hex_value}")
                 return value_text, hex_value
-            logging.debug(f"No hex found in value: {value}")
+            self.logger.debug(f"No hex found in value: {value}")
             return value, None
 
         position = data.get('DC_SWC_Position', 'N/A')
         value = data.get('DC_SWC_Value', 'N/A')
-        logging.debug(f"Formatting SWC information: position={position}, value={value}")
+        self.logger.debug(f"Formatting SWC information: position={position}, value={value}")
 
         # Extract hex from position and value if applicable
         position_text, position_hex = extract_hex(position) if isinstance(position, str) else (position, None)
@@ -43,7 +43,7 @@ class DataDisplay:
             f"DC_SWC_Value: {value_text} ({value_hex})" if value_hex else f"DC_SWC_Value: {value}"
         )
         formatted_output = f"{position_str}\n{value_str}"
-        logging.debug(f"Formatted SWC information:\n{formatted_output}")
+        self.logger.debug(f"Formatted SWC information:\n{formatted_output}")
         return formatted_output
 
     def format_motor_controller_data(self, key, data):
@@ -51,10 +51,10 @@ class DataDisplay:
         Formats motor controller-specific data for display.
         """
         if not isinstance(data, dict):
-            logging.error(f"Expected a dictionary for {key}, but got {type(data)}")
+            self.logger.error(f"Expected a dictionary for {key}, but got {type(data)}")
             return f"{key}: Data not available"
 
-        logging.debug(f"Formatting motor controller data for {key}: {data}")
+        self.logger.debug(f"Formatting motor controller data for {key}: {data}")
         lines = [f"{key} Motor Controller Data:"]
         lines.append(f"  CAN Receive Error Count: {data.get('CAN Receive Error Count', 'N/A')}")
         lines.append(f"  CAN Transmit Error Count: {data.get('CAN Transmit Error Count', 'N/A')}")
@@ -64,14 +64,14 @@ class DataDisplay:
         lines.append(f"  Errors: {errors}")
         lines.append(f"  Limits: {limits}")
         formatted_output = "\n".join(lines)
-        logging.debug(f"Formatted motor controller data for {key}:\n{formatted_output}")
+        self.logger.debug(f"Formatted motor controller data for {key}:\n{formatted_output}")
         return formatted_output
 
     def display(self, data):
         """
         Formats and displays all telemetry data.
         """
-        logging.debug("Starting display of telemetry data.")
+        self.logger.debug("Starting display of telemetry data.")
         order = [
             "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
             "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
@@ -92,7 +92,7 @@ class DataDisplay:
         for key in order:
             if key in data:
                 value = data[key]
-                logging.debug(f"Processing key: {key}, value: {value}")
+                self.logger.debug(f"Processing key: {key}, value: {value}")
                 if key == "DC_SWC_Position":
                     lines.append("")
                     dc_swc_output = self.format_SWC_information({
@@ -100,7 +100,7 @@ class DataDisplay:
                         'DC_SWC_Value': data.get('DC_SWC_Value', 'N/A')
                     })
                     lines.append(dc_swc_output)
-                    logging.debug(f"DC_SWC data added to display.")
+                    self.logger.debug(f"DC_SWC data added to display.")
                 elif key == "DC_SWC_Value":
                     continue  # Skip to avoid duplication
                 elif key == "MC1LIM" or key == "MC2LIM":
@@ -108,22 +108,22 @@ class DataDisplay:
                     lines.append("")
                     mc_output = self.format_motor_controller_data(key, value)
                     lines.append(mc_output)
-                    logging.debug(f"Motor controller data for {key} added to display.")
+                    self.logger.debug(f"Motor controller data for {key} added to display.")
                 else:
                     # Format and append other data
                     try:
                         formatted_value = f"{value:.2f}" if isinstance(value, float) else f"{value}"
                         lines.append(f"{key}: {formatted_value}")
                     except Exception as e:
-                        logging.error(f"Error formatting value for {key}: {value}, Exception: {e}")
+                        self.logger.error(f"Error formatting value for {key}: {value}, Exception: {e}")
                         lines.append(f"{key}: {value}")
-                    logging.debug(f"Data added to display: {key}: {formatted_value}")
+                    self.logger.debug(f"Data added to display: {key}: {formatted_value}")
             else:
                 lines.append(f"{key}: N/A")
-                logging.debug(f"Key {key} not found in data. Added 'N/A' to display.")
+                self.logger.debug(f"Key {key} not found in data. Added 'N/A' to display.")
 
         # Add separator line
         lines.append("----------------------------------------")
         display_output = "\n".join(lines)
-        logging.debug("Finished generating display output.")
+        self.logger.debug("Finished generating display output.")
         return display_output

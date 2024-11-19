@@ -19,35 +19,35 @@ class SerialReaderThread(threading.Thread):
 
     def run(self):
         try:
-            logging.info(f"Attempting to open serial port {self.port} at {self.baudrate} baud.")
+            self.logger.info(f"Attempting to open serial port {self.port} at {self.baudrate} baud.")
             self.serial_conn = serial.Serial(self.port, self.baudrate, timeout=1)
             # Increase buffer size to 4MB
             self.serial_conn.set_buffer_size(rx_size=4 * 1024 * 1024, tx_size=4 * 1024 * 1024)
-            logging.info("Serial port opened and buffer size set to 4MB.")
+            self.logger.info("Serial port opened and buffer size set to 4MB.")
 
             while not self._stop_event.is_set():
                 if self.serial_conn.in_waiting > 0:
                     try:
                         raw_bytes = self.serial_conn.readline()
                         raw_data = raw_bytes.decode('utf-8', errors='replace').strip()
-                        logging.debug(f"Raw data received: {raw_data}")
+                        self.logger.debug(f"Raw data received: {raw_data}")
                         self.process_raw_data_callback(raw_data)
                         self.process_data_callback(raw_data)
                     except Exception as e:
-                        logging.error(f"Error reading from serial port: {e}")
+                        self.logger.error(f"Error reading from serial port: {e}")
                 else:
-                    logging.debug("No data in serial buffer.")
+                    self.logger.debug("No data in serial buffer.")
                 time.sleep(0.1)
         except serial.SerialException as e:
-            logging.error(f"Serial error: {e}")
+            self.logger.error(f"Serial error: {e}")
             print(f"Serial error: {e}")
         except Exception as e:
-            logging.error(f"Unexpected error in SerialReaderThread: {e}")
+            self.logger.error(f"Unexpected error in SerialReaderThread: {e}")
         finally:
             if self.serial_conn and self.serial_conn.is_open:
                 self.serial_conn.close()
-                logging.info(f"Serial port {self.port} closed.")
+                self.logger.info(f"Serial port {self.port} closed.")
 
     def stop(self):
-        logging.info("Stopping SerialReaderThread.")
+        self.logger.info("Stopping SerialReaderThread.")
         self._stop_event.set()

@@ -44,9 +44,9 @@ units = {
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO):
         self.configure_logging(level=log_level)
+        self.logging_enabled = True  # Default logging state
         self.baudrate = baudrate
         self.serial_reader_thread = None
-        self.logging_enabled = True  # Default logging state
         self.data_processor = DataProcessor()
         self.Data_Display = DataDisplay()
         self.battery_info = self.get_user_battery_input()
@@ -65,7 +65,6 @@ class TelemetryApplication:
 
         self.setup_csv(self.csv_file, self.csv_headers)
         self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
-
 
     def get_user_battery_input(self):
         """
@@ -193,17 +192,24 @@ class TelemetryApplication:
 
     def toggle_logging_level(self, level):
         """
-        Toggles the logging level dynamically.
+        Configures the logging module to log only to a file.
 
-        :param level: The desired logging level (e.g., logging.INFO, logging.CRITICAL).
+        :param level: The logging level to set (e.g., logging.INFO, logging.DEBUG).
         """
-        for handler in logging.root.handlers:
-            handler.setLevel(level)
-        logging.root.setLevel(level)
-        if level == logging.INFO:
-            logging.info("Logging level set to INFO.")
-        elif level == logging.CRITICAL:
-            logging.critical("Logging level set to CRITICAL.")
+        # Remove any existing handlers
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+
+        # Set up file handler with mode='w' to overwrite the file
+        log_file = "telemetry.log"
+        file_handler = logging.FileHandler(log_file, mode='w')  # Open in write mode to overwrite
+        file_handler.setLevel(level)
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        file_handler.setFormatter(formatter)
+
+        # Add file handler to root logger
+        logging.root.addHandler(file_handler)
+        logging.root.setLevel(level)  # Set the root logging level
 
     def setup_csv(self, filename, headers):
         try:
@@ -312,7 +318,7 @@ class TelemetryApplication:
                         used_ah=self.used_Ah
                     )
                     if self.logging_enabled:
-                        logging.info(f"Combined data after flush: {combined_data}")
+                        logging.debug(f"Combined data after flush: {combined_data}")
                     if combined_data:
                         self.display_data(combined_data)
             except Exception as e:

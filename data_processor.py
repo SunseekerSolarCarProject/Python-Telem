@@ -50,38 +50,38 @@ class DataProcessor:
         """
         try:
             if hex_data == '0xHHHHHHHH' or len(hex_data) < 8:
-                logging.debug(f"Invalid hex data for float conversion: {hex_data}")
+                self.logger.debug(f"Invalid hex data for float conversion: {hex_data}")
                 return 0.0
             int_value = int(hex_data, 16)
             if int_value > 0x7FFFFFFF:  # Check for signed values
                 int_value -= 0x100000000
             float_value = float(int_value)
-            logging.debug(f"Converted hex to float: {hex_data} -> {float_value}")
+            self.logger.debug(f"Converted hex to float: {hex_data} -> {float_value}")
             return float_value
         except (ValueError, struct.error) as e:
-            logging.error(f"Error converting hex to float: {hex_data}, Exception: {e}")
+            self.logger.error(f"Error converting hex to float: {hex_data}, Exception: {e}")
             return 0.0
 
     def hex_to_bits(self, hex_data):
         try:
             if hex_data in ['HHHHHHHH', '0xHHHHHHHH']:
-                logging.debug(f"Invalid hex data for bit conversion: {hex_data}")
+                self.logger.debug(f"Invalid hex data for bit conversion: {hex_data}")
                 return '0' * 32  # Default to a string of 32 zeros if data is invalid
             bits = f"{int(hex_data, 16):032b}"
-            logging.debug(f"Converted hex to bits: {hex_data} -> {bits}")
+            self.logger.debug(f"Converted hex to bits: {hex_data} -> {bits}")
             return bits
         except ValueError as e:
-            logging.error(f"Invalid hex data: {hex_data}, Exception: {e}")
+            self.logger.error(f"Invalid hex data: {hex_data}, Exception: {e}")
             return '0' * 32
 
     def parse_error_and_limit_flags(self, error_bits, limit_bits):
         try:
             errors = [error_flags_desc[i] for i, bit in enumerate(error_bits[::-1]) if bit == '1']
             limits = [limit_flags_desc[i] for i, bit in enumerate(limit_bits[::-1]) if bit == '1']
-            logging.debug(f"Parsed errors: {errors}, limits: {limits}")
+            self.logger.debug(f"Parsed errors: {errors}, limits: {limits}")
             return errors, limits
         except IndexError as e:
-            logging.error(f"Error parsing error and limit flags: Exception: {e}")
+            self.logger.error(f"Error parsing error and limit flags: Exception: {e}")
             return [], []
 
     def parse_motor_controller_data(self, hex1, hex2):
@@ -111,10 +111,10 @@ class DataProcessor:
                 "Errors": errors,
                 "Limits": limits
             }
-            logging.debug(f"Parsed motor controller data: {motor_data}")
+            self.logger.debug(f"Parsed motor controller data: {motor_data}")
             return motor_data
         except Exception as e:
-            logging.error(f"Error parsing motor controller data: hex1={hex1}, hex2={hex2}, Exception: {e}")
+            self.logger.error(f"Error parsing motor controller data: hex1={hex1}, hex2={hex2}, Exception: {e}")
             return {}
 
     def parse_swc_data(self, hex1, hex2):
@@ -133,46 +133,46 @@ class DataProcessor:
                 "DC_SWC_Position": f"{swc_description} ({hex1})",  # Description with hex
                 "DC_SWC_Value": f"{bits2} ({hex2})"  # Direct bit value
             }
-            logging.debug(f"Parsed SWC data: {swc_data}")
+            self.logger.debug(f"Parsed SWC data: {swc_data}")
             return swc_data
         except Exception as e:
-            logging.error(f"Error parsing SWC data: hex1={hex1}, hex2={hex2}, Exception: {e}")
+            self.logger.error(f"Error parsing SWC data: hex1={hex1}, hex2={hex2}, Exception: {e}")
             return {}
 
     def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval=1):
         try:
             if capacity_Ah is None or current is None:
-                logging.warning("Incomplete data for remaining capacity calculation.")
+                self.logger.warning("Incomplete data for remaining capacity calculation.")
                 return 0.0  # Default if data is incomplete
             remaining_capacity = capacity_Ah - ((current * interval) / 3600) - used_Ah
-            logging.debug(f"Calculated remaining capacity: {remaining_capacity} Ah")
+            self.logger.debug(f"Calculated remaining capacity: {remaining_capacity} Ah")
             return remaining_capacity
         except Exception as e:
-            logging.error(f"Error calculating remaining capacity: Exception: {e}")
+            self.logger.error(f"Error calculating remaining capacity: Exception: {e}")
             return 0.0
 
     def calculate_remaining_time(self, remaining_Ah, current):
         try:
             if current is None or current == 0 or remaining_Ah is None:
-                logging.warning("Incomplete data for remaining time calculation.")
+                self.logger.warning("Incomplete data for remaining time calculation.")
                 return float('inf')  # Infinite time if no current or incomplete data
             remaining_time = remaining_Ah / current
-            logging.debug(f"Calculated remaining time: {remaining_time} hours")
+            self.logger.debug(f"Calculated remaining time: {remaining_time} hours")
             return remaining_time
         except Exception as e:
-            logging.error(f"Error calculating remaining time: Exception: {e}")
+            self.logger.error(f"Error calculating remaining time: Exception: {e}")
             return float('inf')
 
     def calculate_watt_hours(self, remaining_Ah, voltage):
         try:
             if voltage is None or remaining_Ah is None:
-                logging.warning("Incomplete data for watt-hours calculation.")
+                self.logger.warning("Incomplete data for watt-hours calculation.")
                 return 0.0  # Default if data is incomplete
             watt_hours = remaining_Ah * voltage
-            logging.debug(f"Calculated watt-hours: {watt_hours} Wh")
+            self.logger.debug(f"Calculated watt-hours: {watt_hours} Wh")
             return watt_hours
         except Exception as e:
-            logging.error(f"Error calculating watt-hours: Exception: {e}")
+            self.logger.error(f"Error calculating watt-hours: Exception: {e}")
             return 0.0
 
     def calculate_battery_capacity(self, capacity_ah, voltage, quantity, series_strings):
@@ -186,26 +186,26 @@ class DataProcessor:
                 'Total_Capacity_Ah': total_capacity_ah,
                 'Total_Voltage': total_voltage,
             }
-            logging.debug(f"Calculated battery capacity: {battery_info}")
+            self.logger.debug(f"Calculated battery capacity: {battery_info}")
             return battery_info
         except Exception as e:
-            logging.error(f"Error calculating battery capacity: Exception: {e}")
+            self.logger.error(f"Error calculating battery capacity: Exception: {e}")
             return {'error': str(e)}
 
     def convert_mps_to_mph(self, Mps):
         mph = Mps * 2.23694
-        logging.debug(f"Converted {Mps} m/s to {mph} mph")
+        self.logger.debug(f"Converted {Mps} m/s to {mph} mph")
         return mph
 
     def convert_mA_s_to_Ah(self, mA_s):
         ah = (mA_s / 1000) / 3600
-        logging.debug(f"Converted {mA_s} mA·s to {ah} Ah")
+        self.logger.debug(f"Converted {mA_s} mA·s to {ah} Ah")
         return ah
 
     def parse_data(self, data_line):
         parts = data_line.strip().split(',')
         if len(parts) < 3:
-            logging.warning(f"Data line does not have enough parts: {data_line}")
+            self.logger.warning(f"Data line does not have enough parts: {data_line}")
             return {}
 
         processed_data = {}
@@ -214,7 +214,7 @@ class DataProcessor:
             hex1 = parts[1].strip() if len(parts) > 1 else "0x00000000"
             hex2 = parts[2].strip() if len(parts) > 2 else "0x00000000"
 
-            logging.debug(f"Parsing data for key: {key}, hex1: {hex1}, hex2: {hex2}")
+            self.logger.debug(f"Parsing data for key: {key}, hex1: {hex1}, hex2: {hex2}")
 
             # Special cases for data types that should remain hex and be processed separately
             if key in ['MC1LIM', 'MC2LIM']:
@@ -222,22 +222,22 @@ class DataProcessor:
                 motor_data = self.parse_motor_controller_data(hex1, hex2)
                 if motor_data:
                     processed_data[key] = motor_data
-                    logging.debug(f"Processed motor controller data for {key}: {motor_data}")
+                    self.logger.debug(f"Processed motor controller data for {key}: {motor_data}")
                 else:
-                    logging.error(f"Failed to parse {key} data.")
+                    self.logger.error(f"Failed to parse {key} data.")
             elif key == 'DC_SWC':
                 # Parse steering wheel controls
                 swc_data = self.parse_swc_data(hex1, hex2)
                 if swc_data:
                     processed_data.update(swc_data)
-                    logging.debug(f"Processed SWC data: {swc_data}")
+                    self.logger.debug(f"Processed SWC data: {swc_data}")
                 else:
-                    logging.error(f"Failed to parse {key} data.")
+                    self.logger.error(f"Failed to parse {key} data.")
             else:
                 # Generic float conversion for all other data
                 float1 = self.hex_to_float(hex1)
                 float2 = self.hex_to_float(hex2)
-                logging.debug(f"Converted hex to floats: {hex1} -> {float1}, {hex2} -> {float2}")
+                self.logger.debug(f"Converted hex to floats: {hex1} -> {float1}, {hex2} -> {float2}")
                 # Process each sensor based on its type and format
                 if key == 'MC1BUS':
                     processed_data[f"{key}_Voltage"] = float1
@@ -275,9 +275,9 @@ class DataProcessor:
                 else:
                     # Generic fallback for unhandled keys
                     processed_data[key] = {"Value1": float1, "Value2": float2}
-                logging.debug(f"Processed data for key {key}: {processed_data}")
+                self.logger.debug(f"Processed data for key {key}: {processed_data}")
         except Exception as e:
-            logging.error(f"Error parsing data line: '{data_line}'. Exception: {e}")
+            self.logger.error(f"Error parsing data line: '{data_line}'. Exception: {e}")
             processed_data[key] = "Error"
 
         return processed_data
