@@ -4,10 +4,27 @@ import re
 import logging
 
 class DataDisplay:
-    def __init__(self):
+    def __init__(self, units):
+        self.units = units
         self.logger = logging.getLogger(__name__)
         self.logger.info("DataDisplay initialized.")
 
+    def format_with_unit(self, key, value):
+        """
+        Formats a telemetry value with its corresponding unit.
+        :param key: The variable name.
+        :param value: The variable's value.
+        :return: A formatted string with the value and its unit.
+        """
+        unit = self.units.get(key, '')  # Retrieve the unit or default to empty
+        try:
+            formatted_value = f"{value:.2f}" if isinstance(value, float) else str(value)
+        except Exception as e:
+            self.logger.error(f"Error formatting value for {key}: {value}, Exception: {e}")
+            formatted_value = str(value)
+
+        return f"{formatted_value} {unit}".strip()
+    
     def format_SWC_information(self, data):
         """
         Formats DC_SWC data for display, including position and value with hex representation.
@@ -97,8 +114,8 @@ class DataDisplay:
                 if key == "DC_SWC_Position":
                     lines.append("")
                     dc_swc_output = self.format_SWC_information({
-                        'DC_SWC_Position': data.get('DC_SWC_Position', 'N/A'),
-                        'DC_SWC_Value': data.get('DC_SWC_Value', 'N/A')
+                    'DC_SWC_Position': data.get('DC_SWC_Position', 'N/A'),
+                    'DC_SWC_Value': data.get('DC_SWC_Value', 'N/A')
                     })
                     lines.append(dc_swc_output)
                     self.logger.debug(f"DC_SWC data added to display.")
@@ -111,10 +128,12 @@ class DataDisplay:
                     lines.append(mc_output)
                     self.logger.debug(f"Motor controller data for {key} added to display.")
                 else:
-                    # Format and append other data
+                    # Format and append other data with units if applicable
                     try:
+                        unit = self.units.get(key, '')  # Retrieve unit or default to empty
                         formatted_value = f"{value:.2f}" if isinstance(value, float) else f"{value}"
-                        lines.append(f"{key}: {formatted_value}")
+                        display_value = f"{formatted_value} {unit}".strip()
+                        lines.append(f"{key}: {display_value}")
                     except Exception as e:
                         self.logger.error(f"Error formatting value for {key}: {value}, Exception: {e}")
                         lines.append(f"{key}: {value}")

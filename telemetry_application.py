@@ -53,7 +53,7 @@ class TelemetryApplication:
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
         self.extra_calculations = ExtraCalculations()
-        self.Data_Display = DataDisplay()
+        self.Data_Display = DataDisplay(units)
         self.battery_info = self.get_user_battery_input()
         self.csv_headers = self.generate_csv_headers()
         self.secondary_csv_headers = ["timestamp", "raw_data"]
