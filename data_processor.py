@@ -151,7 +151,7 @@ class DataProcessor:
             self.logger.error(f"Error calculating remaining capacity: Exception: {e}")
             return 0.0
         
-    def calculate_remaining_capacity_from_ah(self, bp_pvs_ah, total_capacity_ah):
+    def calculate_remaining_capacity_from_ah(self, used_ah, total_capacity_ah, bp_pvs_ah):
         """
         Calculates remaining capacity in Ah using total capacity and consumed capacity.
     
@@ -163,7 +163,7 @@ class DataProcessor:
             if total_capacity_ah is None or bp_pvs_ah is None:
                 self.logger.warning("Incomplete data for remaining capacity (Ah) calculation.")
                 return 0.0  # Default if data is incomplete
-            self.logger.debug(f"this is the bp_pvs_ah: {bp_pvs_ah}, this is the total_Ah: {total_capacity_ah}")
+            self.logger.debug(f"this is the bp_pvs_ah: {bp_pvs_ah}, this is the total_Ah: {total_capacity_ah}, this is used_ah: {used_ah}")
             remaining_capacity = total_capacity_ah - bp_pvs_ah
             self.logger.debug(f"Calculated remaining capacity (Ah): {remaining_capacity} Ah")
             return max(remaining_capacity, 0.0)  # Ensure non-negative result
