@@ -91,12 +91,20 @@ class BufferData:
         # Add battery-related metrics
         shunt_current = self.safe_float(self.combined_data.get('BP_ISH_Amps', 0))
         self.combined_data.update(battery_info)
-        self.combined_data['remaining_Ah'] = self.dataprocessor.calculate_remaining_capacity(
+        self.combined_data['Shunt_Remaining_Ah'] = self.dataprocessor.calculate_remaining_capacity(
             used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah', 0.0)), shunt_current)
         self.combined_data['remaining_wh'] = self.dataprocessor.calculate_watt_hours(
-            self.combined_data['remaining_Ah'], self.safe_float(self.combined_data.get('Total_Voltage', 0.0)))
-        self.combined_data['remaining_time'] = self.dataprocessor.calculate_remaining_time(
-            self.combined_data['remaining_Ah'], shunt_current)
+            self.combined_data['Shunt_Remaining_Ah'], self.safe_float(self.combined_data.get('Total_Voltage', 0.0)))
+        self.combined_data['Shunt_Remaining_Time'] = self.dataprocessor.calculate_remaining_time(
+            self.combined_data['Shunt_Remaining_Ah'], shunt_current)
+        
+        # New: Calculate remaining time using BP_PVS_Ah
+        # Ensure BP_PVS_Ah is safely retrieved from combined_data
+        bp_pvs_ah = self.safe_float(self.combined_data.get('BP_PVS_Ah', 0))  # Get the value, not a key or list
+        self.combined_data['Used_Ah_Remaining_Ah'] = self.dataprocessor.calculate_remaining_capacity_from_ah(
+            used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah', 0.0)), bp_pvs_ah)
+        self.combined_data['Used_Ah_Remaining_Time'] = self.dataprocessor.calculate_remaining_time_from_ah(
+        self.combined_data['Used_Ah_Remaining_Ah'], bp_pvs_ah)
 
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 

@@ -84,7 +84,8 @@ class DataDisplay:
             "DC_SWC_Position",  # Process DC_SWC here
             # "DC_SWC_Value",    # Remove or comment out to avoid duplication
             "MC1LIM", "MC2LIM",
-            "remaining_Ah", "remaining_wh", "remaining_time",
+            "Shunt_Remaining_Ah","Used_Ah_Remaining_Ah", "remaining_wh", 
+            "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
             "device_timestamp", "timestamp"
         ]
 

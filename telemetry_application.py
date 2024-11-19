@@ -4,7 +4,7 @@ import time
 import csv
 import os
 import logging
-from logging.handlers import RotatingFileHandler
+import threading
 import serial
 import serial.tools.list_ports
 from datetime import datetime
@@ -12,6 +12,7 @@ from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
+from custom_logger import CustomLogger
 
 # Updated units and key descriptions
 units = {
@@ -44,7 +45,8 @@ units = {
 
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO):
-        self.configure_logging(level=log_level)
+        # Initialize the custom logger
+        self.logger = CustomLogger(level=log_level)
         self.logging_enabled = True  # Default logging state
         self.baudrate = baudrate
         self.serial_reader_thread = None
@@ -161,7 +163,8 @@ class TelemetryApplication:
 
         # Add additional calculated fields
         battery_headers = ["Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
-                           "remaining_Ah", "remaining_wh", "remaining_time"]
+                           "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "remaining_wh",
+                            "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"]
 
         # Add timestamp fields
         timestamp_headers = ["timestamp", "device_timestamp"]
@@ -170,39 +173,11 @@ class TelemetryApplication:
         logging.debug(f"CSV headers generated: {headers}")
         return headers
 
-    def configure_logging(self, level=logging.INFO):
-        """
-        Configures the logging module to log only to a file.
-
-        :param level: The logging level to set (e.g., logging.INFO, logging.DEBUG).
-        """
-        # Remove any existing handlers
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
-
-        # Set up rotating file handler
-        log_file = "telemetry.log"
-        file_handler = RotatingFileHandler(log_file, mode='w', maxBytes=5*1024*1024, backupCount=2)
-        file_handler.setLevel(level)
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        file_handler.setFormatter(formatter)
-
-        # Add file handler to root logger
-        logging.root.addHandler(file_handler)
-        logging.root.setLevel(level)
-
     def toggle_logging_level(self, level):
         """
-        Toggles the logging level dynamically.
-    
-        :param level: The desired logging level (e.g., logging.INFO, logging.CRITICAL).
+        Delegates logging level change to the CustomLogger instance.
         """
-        for handler in logging.root.handlers:
-            handler.setLevel(level)
-        logging.root.setLevel(level)
-
-        level_name = logging.addLevelName(level)
-        logging.info(f"Logging level set to {level_name}.")
+        self.logger.toggle_logging_level(level)
 
     def setup_csv(self, filename, headers):
         try:
@@ -212,6 +187,26 @@ class TelemetryApplication:
             logging.info(f"CSV file '{filename}' initialized with headers.")
         except Exception as e:
             logging.error(f"Error setting up CSV file '{filename}': {e}")
+
+    def listen_for_commands(self):
+        while True:
+            try:
+                command = input()
+                if command.startswith("set_log_level"):
+                    parts = command.split()
+                    if len(parts) != 2:
+                        print("Usage: set_log_level [DEBUG|INFO|WARNING|ERROR|CRITICAL]")
+                        continue
+                    _, level_str = parts
+                    if level_str.upper() not in logging._nameToLevel:
+                        print("Invalid logging level. Valid levels are: DEBUG, INFO, WARNING, ERROR, CRITICAL.")
+                        continue
+                    level = logging._nameToLevel[level_str.upper()]
+                    self.toggle_logging_level(level)
+                    print(f"Logging level changed to {level_str.upper()}")
+            except Exception as e:
+                logging.error(f"Error in listen_for_commands: {e}")
+                break
 
     def select_port(self):
         ports = list(serial.tools.list_ports.comports())
@@ -253,6 +248,10 @@ class TelemetryApplication:
             logging.error(f"Failed to start serial reader thread: {e}")
             print(f"Failed to start serial reader thread: {e}")
             return
+        
+        # Start the command listener thread
+        command_thread = threading.Thread(target=self.listen_for_commands, daemon=True)
+        command_thread.start()
 
         try:
             while True:
