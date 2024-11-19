@@ -4,6 +4,7 @@ import time
 import csv
 import os
 import logging
+from logging.handlers import RotatingFileHandler
 import serial
 import serial.tools.list_ports
 from datetime import datetime
@@ -179,41 +180,33 @@ class TelemetryApplication:
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
 
-        # Set up file handler
+        # Set up rotating file handler
         log_file = "telemetry.log"
-        file_handler = logging.FileHandler(log_file)
+        file_handler = RotatingFileHandler(log_file, mode='w', maxBytes=5*1024*1024, backupCount=2)
         file_handler.setLevel(level)
         formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         file_handler.setFormatter(formatter)
 
         # Add file handler to root logger
         logging.root.addHandler(file_handler)
-        logging.root.setLevel(level)  # Set the root logging level
+        logging.root.setLevel(level)
 
     def toggle_logging_level(self, level):
         """
-        Configures the logging module to log only to a file.
-
-        :param level: The logging level to set (e.g., logging.INFO, logging.DEBUG).
+        Toggles the logging level dynamically.
+    
+        :param level: The desired logging level (e.g., logging.INFO, logging.CRITICAL).
         """
-        # Remove any existing handlers
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
+        for handler in logging.root.handlers:
+            handler.setLevel(level)
+        logging.root.setLevel(level)
 
-        # Set up file handler with mode='w' to overwrite the file
-        log_file = "telemetry.log"
-        file_handler = logging.FileHandler(log_file, mode='w')  # Open in write mode to overwrite
-        file_handler.setLevel(level)
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        file_handler.setFormatter(formatter)
-
-        # Add file handler to root logger
-        logging.root.addHandler(file_handler)
-        logging.root.setLevel(level)  # Set the root logging level
+        level_name = logging.addLevelName(level)
+        logging.info(f"Logging level set to {level_name}.")
 
     def setup_csv(self, filename, headers):
         try:
-            with open(filename, mode='w', newline='') as file:
+            with open(filename, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow(headers)
             logging.info(f"CSV file '{filename}' initialized with headers.")
