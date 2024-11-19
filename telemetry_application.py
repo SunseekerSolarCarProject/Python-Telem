@@ -41,7 +41,13 @@ units = {
     'BP_PVS_milliamp/s': 'mA/s',
     'BP_PVS_Ah': 'Ah',
     'BP_ISH_Amps': 'A',
-    'BP_ISH_SOC': '%'
+    'BP_ISH_SOC': '%',
+    'timestamp': 'hh:mm:ss',
+    'Shunt_Remaining_Ah': 'Ah',
+    'Used_Ah_Remaining_Ah': 'Ah',
+    'Shunt_Remaining_Time': 'hours',
+    'Used_Ah_Remaining_Time': 'hours',
+    'device_timestamp': 'hh:mm:ss'
 }
 
 class TelemetryApplication:
@@ -165,7 +171,8 @@ class TelemetryApplication:
 
         # Add additional calculated fields
         battery_headers = ["Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
-                           "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "remaining_wh",
+                           "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
+                            "Used_Ah_Remaining_wh",
                             "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"]
 
         # Add timestamp fields
@@ -336,6 +343,7 @@ class TelemetryApplication:
         Delegates data display to the DataDisplay class.
         """
         try:
+            logging.debug(f"Combined data to display: {combined_data}")
             display_output = self.Data_Display.display(combined_data)
             print(display_output)
             logging.debug("Data displayed successfully.")

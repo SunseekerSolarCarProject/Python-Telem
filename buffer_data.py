@@ -95,7 +95,7 @@ class BufferData:
         self.combined_data.update(battery_info)
         self.combined_data['Shunt_Remaining_Ah'] = self.extra_calculations.calculate_remaining_capacity(
             used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah', 0.0)), shunt_current)
-        self.combined_data['remaining_wh'] = self.extra_calculations.calculate_watt_hours(
+        self.combined_data['Shunt_Remaining_wh'] = self.extra_calculations.calculate_watt_hours(
             self.combined_data['Shunt_Remaining_Ah'], self.safe_float(self.combined_data.get('BP_PVS_Voltage', 0.0)))
         self.combined_data['Shunt_Remaining_Time'] = self.extra_calculations.calculate_remaining_time(
             self.combined_data['Shunt_Remaining_Ah'], shunt_current)
@@ -107,6 +107,8 @@ class BufferData:
             used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah')), bp_pvs_ah)
         self.logger.debug(f"this is the used Ah {bp_pvs_ah}")
         self.logger.debug(f"this is the used total_Ah {self.combined_data.get('Total_Capacity_Ah')}")
+        self.combined_data['Used_Ah_Remaining_wh'] = self.extra_calculations.calculate_watt_hours(
+            self.combined_data['Used_Ah_Remaining_Ah'], self.safe_float(self.combined_data.get('BP_PVS_Voltage', 0.0)))
         self.combined_data['Used_Ah_Remaining_Time'] = self.extra_calculations.calculate_remaining_time_from_ah(
         self.combined_data['Used_Ah_Remaining_Ah'], bp_pvs_ah)
 

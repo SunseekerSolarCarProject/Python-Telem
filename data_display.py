@@ -101,7 +101,7 @@ class DataDisplay:
             "DC_SWC_Position",  # Process DC_SWC here
             # "DC_SWC_Value",    # Remove or comment out to avoid duplication
             "MC1LIM", "MC2LIM",
-            "Shunt_Remaining_Ah","Used_Ah_Remaining_Ah", "remaining_wh", 
+            "Shunt_Remaining_Ah", "Shunt_Remaining_wh", "Used_Ah_Remaining_Ah", "Used_Ah_Remaining_wh", 
             "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
             "device_timestamp", "timestamp"
         ]
@@ -110,7 +110,7 @@ class DataDisplay:
         for key in order:
             if key in data:
                 value = data[key]
-                self.logger.debug(f"Processing key: {key}, value: {value}")
+                self.logger.debug(f"Processing key: {repr(key)}, value: {value}")
                 if key == "DC_SWC_Position":
                     lines.append("")
                     dc_swc_output = self.format_SWC_information({
@@ -137,10 +137,10 @@ class DataDisplay:
                     except Exception as e:
                         self.logger.error(f"Error formatting value for {key}: {value}, Exception: {e}")
                         lines.append(f"{key}: {value}")
-                    self.logger.debug(f"Data added to display: {key}: {formatted_value}")
-            else:
-                lines.append(f"{key}: N/A")
-                self.logger.debug(f"Key {key} not found in data. Added 'N/A' to display.")
+                    self.logger.debug(f"Data added to display: {repr(key)}: {formatted_value}")
+        else:
+            lines.append(f"{key}: N/A")
+            self.logger.debug(f"Key {repr(key)} not found in data. Added 'N/A' to display.")
 
         # Add separator line
         lines.append("----------------------------------------")
