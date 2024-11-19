@@ -1,13 +1,12 @@
 <h1 align="center"> Telemetry Application </h1>
-**Telemetry Application**\
 This is the newer telemetry that I have rebuilt up in python and any one can read for newcommers into coding.
 I have added much functionality to the Telemetry Application to make it easily readable in the terminal and two csv's are outputed and all the data is appended to the csv's to handle if the program shutsdown and needs to restart old data is not lost.
 This will be much more expansive with a gui to deal with but that is in the works currently. 
 
-**Windows**\
+### Windows
 The files for the executable for windows is within the release version of github where you can download the zip folder which is going to be needed to be unpacked. Then in the output folder there is an another folder that contains the name "main_app" that is where to execute the program is at with the name being "main_app.exe".
 
-**Macs**\
+### Macs
 To run on my it is more of an execution within your mac terminal. It should look something like this to execute the file. 
 1. The first step is download the entire project to your mac from github.
 2. This is to open your terminal within that folder
