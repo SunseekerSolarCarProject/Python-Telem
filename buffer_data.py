@@ -6,12 +6,14 @@ import logging
 import csv
 from data_processor import DataProcessor
 from extra_calculations import ExtraCalculations
+from csv_handler import CSVHandler
 
 class BufferData:
     def __init__(self, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
         self.logger = logging.getLogger(__name__)
         self.dataprocessor = DataProcessor()
         self.extra_calculations = ExtraCalculations()
+        self.csv_handler = CSVHandler()
         self.csv_headers = csv_headers
         self.secondary_csv_headers = secondary_csv_headers
         self.buffer_size = buffer_size
@@ -65,18 +67,11 @@ class BufferData:
             self.logger.debug("Raw data buffer is empty. Nothing to flush.")
             return  # Nothing to flush
 
-        try:
-            with open(filename, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                for raw_data_entry in self.raw_data_buffer:
-                    row = [raw_data_entry.get(header, '') for header in self.secondary_csv_headers]
-                    writer.writerow(row)
-            self.logger.debug(f"Flushed raw data buffer to file: {filename}")
-        except Exception as e:
-            self.logger.error(f"Error flushing raw data buffer to file {filename}: {e}")
-        finally:
-            self.raw_data_buffer.clear()
-            self.logger.debug("Raw data buffer cleared after flushing.")
+        for raw_data_entry in self.raw_data_buffer:
+            self.csv_handler.append_to_csv(filename, self.secondary_csv_headers, raw_data_entry)
+
+        self.raw_data_buffer.clear()
+        self.logger.debug("Raw data buffer cleared after flushing.")
 
     def flush_buffer(self, filename, battery_info, used_ah):
         """
@@ -114,33 +109,13 @@ class BufferData:
 
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
-        # Write to CSV
-        try:
-            self.append_to_csv(filename, self.combined_data)
-            self.logger.debug(f"Data appended to CSV file: {filename}")
-        except Exception as e:
-            self.logger.error(f"Error writing to CSV file {filename}: {e}")
-
-        # Clear the data buffer and reset flush time
+        # Append data to CSV
+        self.csv_handler.append_to_csv(filename, self.csv_headers, self.combined_data)
         self.data_buffer.clear()
         self.last_flush_time = time.time()
         self.logger.debug("Data buffer cleared and last_flush_time reset.")
-
         self.logger.debug(f"Final combined_data after processing: {self.combined_data}")
         return self.combined_data
-
-    def append_to_csv(self, filename, data):
-        """
-        Append a single row of data to the specified CSV file.
-        """
-        row = [data.get(header, '') for header in self.csv_headers]
-        try:
-            with open(filename, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(row)
-            self.logger.debug(f"Appended row to CSV file {filename}: {row}")
-        except Exception as e:
-            self.logger.error(f"Error appending row to CSV file {filename}: {e}")
 
     def safe_float(self, value, default=0.0):
         """

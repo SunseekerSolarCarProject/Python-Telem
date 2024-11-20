@@ -1,12 +1,13 @@
 # gui_display.py
 
 import sys
+import os
 import logging
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QSizePolicy,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
-    QColorDialog
+    QColorDialog, QComboBox, QLabel, QInputDialog
 )
 from PyQt6.QtCore import pyqtSignal
 import pyqtgraph as pg
@@ -14,10 +15,12 @@ import pyqtgraph as pg
 class TelemetryGUI(QWidget):
     # Define a signal to update the plots with new data
     update_data_signal = pyqtSignal(dict)
+    battery_info_signal = pyqtSignal(dict)
 
     def __init__(self, data_keys):
         super().__init__()
         self.data_keys = data_keys
+        self.battery_info = None
         self.logger = logging.getLogger(__name__)
         self.logger.info("Initializing TelemetryGUI.")
         self.max_data_points = 50  # Maximum number of data points to display
@@ -36,6 +39,10 @@ class TelemetryGUI(QWidget):
         # Create main layout and tabs
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
+
+        # Add battery configuration dropdown
+        self.create_battery_config_dropdown()
+
         self.tabs = QTabWidget()
         self.layout.addWidget(self.tabs)
 
@@ -87,7 +94,6 @@ class TelemetryGUI(QWidget):
                 'MC1VEL_RPM',
                 'MC1VEL_Velocity',
                 'MC1VEL_Speed',
-                'MC1LIM',
                 # Add other MC1 data keys
             ],
             'Motor Controller 2': [
@@ -96,7 +102,7 @@ class TelemetryGUI(QWidget):
                 'MC2VEL_RPM',
                 'MC2VEL_Velocity',
                 'MC2VEL_Speed',
-                'MC2LIM',
+                
                 # Add other MC2 data keys
             ],
             'Battery Pack Part 1': [
@@ -126,6 +132,86 @@ class TelemetryGUI(QWidget):
         self.create_plot_tabs()
         self.create_data_table_tab()
 
+    def create_battery_config_dropdown(self):
+        """
+        Creates a dropdown menu for selecting battery configurations.
+        """
+        label = QLabel("Select Battery Configuration:")
+        self.layout.addWidget(label)
+
+        self.battery_dropdown = QComboBox()
+        self.layout.addWidget(self.battery_dropdown)
+
+        # Populate the dropdown with battery configurations
+        self.populate_battery_dropdown()
+
+        # Add a button to confirm selection
+        confirm_button = QPushButton("Load Battery Configuration")
+        confirm_button.clicked.connect(self.load_selected_battery_config)
+        self.layout.addWidget(confirm_button)
+
+    def populate_battery_dropdown(self):
+        """
+        Populate the dropdown menu with available battery files and a manual input option.
+        """
+        battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
+        self.battery_dropdown.addItems(battery_files)
+        self.battery_dropdown.addItem("Manual Input")
+
+    def manual_battery_input(self):
+        """
+        Prompt the user to manually input battery information.
+        """
+        try:
+            capacity_ah, ok1 = QInputDialog.getDouble(self, "Battery Capacity", "Capacity (Ah) per cell:", 0, 0)
+            voltage, ok2 = QInputDialog.getDouble(self, "Battery Voltage", "Voltage (V) per cell:", 0, 0)
+            quantity, ok3 = QInputDialog.getInt(self, "Cell Count", "Number of cells:", 0, 0)
+            series_strings, ok4 = QInputDialog.getInt(self, "Series Strings", "Number of series strings:", 0, 0)
+
+            if all([ok1, ok2, ok3, ok4]):
+                self.battery_info = {
+                    "capacity_ah": capacity_ah,
+                    "voltage": voltage,
+                    "quantity": quantity,
+                    "series_strings": series_strings
+                }
+                self.logger.info(f"Manual battery input: {self.battery_info}")
+            else:
+                self.logger.warning("Battery input cancelled or incomplete.")
+        except Exception as e:
+            self.logger.error(f"Error during manual battery input: {e}")
+
+    def load_battery_info_from_file(self, file_path):
+        """
+        Load battery information from a text file.
+        """
+        try:
+            battery_data = {}
+            with open(file_path, 'r') as file:
+                for line in file:
+                    key, value = line.strip().split(", ")
+                    battery_data[key] = float(value) if "voltage" in key or "amps" in key else int(value)
+            return battery_data
+        except Exception as e:
+            self.logger.error(f"Error reading battery file {file_path}: {e}")
+            raise
+    
+    def load_selected_battery_config(self):
+        """
+        Load the selected battery configuration or prompt for manual input.
+        """
+        selected = self.battery_dropdown.currentText()
+        if selected == "Manual Input":
+            self.manual_battery_input()
+        else:
+            try:
+                self.battery_info = self.load_battery_info_from_file(selected)
+                self.logger.info(f"Loaded battery configuration: {self.battery_info}")
+            except:
+                self.logger.error("Battery info failed to load")
+        if self.battery_info:
+            self.battery_info_signal.emit(self.battery_info)  # Emit battery info
+    
     def add_lim_subfields(self):
         subfields = [
             'CAN Receive Error Count',
@@ -151,7 +237,6 @@ class TelemetryGUI(QWidget):
         if color.isValid():
             self.plot_widgets[key]['curve'].setPen(pg.mkPen(color.name(), width=2))
             self.logger.info(f"Changed line color for {key} to {color.name()}")
-
 
     def create_plot_tabs(self):
         self.plot_widgets = {}

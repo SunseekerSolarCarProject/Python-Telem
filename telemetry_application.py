@@ -18,6 +18,7 @@ from buffer_data import BufferData
 from custom_logger import CustomLogger
 from extra_calculations import ExtraCalculations
 from gui_display import TelemetryGUI
+from csv_handler import CSVHandler
 
 # Updated units and key descriptions
 units = {
@@ -69,18 +70,24 @@ class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
         # Initialize the custom logger
         self.logger = CustomLogger(level=log_level)
+
+        #initialize attributes
+        self.battery_info = None
         self.logging_enabled = True  # Default logging state
         self.baudrate = baudrate
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
         self.extra_calculations = ExtraCalculations()
         self.Data_Display = DataDisplay(units)
+        self.csv_handler = CSVHandler()
+
         self.battery_info = self.get_user_battery_input()
-        self.csv_headers = self.generate_csv_headers()
+        self.csv_headers = self.csv_handler.generate_csv_headers()
         self.secondary_csv_headers = ["timestamp", "raw_data"]
         self.csv_file = "telemetry_data.csv"
         self.secondary_csv_file = "raw_hex_data.csv"
         self.used_Ah = 0.0
+
         # Initialize BufferData
         self.buffer = BufferData(
             csv_headers=self.csv_headers,
@@ -89,28 +96,45 @@ class TelemetryApplication:
             buffer_timeout=buffer_timeout
         )
 
-        self.setup_csv(self.csv_file, self.csv_headers)
-        self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
+        self.csv_handler.setup_csv(self.csv_file, self.csv_headers)
+        self.csv_handler.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
 
         # Initialize GUI components
         self.app = app  # Store the QApplication instance
         # Define data keys to be plotted (excluding SWC and motor controller data)
         self.gui = TelemetryGUI(data_keys=[])
 
+        # Hook GUI battery info signal (assuming you add a signal to the GUI for battery info)
+        self.gui.battery_info_signal.connect(self.set_battery_info)
+
+        # Get battery info
+        self.battery_info = self.get_user_battery_input()
+
+    def set_battery_info(self, battery_info):
+        """
+        Set the battery information passed from the GUI.
+        """
+        self.battery_info = battery_info
+        self.logger.info(f"Battery info set via GUI: {battery_info}")
+
     def get_user_battery_input(self):
         """
-        Allows the user to select a battery file or enter information manually.
+        Get battery input from the user if not provided by the GUI.
         """
-        logging.info("Getting user battery input.")
+        if self.battery_info:  # Check if GUI has already provided battery info
+            self.logger.info("Using battery info provided by the GUI.")
+            return self.battery_info
+        
+        # Fallback to terminal-based input
+        logging.info("Getting user battery input via terminal.")
         print("Available battery files:")
         battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
 
-        # List available files and prompt user for a choice
         for i, filename in enumerate(battery_files, start=1):
             print(f"{i}. {filename}")
         print(f"{len(battery_files) + 1}. Enter battery information manually")
 
-        # Prompt for file selection or manual input
+        # Terminal input logic remains unchanged
         try:
             choice = int(input("Select an option by number: "))
         except ValueError:
@@ -119,36 +143,41 @@ class TelemetryApplication:
             return self.get_user_battery_input()
 
         if 1 <= choice <= len(battery_files):
-            # Load battery info from selected file
             file_path = battery_files[choice - 1]
-            battery_info = self.load_battery_info_from_file(file_path)
-            if battery_info:
-                logging.info(f"Battery info loaded from file: {file_path}")
-                return battery_info
-            else:
-                logging.error(f"Error loading battery data from {file_path}.")
-                print(f"Error loading battery data from {file_path}.")
+            return self.load_battery_info_from_file(file_path)
         else:
-            # Manual input if user opts not to select a file
-            print("Please enter the following battery information:")
-            try:
-                capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
-                voltage = float(input("Battery Voltage (V) per cell: "))
-                quantity = int(input("Number of cells: "))
-                series_strings = int(input("Number of series strings: "))
-            except ValueError as e:
-                logging.error(f"Invalid input for battery information: {e}")
-                print("Invalid input. Please enter numeric values.")
-                return self.get_user_battery_input()
+            return self.manual_battery_input()
 
-            battery_info = self.extra_calculations.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
-            logging.info("Battery info calculated from manual input.")
+    def manual_battery_input(self):
+        """
+        Prompt the user to manually input battery configuration via the terminal.
+        """
+        print("\nManual Battery Input:")
+        print("Please enter the following battery details:")
+        try:
+            capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
+            voltage = float(input("Battery Voltage (V) per cell: "))
+            quantity = int(input("Number of cells: "))
+            series_strings = int(input("Number of series strings: "))
+        except ValueError as e:
+            logging.error(f"Invalid input during manual battery configuration: {e}")
+            print("Error: Invalid input. Please enter numeric values where required.")
+            return self.manual_battery_input()  # Restart manual input on error
 
-        if 'error' in battery_info:
-            logging.error(f"Error calculating battery info: {battery_info['error']}")
+        battery_info = self.extra_calculations.calculate_battery_capacity(
+            capacity_ah=capacity_ah,
+            voltage=voltage,
+            quantity=quantity,
+            series_strings=series_strings
+        )
+
+        if "error" in battery_info:
+            logging.error(f"Error in manual battery calculation: {battery_info['error']}")
             print(f"Error calculating battery info: {battery_info['error']}")
-            return {'Total_Capacity_Wh': 0.0, 'Total_Capacity_Ah': 0.0, 'Total_Voltage': 0.0}
+            return self.manual_battery_input()  # Restart if the calculation fails
 
+        logging.info("Battery info successfully entered manually.")
+        print(f"Manual Battery Input Complete: {battery_info}")
         return battery_info
 
     def load_battery_info_from_file(self, file_path):
@@ -176,46 +205,11 @@ class TelemetryApplication:
             print(f"Error reading file {file_path}: {e}")
             return None
 
-    def generate_csv_headers(self):
-        """
-        Define all potential CSV columns based on known telemetry fields and battery info.
-        """
-        telemetry_headers = [
-            "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
-            "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_Velocity", "MC2VEL_RPM", "MC2VEL_Speed",
-            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC_Position", "DC_SWC_Value",
-            "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
-            "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
-            "MC1LIM", "MC2LIM"
-        ]
-
-        # Add additional calculated fields
-        battery_headers = ["Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
-                           "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
-                            "Used_Ah_Remaining_wh",
-                            "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"]
-
-        # Add timestamp fields
-        timestamp_headers = ["timestamp", "device_timestamp"]
-
-        headers = timestamp_headers + telemetry_headers + battery_headers
-        logging.debug(f"CSV headers generated: {headers}")
-        return headers
-
     def toggle_logging_level(self, level):
         """
         Delegates logging level change to the CustomLogger instance.
         """
         self.logger.toggle_logging_level(level)
-
-    def setup_csv(self, filename, headers):
-        try:
-            with open(filename, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(headers)
-            logging.info(f"CSV file '{filename}' initialized with headers.")
-        except Exception as e:
-            logging.error(f"Error setting up CSV file '{filename}': {e}")
 
     def listen_for_commands(self):
         while True:
@@ -270,6 +264,20 @@ class TelemetryApplication:
         # No need to call app.exec() here; it's called in main.py
 
     def run_application(self):
+        """
+        Main application logic for running telemetry data collection and processing.
+        """
+        # Wait for and retrieve battery information from GUI or fallback to terminal input
+        if self.gui.battery_info:
+            self.battery_info = self.gui.battery_info
+            self.logger.info("Using battery configuration provided by GUI.")
+        else:
+            self.battery_info = self.get_user_battery_input()
+        if not self.battery_info:
+            logging.error("No valid battery information provided. Exiting.")
+            return
+        
+        #select serial port
         port = self.select_port()
         if not port:
             logging.error("No valid port selected. Exiting.")
@@ -386,13 +394,11 @@ class TelemetryApplication:
             logging.error(f"Error displaying data: {combined_data}, Exception: {e}")
 
     def finalize_csv(self):
+        """
+        Finalize the CSV by renaming the file to user-specified name.
+        """
         try:
-            custom_filename = input("Enter a filename to save the CSV data (without extension): ")
-            custom_filename = f"{custom_filename}.csv"
-            with open(self.csv_file, 'r') as original, open(custom_filename, 'w', newline='') as new_file:
-                new_file.write(original.read())
-            logging.info(f"Data successfully saved to {custom_filename}.")
-            print(f"Data successfully saved to {custom_filename}.")
+            custom_filename = input("Enter a filename to save the CSV data (without extension): ") + ".csv"
+            self.csv_handler.finalize_csv(self.csv_file, custom_filename)
         except Exception as e:
-            logging.error(f"Error finalizing CSV file: {e}")
-            print(f"Error saving data to {custom_filename}: {e}")
+            self.logger.error(f"Error finalizing CSV file: {e}")
