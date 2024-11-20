@@ -69,7 +69,8 @@ class ApplicationWorker(QObject):
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
         # Initialize the custom logger
-        self.logger = CustomLogger(level=log_level)
+        self.logger = logging.getLogger(__name__)
+        #self.logger = CustomLogger(level=log_level)
 
         #initialize attributes
         self.battery_info = None
@@ -81,7 +82,6 @@ class TelemetryApplication:
         self.Data_Display = DataDisplay(units)
         self.csv_handler = CSVHandler()
 
-        self.battery_info = self.get_user_battery_input()
         self.csv_headers = self.csv_handler.generate_csv_headers()
         self.secondary_csv_headers = ["timestamp", "raw_data"]
         self.csv_file = "telemetry_data.csv"
@@ -124,9 +124,9 @@ class TelemetryApplication:
         if self.battery_info:  # Check if GUI has already provided battery info
             self.logger.info("Using battery info provided by the GUI.")
             return self.battery_info
-        
+
         # Fallback to terminal-based input
-        logging.info("Getting user battery input via terminal.")
+        self.logger.info("Getting user battery input via terminal.")
         print("Available battery files:")
         battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
 
@@ -134,19 +134,22 @@ class TelemetryApplication:
             print(f"{i}. {filename}")
         print(f"{len(battery_files) + 1}. Enter battery information manually")
 
-        # Terminal input logic remains unchanged
         try:
             choice = int(input("Select an option by number: "))
         except ValueError:
-            logging.error("Invalid input for battery file selection.")
+            self.logger.error("Invalid input for battery file selection.")
             print("Invalid input. Please enter a number.")
             return self.get_user_battery_input()
 
         if 1 <= choice <= len(battery_files):
             file_path = battery_files[choice - 1]
             return self.load_battery_info_from_file(file_path)
-        else:
+        elif choice == len(battery_files) + 1:
             return self.manual_battery_input()
+        else:
+            self.logger.error("Invalid choice. Please try again.")
+            print("Invalid choice. Please try again.")
+            return self.get_user_battery_input()
 
     def manual_battery_input(self):
         """
