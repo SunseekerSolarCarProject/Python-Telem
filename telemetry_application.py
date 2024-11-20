@@ -2,7 +2,6 @@
 
 import sys
 import time
-import csv
 import os
 import logging
 import threading
@@ -17,7 +16,7 @@ from data_display import DataDisplay
 from buffer_data import BufferData
 from custom_logger import CustomLogger
 from extra_calculations import ExtraCalculations
-from gui_display import TelemetryGUI
+from gui_display import TelemetryGUI, ConfigDialog
 from csv_handler import CSVHandler
 
 # Updated units and key descriptions
@@ -68,20 +67,22 @@ class ApplicationWorker(QObject):
 
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
-        # Initialize the custom logger
-        self.logger = logging.getLogger(__name__)
-        #self.logger = CustomLogger(level=log_level)
-
-        #initialize attributes
-        self.battery_info = None
-        self.logging_enabled = True  # Default logging state
         self.baudrate = baudrate
+        self.app = app  # Store the QApplication instance
+        self.battery_info = None
+        self.port = None
+        self.logging_level = log_level
+
+        # Initialize the custom logger
+        self.custom_logger = CustomLogger(level=self.logging_level)
+        self.logger = logging.getLogger(__name__)
+
+        # Initialize other attributes
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
         self.extra_calculations = ExtraCalculations()
         self.Data_Display = DataDisplay(units)
         self.csv_handler = CSVHandler()
-
         self.csv_headers = self.csv_handler.generate_csv_headers()
         self.secondary_csv_headers = ["timestamp", "raw_data"]
         self.csv_file = "telemetry_data.csv"
@@ -98,17 +99,6 @@ class TelemetryApplication:
 
         self.csv_handler.setup_csv(self.csv_file, self.csv_headers)
         self.csv_handler.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
-
-        # Initialize GUI components
-        self.app = app  # Store the QApplication instance
-        # Define data keys to be plotted (excluding SWC and motor controller data)
-        self.gui = TelemetryGUI(data_keys=[])
-
-        # Hook GUI battery info signal (assuming you add a signal to the GUI for battery info)
-        self.gui.battery_info_signal.connect(self.set_battery_info)
-
-        # Get battery info
-        self.battery_info = self.get_user_battery_input()
 
     def set_battery_info(self, battery_info):
         """
@@ -214,26 +204,6 @@ class TelemetryApplication:
         """
         self.logger.toggle_logging_level(level)
 
-    def listen_for_commands(self):
-        while True:
-            try:
-                command = input()
-                if command.startswith("set_log_level"):
-                    parts = command.split()
-                    if len(parts) != 2:
-                        print("Usage: set_log_level [DEBUG|INFO|WARNING|ERROR|CRITICAL]")
-                        continue
-                    _, level_str = parts
-                    if level_str.upper() not in logging._nameToLevel:
-                        print("Invalid logging level. Valid levels are: DEBUG, INFO, WARNING, ERROR, CRITICAL.")
-                        continue
-                    level = logging._nameToLevel[level_str.upper()]
-                    self.toggle_logging_level(level)
-                    print(f"Logging level changed to {level_str.upper()}")
-            except Exception as e:
-                logging.error(f"Error in listen_for_commands: {e}")
-                break
-
     def select_port(self):
         ports = list(serial.tools.list_ports.comports())
         if not ports:
@@ -254,71 +224,64 @@ class TelemetryApplication:
             return None
 
     def start(self):
-        # Start the application logic in a separate thread
-        self.worker = ApplicationWorker(self)
-        self.thread = QThread()
-        self.worker.moveToThread(self.thread)
-        self.thread.started.connect(self.worker.run)
-        self.worker.finished.connect(self.thread.quit)
-        self.thread.start()
-
-        # Show the GUI
-        self.gui.show()
-        # No need to call app.exec() here; it's called in main.py
+        # Run the application logic directly
+        self.run_application()
 
     def run_application(self):
-        """
-        Main application logic for running telemetry data collection and processing.
-        """
-        # Wait for and retrieve battery information from GUI or fallback to terminal input
-        if self.gui.battery_info:
-            self.battery_info = self.gui.battery_info
-            self.logger.info("Using battery configuration provided by GUI.")
+         # Show configuration dialog
+        config_dialog = ConfigDialog()
+        if config_dialog.exec():
+            # User clicked OK
+            self.battery_info = config_dialog.battery_info
+            self.port = config_dialog.selected_port
+            self.logging_level = config_dialog.logging_level
+            # Set logging level
+            self.custom_logger.toggle_logging_level(self.logging_level)
+            self.logger.info(f"Logging level set to {logging.getLevelName(self.logging_level)}")
         else:
-            self.battery_info = self.get_user_battery_input()
-        if not self.battery_info:
-            logging.error("No valid battery information provided. Exiting.")
-            return
-        
-        #select serial port
-        port = self.select_port()
-        if not port:
-            logging.error("No valid port selected. Exiting.")
-            print("Invalid port selection.")
+            # User canceled
+            self.logger.error("Configuration canceled by user. Exiting.")
             return
 
+        if not self.battery_info:
+            self.logger.error("No valid battery information provided. Exiting.")
+            return
+
+        if not self.port:
+            self.logger.error("No valid port selected. Exiting.")
+            return
+
+        # Now initialize GUI
+        self.gui = TelemetryGUI(data_keys=[])
+        # Show the GUI
+        self.gui.show()
+
+        # Proceed with the rest of the application
         try:
             self.serial_reader_thread = SerialReaderThread(
-                port,
+                self.port,
                 self.baudrate,
                 process_data_callback=self.process_data,
                 process_raw_data_callback=self.process_raw_data
             )
             self.serial_reader_thread.start()
-            logging.info(f"Telemetry application started on {port}.")
-            print(f"Telemetry application started on {port}.")
+            self.logger.info(f"Telemetry application started on {self.port}.")
+            print(f"Telemetry application started on {self.port}.")
         except Exception as e:
-            logging.error(f"Failed to start serial reader thread: {e}")
+            self.logger.error(f"Failed to start serial reader thread: {e}")
             print(f"Failed to start serial reader thread: {e}")
             return
 
-        # Start the command listener thread
-        command_thread = threading.Thread(target=self.listen_for_commands, daemon=True)
-        command_thread.start()
+        # Connect to the application's aboutToQuit signal for cleanup
+        QApplication.instance().aboutToQuit.connect(self.cleanup)
 
-        try:
-            while True:
-                time.sleep(0.05)
-        except KeyboardInterrupt:
-            logging.info("KeyboardInterrupt received. Shutting down.")
-            print("Shutting down.")
-        finally:
-            if self.serial_reader_thread:
-                self.serial_reader_thread.stop()
-                self.serial_reader_thread.join()
-            self.finalize_csv()
-            logging.info("Application stopped.")
-            print("Application stopped.")
+    def cleanup(self):
+        if self.serial_reader_thread:
+            self.serial_reader_thread.stop()
+            self.serial_reader_thread.join()
+        self.finalize_csv()
+        self.logger.info("Application stopped.")
+        print("Application stopped.")
 
     def process_data(self, data):
         """
@@ -326,8 +289,7 @@ class TelemetryApplication:
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        if self.logging_enabled:  # Check if logging is enabled
-            logging.debug(f"Raw data received: {data}")
+        self.logger.debug(f"Raw data received: {data}")
 
         if data.startswith("TL_TIM"):
             # Extract device timestamp from TL_TIM data
@@ -335,17 +297,14 @@ class TelemetryApplication:
                 device_timestamp = data.split(",")[1].strip()
                 # Update the buffer with the device timestamp
                 self.buffer.add_data({'device_timestamp': device_timestamp})
-                if self.logging_enabled:
-                    logging.debug(f"Device timestamp updated: {device_timestamp}")
+                self.logger.debug(f"Device timestamp updated: {device_timestamp}")
             except IndexError as e:
-                if self.logging_enabled:
-                    logging.error(f"Error parsing device timestamp: {data}, Exception: {e}")
+                self.logger.error(f"Error parsing device timestamp: {data}, Exception: {e}")
             return
 
         # Parse other telemetry data
         processed_data = self.data_processor.parse_data(data)
-        if self.logging_enabled:
-            logging.debug(f"Processed data: {processed_data}")
+        self.logger.debug(f"Processed data: {processed_data}")
 
         if processed_data:
             # Add timestamps
@@ -354,23 +313,20 @@ class TelemetryApplication:
             # Add data to the buffer and check if it's ready to flush
             try:
                 ready_to_flush = self.buffer.add_data(processed_data)
-                if self.logging_enabled:
-                    logging.debug(f"Data added to buffer: {processed_data}")
+                self.logger.debug(f"Data added to buffer: {processed_data}")
                 if ready_to_flush:
                     combined_data = self.buffer.flush_buffer(
                         filename=self.csv_file,
                         battery_info=self.battery_info,
                         used_ah=self.used_Ah
                     )
-                    if self.logging_enabled:
-                        logging.debug(f"Combined data after flush: {combined_data}")
+                    self.logger.debug(f"Combined data after flush: {combined_data}")
                     if combined_data:
                         self.display_data(combined_data)
                         # Emit signal to update GUI
                         self.gui.update_data_signal.emit(combined_data)
             except Exception as e:
-                if self.logging_enabled:
-                    logging.error(f"Error processing data: {processed_data}, Exception: {e}")
+                self.logger.error(f"Error processing data: {processed_data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
         """
@@ -380,21 +336,23 @@ class TelemetryApplication:
         raw_data_entry = {"timestamp": timestamp, "raw_data": raw_data}
         try:
             self.buffer.add_raw_data(raw_data_entry, self.secondary_csv_file)
-            logging.debug(f"Raw data added to buffer: {raw_data_entry}")
+            self.logger.debug(f"Raw data added to buffer: {raw_data_entry}")
         except Exception as e:
-            logging.error(f"Error processing raw data: {raw_data_entry}, Exception: {e}")
+            self.logger.error(f"Error processing raw data: {raw_data_entry}, Exception: {e}")
+
 
     def display_data(self, combined_data):
         """
         Delegates data display to the DataDisplay class.
         """
         try:
-            logging.debug(f"Combined data to display: {combined_data}")
+            self.logger.debug(f"Combined data to display: {combined_data}")
             display_output = self.Data_Display.display(combined_data)
             print(display_output)
-            logging.debug("Data displayed successfully.")
+            self.logger.debug("Data displayed successfully.")
         except Exception as e:
-            logging.error(f"Error displaying data: {combined_data}, Exception: {e}")
+            self.logger.error(f"Error displaying data: {combined_data}, Exception: {e}")
+
 
     def finalize_csv(self):
         """
