@@ -60,7 +60,8 @@ class ExtraCalculations:
             self.logger.error(f"Error calculating remaining capacity (Ah): {e}")
             return 0.0
 
-    def calculate_remaining_time(self, remaining_Ah, current):
+    def calculate_remaining_time_hours(self, remaining_Ah, current):
+        #deals with Ah over A to get hours back
         try:
             if current is None or current == 0 or remaining_Ah is None:
                 self.logger.warning("Incomplete data for remaining time calculation.")
@@ -72,7 +73,7 @@ class ExtraCalculations:
             self.logger.error(f"Error calculating remaining time: {e}")
             return float('inf')
 
-    def calculate_remaining_time_from_ah(self, remaining_ah, consumption_rate_ah):
+    def calculate_remaining_time_from_ah_hours(self, remaining_ah, consumption_rate_ah):
         try:
             if consumption_rate_ah is None or consumption_rate_ah <= 0:
                 self.logger.warning("Consumption rate (Ah) is invalid for remaining time calculation.")
@@ -98,3 +99,20 @@ class ExtraCalculations:
         except Exception as e:
             self.logger.error(f"Error calculating watt-hours: {e}")
             return 0.0
+
+    def calculate_exact_time(self, hours_float):
+        """
+        Converts a float value of hours to a string in hh:mm:ss format.
+        Args:
+        hours_float (float): Time in hours as a float.
+    
+        Returns:
+        str: Time in hh:mm:ss format.
+        """
+        # Extract hours, minutes, and seconds
+        hours = int(hours_float)  # Get the integer part as hours
+        minutes = int((hours_float - hours) * 60)  # Extract minutes
+        seconds = int(((hours_float - hours) * 60 - minutes) * 60)  # Extract seconds
+    
+        # Format the result as hh:mm:ss
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
