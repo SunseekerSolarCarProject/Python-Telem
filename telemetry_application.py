@@ -1,5 +1,6 @@
 # telemetry_application.py
 
+import sys
 import time
 import csv
 import os
@@ -8,17 +9,20 @@ import threading
 import serial
 import serial.tools.list_ports
 from datetime import datetime
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QThread, QObject, pyqtSignal
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
 from custom_logger import CustomLogger
 from extra_calculations import ExtraCalculations
+from gui_display import TelemetryGUI
 
 # Updated units and key descriptions
 units = {
     'DC_DRV_Motor_Velocity_setpoint': '#',
-    'DC_DRV_Motor_Currrent_setpoint': '#',
+    'DC_DRV_Motor_Current_setpoint': '#',
     'DC_SWC_Position': ' ',
     'DC_SWC_Value': '#',
     'MC1BUS_Voltage': 'V',
@@ -50,8 +54,19 @@ units = {
     'device_timestamp': 'hh:mm:ss'
 }
 
+class ApplicationWorker(QObject):
+    finished = pyqtSignal()
+
+    def __init__(self, app_instance):
+        super().__init__()
+        self.app_instance = app_instance
+
+    def run(self):
+        self.app_instance.run_application()
+        self.finished.emit()
+
 class TelemetryApplication:
-    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO):
+    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
         # Initialize the custom logger
         self.logger = CustomLogger(level=log_level)
         self.logging_enabled = True  # Default logging state
@@ -76,6 +91,11 @@ class TelemetryApplication:
 
         self.setup_csv(self.csv_file, self.csv_headers)
         self.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
+
+        # Initialize GUI components
+        self.app = app  # Store the QApplication instance
+        # Define data keys to be plotted (excluding SWC and motor controller data)
+        self.gui = TelemetryGUI(data_keys=[])
 
     def get_user_battery_input(self):
         """
@@ -237,6 +257,19 @@ class TelemetryApplication:
             return None
 
     def start(self):
+        # Start the application logic in a separate thread
+        self.worker = ApplicationWorker(self)
+        self.thread = QThread()
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread.quit)
+        self.thread.start()
+
+        # Show the GUI
+        self.gui.show()
+        # No need to call app.exec() here; it's called in main.py
+
+    def run_application(self):
         port = self.select_port()
         if not port:
             logging.error("No valid port selected. Exiting.")
@@ -257,7 +290,7 @@ class TelemetryApplication:
             logging.error(f"Failed to start serial reader thread: {e}")
             print(f"Failed to start serial reader thread: {e}")
             return
-        
+
         # Start the command listener thread
         command_thread = threading.Thread(target=self.listen_for_commands, daemon=True)
         command_thread.start()
@@ -322,6 +355,8 @@ class TelemetryApplication:
                         logging.debug(f"Combined data after flush: {combined_data}")
                     if combined_data:
                         self.display_data(combined_data)
+                        # Emit signal to update GUI
+                        self.gui.update_data_signal.emit(combined_data)
             except Exception as e:
                 if self.logging_enabled:
                     logging.error(f"Error processing data: {processed_data}, Exception: {e}")
@@ -361,4 +396,3 @@ class TelemetryApplication:
         except Exception as e:
             logging.error(f"Error finalizing CSV file: {e}")
             print(f"Error saving data to {custom_filename}: {e}")
-

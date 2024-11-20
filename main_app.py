@@ -1,8 +1,10 @@
-# main.py
+# main_app.py
 
+import sys
 import logging
 import argparse
 from telemetry_application import TelemetryApplication
+from PyQt6.QtWidgets import QApplication
 
 def main():
     #current baudrate for faster data processing is 115200 if needed.
@@ -14,8 +16,18 @@ def main():
     # Map string log level to logging module levels
     log_level = getattr(logging, args.loglevel.upper(), logging.INFO)
 
-    app = TelemetryApplication(baudrate=args.baudrate, log_level=log_level)
-    app.start()
+    # Create QApplication in the main thread
+    app = QApplication(sys.argv)
+
+    telemetry_app = TelemetryApplication(
+        baudrate=args.baudrate,
+        log_level=log_level,
+        app=app  # Pass the QApplication instance
+    )
+    telemetry_app.start()
+
+    # Run the PyQt6 application in the main thread
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
