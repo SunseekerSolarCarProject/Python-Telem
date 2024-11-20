@@ -52,15 +52,14 @@ class TelemetryGUI(QWidget):
             ],
             'Battery Pack Part 1': [
                 'BP_PVS_Voltage',
-                'BP_PVS_Ah',
                 'BP_PVS_milliamp/s',
-                'BP_PVS_Ah'
+                'BP_PVS_Ah',
                 # Add other battery-related data keys
             ],
             'Battery Pack Part 2':[
                 'BP_VMX_Voltage',
                 'BP_VMN_Voltage',
-                'Bp_TMX_Temperature',
+                'BP_TMX_Temperature',
             ],
             'Battery Remaining Capacity':[
                 'BP_ISH_SOC',
