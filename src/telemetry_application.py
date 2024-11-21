@@ -85,6 +85,7 @@ class TelemetryApplication:
         self.csv_file = self.csv_handler.get_csv_file_path()
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
         self.used_Ah = 0.0
+        self.gui_display = TelemetryGUI(self.logger, self.csv_handler)
 
         # Initialize BufferData with the existing CSVHandler
         self.buffer = BufferData(
@@ -322,6 +323,24 @@ class TelemetryApplication:
             self.logger.debug("Data displayed successfully.")
         except Exception as e:
             self.logger.error(f"Error displaying data: {combined_data}, Exception: {e}")
+
+    def update_com_and_baud(self, port, baudrate):
+        """
+        Reconfigures the serial reader with the new COM port and baud rate.
+        """
+        if self.serial_reader_thread:
+            self.serial_reader_thread.stop()
+            self.serial_reader_thread.join()  # Ensure the thread has stopped
+
+        # Create and start a new thread with the updated settings
+        self.serial_reader_thread = SerialReaderThread(
+            port,
+            baudrate,
+            process_data_callback=self.process_data,
+            process_raw_data_callback=self.process_raw_data
+        )
+        self.serial_reader_thread.start()
+        self.logger.info(f"Serial reader reconfigured with COM port: {port}, Baud rate: {baudrate}")
 
     def finalize_csv(self):
         """

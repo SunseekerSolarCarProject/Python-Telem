@@ -6,40 +6,59 @@ import threading
 import logging
 
 class CSVHandler:
-    def __init__(self, default_directory='csv_data'):
+    def __init__(self, root_directory='.'):
         """
-        Initializes the CSVHandler with a default save directory.
+        Initializes the CSVHandler with a root directory for default files.
         """
         self.lock = threading.Lock()
-        self.default_directory = default_directory
-        self.ensure_directory_exists(self.default_directory)
-        self.current_csv_file = os.path.join(self.default_directory, "telemetry_data.csv")
-        self.secondary_csv_file = os.path.join(self.default_directory, "raw_hex_data.csv")
+        self.root_directory = os.path.abspath(root_directory)
+        self.ensure_directory_exists(self.root_directory)
+        self.current_csv_file = os.path.join(self.root_directory, "telemetry_data.csv")
+        self.secondary_csv_file = os.path.join(self.root_directory, "raw_hex_data.csv")
         self.logger = logging.getLogger(__name__)
+        
+        # Ensure the default CSV files exist
+        self.setup_csv(self.current_csv_file, self.generate_csv_headers())
+        self.setup_csv(self.secondary_csv_file, ["timestamp", "raw_data"])
 
     def ensure_directory_exists(self, directory):
         """
-        Ensures that the specified directory exists; creates it if it doesn't.
+        Ensures the specified directory exists; creates it if it doesn't.
         """
         if not os.path.exists(directory):
             os.makedirs(directory)
-            self.logger.info(f"Created directory for CSV files: {directory}")
+            self.logger.info(f"Created directory: {directory}")
 
     def setup_csv(self, csv_file, headers):
         """
-        Sets up the CSV file with headers if it doesn't exist.
-
-        :param csv_file: Path to the CSV file.
-        :param headers: List of header strings.
+        Sets up a CSV file with headers if it doesn't exist.
         """
-        if not os.path.exists(csv_file):
+        with self.lock:
+            if not os.path.exists(csv_file):
+                try:
+                    with open(csv_file, 'w', newline='') as file:
+                        writer = csv.DictWriter(file, fieldnames=headers)
+                        writer.writeheader()
+                    self.logger.info(f"CSV file created: {csv_file}")
+                except Exception as e:
+                    self.logger.error(f"Error setting up CSV file {csv_file}: {e}")
+
+    def append_to_csv(self, csv_file, data):
+        """
+        Appends a row of data to the specified CSV file.
+        """
+        with self.lock:
             try:
-                with open(csv_file, 'w', newline='') as file:
-                    writer = csv.DictWriter(file, fieldnames=headers)
-                    writer.writeheader()
-                self.logger.info(f"CSV file created with headers: {csv_file}")
+                if not os.path.exists(csv_file):
+                    self.logger.warning(f"CSV file {csv_file} does not exist. Setting up with inferred headers.")
+                    self.setup_csv(csv_file, data.keys())
+                
+                with open(csv_file, 'a', newline='') as file:
+                    writer = csv.DictWriter(file, fieldnames=data.keys())
+                    writer.writerow(data)
+                self.logger.debug(f"Appended data to {csv_file}: {data}")
             except Exception as e:
-                self.logger.error(f"Error setting up CSV file {csv_file}: {e}")
+                self.logger.error(f"Error appending to CSV {csv_file}: {e}")
 
     def set_csv_save_directory(self, directory):
         """
@@ -49,9 +68,18 @@ class CSVHandler:
         """
         self.ensure_directory_exists(directory)
         self.default_directory = directory
-        self.current_csv_file = os.path.join(self.default_directory, "telemetry_data.csv")
-        self.secondary_csv_file = os.path.join(self.default_directory, "raw_hex_data.csv")
-        self.logger.info(f"CSV save directory set to: {directory}")
+        self.change_csv_file_name("telemetry_data.csv", True)
+        self.change_csv_file_name("raw_hex_data.csv", False)
+
+    def change_csv_file_name(self, new_filename, is_primary):
+        file_path = os.path.join(self.default_directory, new_filename)
+        headers = self.generate_csv_headers() if is_primary else ["timestamp", "raw_data"]
+        self.setup_csv(file_path, headers)
+        if is_primary:
+            self.current_csv_file = file_path
+        else:
+            self.secondary_csv_file = file_path
+        self.logger.info(f"CSV file path updated: {file_path}")
 
     def get_csv_file_path(self):
         """
@@ -64,38 +92,6 @@ class CSVHandler:
         Returns the current secondary CSV file path.
         """
         return self.secondary_csv_file
-
-    def append_to_csv(self, csv_file, data):
-        """
-        Appends a single row of data to the specified CSV file without rewriting headers.
-
-        :param csv_file: Path to the CSV file.
-        :param data: Dictionary containing the data to append.
-        """
-        with self.lock:
-            try:
-                if not isinstance(data, dict):
-                    self.logger.error(f"Data to append is not a dict: {data} (type: {type(data)})")
-                    return  # Early exit to prevent further errors
-
-                # Determine fieldnames from existing headers
-                if os.path.exists(csv_file):
-                    with open(csv_file, 'r', newline='') as read_file:
-                        reader = csv.DictReader(read_file)
-                        fieldnames = reader.fieldnames
-                else:
-                    # If file doesn't exist, use keys from data
-                    fieldnames = data.keys()
-                    self.logger.warning(f"CSV file {csv_file} does not exist. Using data keys as headers.")
-
-                with open(csv_file, 'a', newline='') as file:
-                    writer = csv.DictWriter(file, fieldnames=fieldnames)
-                    # Ensure all keys in data match the fieldnames
-                    row = {key: data.get(key, "") for key in fieldnames}
-                    writer.writerow(row)
-                self.logger.debug(f"Data appended to CSV: {csv_file}, Data: {row}")
-            except Exception as e:
-                self.logger.error(f"Error appending to CSV {csv_file}: {e}")
 
     def finalize_csv(self, original_csv, new_csv_path):
         """
