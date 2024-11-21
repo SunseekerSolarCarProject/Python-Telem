@@ -1,38 +1,263 @@
 # gui_display.py
 
-import sys
 import os
 import logging
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QSizePolicy,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
-    QColorDialog, QComboBox, QLabel, QInputDialog, QDialog, QDialogButtonBox
+    QColorDialog, QComboBox, QLabel, QInputDialog, QDialog, QDialogButtonBox,
+    QFormLayout, QLineEdit, QSpinBox, QMessageBox, QHBoxLayout, QFileDialog
 )
 from PyQt6.QtCore import pyqtSignal
 import pyqtgraph as pg
-import serial.tools.list_ports
-from extra_calculations import ExtraCalculations
+import serial.tools.list_ports  # Required for listing serial ports
+from extra_calculations import ExtraCalculations  # Ensure this module exists
+
+class ConfigDialog(QDialog):
+    """
+    A dialog for configuring battery settings, selecting the serial port,
+    and setting the logging level. Emits a signal with the configuration data upon acceptance.
+    """
+    # Signal to emit configuration data
+    config_data_signal = pyqtSignal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configuration")
+        self.setModal(True)
+        self.logger = logging.getLogger(__name__)
+
+        self.battery_info = None
+        self.selected_port = None
+        self.logging_level = logging.INFO  # Default logging level
+
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QFormLayout(self)
+
+        # Dropdown for selecting battery configuration file or manual input
+        self.config_dropdown = QComboBox()
+        self.populate_config_dropdown()
+        layout.addRow("Battery Configuration:", self.config_dropdown)
+
+        # Button to load selected configuration
+        load_button = QPushButton("Load Configuration")
+        load_button.clicked.connect(self.load_configuration)
+        layout.addRow(load_button)
+
+        # Dropdown for selecting COM port
+        self.port_dropdown = QComboBox()
+        self.populate_port_dropdown()
+        layout.addRow("Select COM Port:", self.port_dropdown)
+
+        # Dropdown for selecting Logging Level
+        self.log_level_dropdown = QComboBox()
+        logging_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        self.log_level_dropdown.addItems(logging_levels)
+        self.log_level_dropdown.setCurrentText('INFO')  # Default level
+        layout.addRow("Logging Level:", self.log_level_dropdown)
+
+        # Dialog Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def populate_config_dropdown(self):
+        """
+        Populate the dropdown menu with available battery configuration files and 'Manual Input'.
+        """
+        config_dir = "config_files"  # Directory where .txt config files are stored
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir)
+            self.logger.info(f"Created configuration directory: {config_dir}")
+
+        config_files = [f for f in os.listdir(config_dir) if f.endswith('.txt')]
+        self.config_dropdown.addItems(config_files)
+        self.config_dropdown.addItem("Manual Input")
+
+    def populate_port_dropdown(self):
+        """
+        Populate the COM port dropdown with available serial ports.
+        """
+        ports = serial.tools.list_ports.comports()
+        port_list = [port.device for port in ports]
+        if not port_list:
+            port_list = ["No COM ports available"]
+        self.port_dropdown.addItems(port_list)
+
+    def load_configuration(self):
+        """
+        Load the selected configuration file or prompt for manual input.
+        """
+        selected = self.config_dropdown.currentText()
+        config_dir = "config_files"
+        if selected == "Manual Input":
+            self.manual_battery_input()
+        else:
+            file_path = os.path.join(config_dir, selected)
+            self.load_battery_info_from_file(file_path)
+
+    def manual_battery_input(self):
+        """
+        Prompt the user to manually input battery information.
+        """
+        try:
+            capacity_ah, ok1 = QInputDialog.getDouble(
+                self, 
+                "Battery Capacity", 
+                "Battery capacity (Amps Hours):", 
+                decimals=2
+            )
+            if not ok1:
+                raise ValueError("Battery capacity input canceled.")
+
+            voltage, ok2 = QInputDialog.getDouble(
+                self, 
+                "Battery Voltage", 
+                "Battery nominal voltage (V):", 
+                decimals=2
+            )
+            if not ok2:
+                raise ValueError("Battery voltage input canceled.")
+
+            quantity, ok3 = QInputDialog.getInt(
+                self, 
+                "Number of Cells", 
+                "Amount of battery cells:", 
+                min=1
+            )
+            if not ok3:
+                raise ValueError("Number of battery cells input canceled.")
+
+            series_strings, ok4 = QInputDialog.getInt(
+                self, 
+                "Series Strings", 
+                "Number of battery strings:", 
+                min=1
+            )
+            if not ok4:
+                raise ValueError("Number of battery strings input canceled.")
+
+            self.battery_info = {
+                "capacity_ah": capacity_ah,
+                "voltage": voltage,
+                "quantity": quantity,
+                "series_strings": series_strings
+            }
+            self.logger.info(f"Manual battery input: {self.battery_info}")
+            self.emit_config_data()
+            QMessageBox.information(self, "Success", "Battery configuration set manually.")
+            self.accept()
+
+        except ValueError as e:
+            QMessageBox.warning(self, "Input Canceled", str(e))
+            self.logger.warning(str(e))
+
+    def load_battery_info_from_file(self, file_path):
+        """
+        Load battery information from a text file.
+        """
+        try:
+            battery_data = {}
+            with open(file_path, 'r') as file:
+                for line in file:
+                    if ', ' in line:
+                        key, value = line.strip().split(", ", 1)
+                        key = key.lower()
+                        if key.startswith("battery capacity amps hours"):
+                            battery_data["capacity_ah"] = float(value)
+                        elif key.startswith("battery nominal voltage"):
+                            battery_data["voltage"] = float(value)
+                        elif key.startswith("amount of battery cells"):
+                            battery_data["quantity"] = int(value)
+                        elif key.startswith("number of battery strings"):
+                            battery_data["series_strings"] = int(value)
+            # Check if all required keys are present
+            required_keys = ["capacity_ah", "voltage", "quantity", "series_strings"]
+            if all(k in battery_data for k in required_keys):
+                self.battery_info = battery_data
+                self.logger.info(f"Loaded battery configuration from {file_path}: {self.battery_info}")
+                self.emit_config_data()
+                QMessageBox.information(self, "Success", f"Battery configuration loaded from {os.path.basename(file_path)}.")
+                self.accept()
+            else:
+                raise ValueError("Incomplete battery configuration in the file.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load configuration: {e}")
+            self.logger.error(f"Failed to load battery configuration from {file_path}: {e}")
+
+    def emit_config_data(self):
+        """
+        Emit the configuration data signal with battery info, selected COM port, and logging level.
+        """
+        selected_port = self.port_dropdown.currentText()
+        log_level_str = self.log_level_dropdown.currentText()
+        log_level = getattr(logging, log_level_str.upper(), logging.INFO)
+
+        if selected_port == "No COM ports available":
+            selected_port = None
+            QMessageBox.warning(self, "Warning", "No COM ports available. Please connect a device or select a valid port.")
+            self.logger.warning("No COM ports available.")
+
+        config_data = {
+            "battery_info": self.battery_info,
+            "selected_port": selected_port,
+            "logging_level": log_level
+        }
+        self.config_data_signal.emit(config_data)
+
+    def accept(self):
+        """
+        Override the accept method to ensure configuration data is emitted before closing.
+        """
+        if self.battery_info:
+            self.emit_config_data()
+            super().accept()
+        else:
+            QMessageBox.warning(self, "Incomplete Configuration", "Please load or input the battery configuration before proceeding.")
+            self.logger.warning("Attempted to accept configuration without battery info.")
 
 class TelemetryGUI(QWidget):
-    # Define a signal to update the plots with new data
+    # Define signals
     update_data_signal = pyqtSignal(dict)
     battery_info_signal = pyqtSignal(dict)
+    save_csv_signal = pyqtSignal()  # Signal for saving CSV
+    change_log_level_signal = pyqtSignal(str)  # Signal for changing log level
 
-    def __init__(self, data_keys):
+    # gui_display.py
+
+class TelemetryGUI(QWidget):
+    # Define signals
+    update_data_signal = pyqtSignal(dict)
+    battery_info_signal = pyqtSignal(dict)
+    save_csv_signal = pyqtSignal()  # Signal for saving CSV
+    change_log_level_signal = pyqtSignal(str)  # Signal for changing log level
+
+    def __init__(self, data_keys, csv_handler):
         super().__init__()
         self.data_keys = data_keys
+        self.csv_handler = csv_handler  # Store the CSVHandler instance
         self.battery_info = None
+
+        # Obtain a logger for this module
         self.logger = logging.getLogger(__name__)
+
         self.logger.info("Initializing TelemetryGUI.")
         self.max_data_points = 361  # Maximum number of data points to display
         self.non_float_keys = [
             'DC_SWC_Position', 'DC_SWC_Value', 
             'device_timestamp', 'timestamp'
-            ]
+        ]
         self.init_ui()
         # Connect the signal to the update method
         self.update_data_signal.connect(self.update_plots)
+        # Connect the log level change signal
+        self.change_log_level_signal.connect(self.change_log_level_from_settings)
 
     def init_ui(self):
         self.logger.debug("Setting up GUI layout and plots with tabs.")
@@ -41,9 +266,6 @@ class TelemetryGUI(QWidget):
         # Create main layout and tabs
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
-
-        # Add battery configuration dropdown
-        self.create_battery_config_dropdown()
 
         self.tabs = QTabWidget()
         self.layout.addWidget(self.tabs)
@@ -125,7 +347,12 @@ class TelemetryGUI(QWidget):
                 'Shunt_Remaining_Time',
                 'Used_Ah_Remaining_Time',
             ],
-            # Add more tabs as needed
+            'Settings': [  # New Settings tab
+                # Placeholder for settings controls
+            ],
+            'CSV Management': [  # New CSV Management tab
+                # Placeholder for CSV management controls
+            ]
         }
 
         # Add LIM subfields and update definitions
@@ -133,116 +360,59 @@ class TelemetryGUI(QWidget):
 
         self.create_plot_tabs()
         self.create_data_table_tab()
+        self.create_settings_tab()
+        self.create_csv_management_tab()
 
-    def create_battery_config_dropdown(self):
+    def create_settings_tab(self):
         """
-        Creates a dropdown menu for selecting battery configurations.
+        Creates the Settings tab for adjusting logging levels.
         """
-        label = QLabel("Select Battery Configuration:")
-        self.layout.addWidget(label)
+        settings_tab = QWidget()
+        settings_layout = QVBoxLayout()
+        settings_tab.setLayout(settings_layout)
+        self.tabs.addTab(settings_tab, 'Settings')
 
-        self.battery_dropdown = QComboBox()
-        self.layout.addWidget(self.battery_dropdown)
+        # Logging Level Controls
+        log_level_label = QLabel("Select Logging Level:")
+        settings_layout.addWidget(log_level_label)
 
-        # Populate the dropdown with battery configurations
-        self.populate_battery_dropdown()
+        self.settings_log_level_dropdown = QComboBox()
+        logging_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        self.settings_log_level_dropdown.addItems(logging_levels)
+        self.settings_log_level_dropdown.setCurrentText('INFO')  # Default level
+        self.settings_log_level_dropdown.currentTextChanged.connect(self.change_log_level_from_settings)
+        settings_layout.addWidget(self.settings_log_level_dropdown)
 
-        # Add a button to confirm selection
-        confirm_button = QPushButton("Load Battery Configuration")
-        confirm_button.clicked.connect(self.load_selected_battery_config)
-        self.layout.addWidget(confirm_button)
+        # Optional: Add more settings in the future
 
-    def populate_battery_dropdown(self):
+    def create_csv_management_tab(self):
         """
-        Populate the dropdown menu with available battery files and a manual input option.
+        Creates the CSV Management tab for handling CSV data.
         """
-        battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
-        self.battery_dropdown.addItems(battery_files)
-        self.battery_dropdown.addItem("Manual Input")
+        csv_tab = QWidget()
+        csv_layout = QVBoxLayout()
+        csv_tab.setLayout(csv_layout)
+        self.tabs.addTab(csv_tab, 'CSV Management')
 
-    def manual_battery_input(self):
-        """
-        Prompt the user to manually input battery information.
-        """
-        try:
-            capacity_ah, ok1 = QInputDialog.getDouble(self, "Battery Capacity", "Capacity (Ah) per cell:", 0, 0)
-            voltage, ok2 = QInputDialog.getDouble(self, "Battery Voltage", "Voltage (V) per cell:", 0, 0)
-            quantity, ok3 = QInputDialog.getInt(self, "Cell Count", "Number of cells:", 0, 0)
-            series_strings, ok4 = QInputDialog.getInt(self, "Series Strings", "Number of series strings:", 0, 0)
+        # Display Current CSV File Path
+        self.csv_path_label = QLabel(f"Current CSV File: {self.csv_handler.get_csv_file_path()}")
+        csv_layout.addWidget(self.csv_path_label)
 
-            if all([ok1, ok2, ok3, ok4]):
-                self.battery_info = {
-                    "capacity_ah": capacity_ah,
-                    "voltage": voltage,
-                    "quantity": quantity,
-                    "series_strings": series_strings
-                }
-                self.logger.info(f"Manual battery input: {self.battery_info}")
-            else:
-                self.logger.warning("Battery input cancelled or incomplete.")
-        except Exception as e:
-            self.logger.error(f"Error during manual battery input: {e}")
+        # Button to Save CSV Data
+        save_csv_button = QPushButton("Save CSV Data")
+        save_csv_button.clicked.connect(self.save_csv_data)
+        csv_layout.addWidget(save_csv_button)
 
-    def load_battery_info_from_file(self, file_path):
-        """
-        Load battery information from a text file.
-        """
-        try:
-            battery_data = {}
-            with open(file_path, 'r') as file:
-                for line in file:
-                    key, value = line.strip().split(", ")
-                    battery_data[key] = float(value) if "voltage" in key or "amps" in key else int(value)
-            return battery_data
-        except Exception as e:
-            self.logger.error(f"Error reading battery file {file_path}: {e}")
-            raise
-    
-    def load_selected_battery_config(self):
-        """
-        Load the selected battery configuration or prompt for manual input.
-        """
-        selected = self.battery_dropdown.currentText()
-        if selected == "Manual Input":
-            self.manual_battery_input()
-        else:
-            try:
-                self.battery_info = self.load_battery_info_from_file(selected)
-                self.logger.info(f"Loaded battery configuration: {self.battery_info}")
-            except:
-                self.logger.error("Battery info failed to load")
-        if self.battery_info:
-            self.battery_info_signal.emit(self.battery_info)  # Emit battery info
-    
-    def add_lim_subfields(self):
-        subfields = [
-            'CAN Receive Error Count',
-            'CAN Transmit Error Count',
-            'Active Motor Info',
-            'Errors',
-            'Limits',
-        ]
-        for mc in ['MC1LIM', 'MC2LIM']:
-            # Add the main key to non_float_keys
-            self.non_float_keys.append(mc)
-            for subfield in subfields:
-                key = f"{mc}_{subfield}"
-                self.data_keys_units[key] = ''
-                self.non_float_keys.append(key)
-                if mc == 'MC1LIM':
-                    self.tab_definitions['Motor Controller 1'].append(key)
-                else:
-                    self.tab_definitions['Motor Controller 2'].append(key)
-
-    def change_line_color(self, key):
-        color = QColorDialog.getColor()  # Open a color picker dialog
-        if color.isValid():
-            self.plot_widgets[key]['curve'].setPen(pg.mkPen(color.name(), width=2))
-            self.logger.info(f"Changed line color for {key} to {color.name()}")
+        # Button to Change CSV Save Location
+        change_csv_location_button = QPushButton("Change CSV Save Location")
+        change_csv_location_button.clicked.connect(self.change_csv_save_location)
+        csv_layout.addWidget(change_csv_location_button)
 
     def create_plot_tabs(self):
         self.plot_widgets = {}
         for tab_name, data_keys in self.tab_definitions.items():
+            if tab_name in ['Settings', 'CSV Management']:
+                continue  # Skip adding plots to these tabs
             tab = QWidget()
             tab_layout = QVBoxLayout()
             tab.setLayout(tab_layout)
@@ -300,6 +470,67 @@ class TelemetryGUI(QWidget):
         # Adjust row heights for multi-line text
         self.table_widget.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
+    def add_lim_subfields(self):
+        subfields = [
+            'CAN Receive Error Count',
+            'CAN Transmit Error Count',
+            'Active Motor Info',
+            'Errors',
+            'Limits',
+        ]
+        for mc in ['MC1LIM', 'MC2LIM']:
+            # Add the main key to non_float_keys
+            self.non_float_keys.append(mc)
+            for subfield in subfields:
+                key = f"{mc}_{subfield}"
+                self.data_keys_units[key] = ''
+                self.non_float_keys.append(key)
+                if mc == 'MC1LIM':
+                    self.tab_definitions['Motor Controller 1'].append(key)
+                else:
+                    self.tab_definitions['Motor Controller 2'].append(key)
+
+    def change_line_color(self, key):
+        color = QColorDialog.getColor()  # Open a color picker dialog
+        if color.isValid():
+            self.plot_widgets[key]['curve'].setPen(pg.mkPen(color.name(), width=2))
+            self.logger.info(f"Changed line color for {key} to {color.name()}")
+
+    def change_log_level_from_settings(self, level_str):
+        """
+        Slot to handle logging level changes from the Settings tab.
+        """
+        self.logger.info(f"Logging level changed to: {level_str} from Settings tab.")
+        self.change_log_level_signal.emit(level_str)
+
+    def save_csv_data(self):
+        """
+        Emits the save_csv_signal to trigger CSV finalization in TelemetryApplication.
+        """
+        self.logger.info("Save CSV button clicked in CSV Management tab.")
+        self.save_csv_signal.emit()  # Emit signal to trigger CSV save
+
+    def change_csv_save_location(self):
+        """
+        Allows the user to change the default CSV save directory.
+        """
+        options = QFileDialog.Options()
+        options |= QFileDialog.Option.DontUseNativeDialog
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select CSV Save Directory",
+            "",
+            options=options
+        )
+        if directory:
+            self.csv_handler.set_csv_save_directory(directory)
+            self.csv_path_label.setText(f"Current CSV File: {self.csv_handler.get_csv_file_path()}")
+            self.logger.info(f"CSV save directory changed to: {directory}")
+            QMessageBox.information(self, "Success", f"CSV save directory changed to: {directory}")
+        else:
+            self.logger.warning("CSV save location change canceled by user.")
+            QMessageBox.warning(self, "Canceled", "CSV save location change was canceled.")
+
     def update_plots(self, data):
         self.logger.debug(f"Received data for updating plots: {data}")
         # Update plots
@@ -340,6 +571,9 @@ class TelemetryGUI(QWidget):
     def parse_and_update_lim_data(self, key, lim_data):
         """
         Parses the LIM data dictionary and updates the table entries for each subfield.
+
+        :param key: The main LIM key (e.g., 'MC1LIM').
+        :param lim_data: Dictionary containing LIM subfield data.
         """
         data_dict = {}
         for sub_key, value in lim_data.items():
@@ -362,6 +596,9 @@ class TelemetryGUI(QWidget):
     def add_table_row(self, key, value):
         """
         Adds a new row to the data table for a new key.
+
+        :param key: The key name.
+        :param value: The value associated with the key.
         """
         idx = self.table_widget.rowCount()
         self.table_widget.insertRow(idx)
@@ -374,117 +611,21 @@ class TelemetryGUI(QWidget):
         self.table_rows[key] = idx
         self.logger.debug(f"Added new table row for key: {key}")
 
+    def display_data(self, combined_data):
+        """
+        Delegates data display to the DataDisplay class.
+
+        :param combined_data: Dictionary containing combined telemetry data.
+        """
+        try:
+            self.logger.debug(f"Combined data to display: {combined_data}")
+            display_output = self.Data_Display.display(combined_data)
+            print(display_output)
+            self.logger.debug("Data displayed successfully.")
+        except Exception as e:
+            self.logger.error(f"Error displaying data: {combined_data}, Exception: {e}")
+
     def closeEvent(self, event):
         self.logger.info("GUI window closed by user.")
         # Handle GUI close event if needed
         event.accept()
-
-class ConfigDialog(QDialog):
-    """
-    Configuration dialog for selecting battery configuration, COM port, and logging level.
-    """
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Telemetry Configuration")
-        self.battery_info = None
-        self.selected_port = None
-        self.logging_level = logging.INFO
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        # Battery configuration
-        label_battery = QLabel("Select Battery Configuration:")
-        layout.addWidget(label_battery)
-        self.battery_dropdown = QComboBox()
-        self.populate_battery_dropdown()
-        layout.addWidget(self.battery_dropdown)
-
-        # COM port selection
-        label_port = QLabel("Select COM Port:")
-        layout.addWidget(label_port)
-        self.port_dropdown = QComboBox()
-        self.populate_port_dropdown()
-        layout.addWidget(self.port_dropdown)
-
-        # Logging level selection
-        label_logging = QLabel("Select Logging Level:")
-        layout.addWidget(label_logging)
-        self.logging_dropdown = QComboBox()
-        self.populate_logging_dropdown()
-        layout.addWidget(self.logging_dropdown)
-
-        # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def populate_battery_dropdown(self):
-        battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
-        self.battery_dropdown.addItems(battery_files)
-        self.battery_dropdown.addItem("Manual Input")
-
-    def populate_port_dropdown(self):
-        ports = list(serial.tools.list_ports.comports())
-        port_list = [port.device for port in ports]
-        self.port_dropdown.addItems(port_list)
-
-    def populate_logging_dropdown(self):
-        logging_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-        self.logging_dropdown.addItems(logging_levels)
-        self.logging_dropdown.setCurrentText('INFO')
-
-    def accept(self):
-        # Battery info
-        selected_battery = self.battery_dropdown.currentText()
-        if selected_battery == "Manual Input":
-            self.battery_info = self.manual_battery_input()
-            if not self.battery_info:
-                # User canceled manual input
-                return
-        else:
-            self.battery_info = self.load_battery_info_from_file(selected_battery)
-            if not self.battery_info:
-                # Error loading battery info
-                return
-        # Selected port
-        self.selected_port = self.port_dropdown.currentText()
-        # Logging level
-        self.logging_level = getattr(logging, self.logging_dropdown.currentText())
-        super().accept()
-
-    def manual_battery_input(self):
-        try:
-            capacity_ah, ok1 = QInputDialog.getDouble(self, "Battery Capacity", "Capacity (Ah) per cell:", 0, 0)
-            voltage, ok2 = QInputDialog.getDouble(self, "Battery Voltage", "Voltage (V) per cell:", 0, 0)
-            quantity, ok3 = QInputDialog.getInt(self, "Cell Count", "Number of cells:", 0, 0)
-            series_strings, ok4 = QInputDialog.getInt(self, "Series Strings", "Number of series strings:", 0, 0)
-
-            if all([ok1, ok2, ok3, ok4]):
-                battery_info = {
-                    "capacity_ah": capacity_ah,
-                    "voltage": voltage,
-                    "quantity": quantity,
-                    "series_strings": series_strings
-                }
-                return battery_info
-            else:
-                return None  # User canceled
-        except Exception as e:
-            logging.error(f"Error during manual battery input: {e}")
-            return None
-
-    def load_battery_info_from_file(self, file_path):
-        try:
-            battery_data = {}
-            with open(file_path, 'r') as file:
-                for line in file:
-                    key, value = line.strip().split(", ")
-                    battery_data[key] = float(value) if "voltage" in key or "amps" in key else int(value)
-            return battery_data
-        except Exception as e:
-            logging.error(f"Error reading battery file {file_path}: {e}")
-            return None

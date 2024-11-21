@@ -1,23 +1,22 @@
 # telemetry_application.py
 
 import sys
-import time
 import os
 import logging
 import threading
 import serial
 import serial.tools.list_ports
 from datetime import datetime
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QThread, QObject, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PyQt6.QtCore import QObject, pyqtSignal
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
-from custom_logger import CustomLogger
 from extra_calculations import ExtraCalculations
 from gui_display import TelemetryGUI, ConfigDialog
 from csv_handler import CSVHandler
+from central_logger import CentralLogger  # Import CentralLogger
 
 # Updated units and key descriptions
 units = {
@@ -46,47 +45,48 @@ units = {
     'BP_PVS_Ah': 'Ah',
     'BP_ISH_Amps': 'A',
     'BP_ISH_SOC': '%',
-    'timestamp': 'hh:mm:ss',
+    'Shunt_Remaining_wh': 'Wh',
+    'Used_Ah_Remaining_wh': 'Wh',
     'Shunt_Remaining_Ah': 'Ah',
     'Used_Ah_Remaining_Ah': 'Ah',
     'Shunt_Remaining_Time': 'hours',
     'Used_Ah_Remaining_Time': 'hours',
+    'timestamp': 'hh:mm:ss',
     'device_timestamp': 'hh:mm:ss'
 }
 
-class ApplicationWorker(QObject):
-    finished = pyqtSignal()
-
-    def __init__(self, app_instance):
-        super().__init__()
-        self.app_instance = app_instance
-
-    def run(self):
-        self.app_instance.run_application()
-        self.finished.emit()
-
 class TelemetryApplication:
-    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
+    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
+        """
+        Initializes the TelemetryApplication.
+
+        :param baudrate: Serial communication baud rate.
+        :param buffer_timeout: Time in seconds before the buffer flushes data.
+        :param buffer_size: Number of data points before the buffer flushes.
+        :param log_level: Logging level (e.g., logging.INFO).
+        :param app: QApplication instance.
+        :param central_logger: Instance of CentralLogger.
+        """
         self.baudrate = baudrate
         self.app = app  # Store the QApplication instance
         self.battery_info = None
-        self.port = None
+        self.selected_port = None
         self.logging_level = log_level
+        self.central_logger = central_logger
 
-        # Initialize the custom logger
-        self.custom_logger = CustomLogger(level=self.logging_level)
-        self.logger = logging.getLogger(__name__)
+        # Obtain a logger for this module
+        self.logger = self.central_logger.get_logger(__name__) if self.central_logger else logging.getLogger(__name__)
 
         # Initialize other attributes
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
         self.extra_calculations = ExtraCalculations()
         self.Data_Display = DataDisplay(units)
-        self.csv_handler = CSVHandler()
+        self.csv_handler = CSVHandler()  # Initialized with default directory
         self.csv_headers = self.csv_handler.generate_csv_headers()
         self.secondary_csv_headers = ["timestamp", "raw_data"]
-        self.csv_file = "telemetry_data.csv"
-        self.secondary_csv_file = "raw_hex_data.csv"
+        self.csv_file = self.csv_handler.get_csv_file_path()
+        self.secondary_csv_file = os.path.join(self.csv_handler.default_directory, "raw_hex_data.csv")
         self.used_Ah = 0.0
 
         # Initialize BufferData
@@ -100,182 +100,112 @@ class TelemetryApplication:
         self.csv_handler.setup_csv(self.csv_file, self.csv_headers)
         self.csv_handler.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
 
-    def set_battery_info(self, battery_info):
+    def set_battery_info(self, config_data):
         """
-        Set the battery information passed from the GUI.
+        Sets the battery information received from the GUI and performs necessary calculations.
+
+        :param config_data: Dictionary containing battery configuration details.
         """
-        self.battery_info = battery_info
-        self.logger.info(f"Battery info set via GUI: {battery_info}")
+        self.battery_info = config_data.get("battery_info")
+        self.selected_port = config_data.get("selected_port")
+        self.logging_level = config_data.get("logging_level")
 
-    def get_user_battery_input(self):
-        """
-        Get battery input from the user if not provided by the GUI.
-        """
-        if self.battery_info:  # Check if GUI has already provided battery info
-            self.logger.info("Using battery info provided by the GUI.")
-            return self.battery_info
+        self.logger.info(f"Battery info set via GUI: {self.battery_info}")
+        self.logger.info(f"Selected serial port: {self.selected_port}")
+        self.logger.info(f"Logging level: {logging.getLevelName(self.logging_level)}")
 
-        # Fallback to terminal-based input
-        self.logger.info("Getting user battery input via terminal.")
-        print("Available battery files:")
-        battery_files = [f for f in os.listdir('.') if f.endswith('.txt')]
+        # Validate selected COM port
+        if not self.selected_port:
+            self.logger.error("No valid COM port selected. Exiting application.")
+            QMessageBox.critical(None, "Configuration Error", "No valid COM port selected. Please connect a device or select a valid port.")
+            self.app.quit()
+            return
 
-        for i, filename in enumerate(battery_files, start=1):
-            print(f"{i}. {filename}")
-        print(f"{len(battery_files) + 1}. Enter battery information manually")
-
-        try:
-            choice = int(input("Select an option by number: "))
-        except ValueError:
-            self.logger.error("Invalid input for battery file selection.")
-            print("Invalid input. Please enter a number.")
-            return self.get_user_battery_input()
-
-        if 1 <= choice <= len(battery_files):
-            file_path = battery_files[choice - 1]
-            return self.load_battery_info_from_file(file_path)
-        elif choice == len(battery_files) + 1:
-            return self.manual_battery_input()
-        else:
-            self.logger.error("Invalid choice. Please try again.")
-            print("Invalid choice. Please try again.")
-            return self.get_user_battery_input()
-
-    def manual_battery_input(self):
-        """
-        Prompt the user to manually input battery configuration via the terminal.
-        """
-        print("\nManual Battery Input:")
-        print("Please enter the following battery details:")
-        try:
-            capacity_ah = float(input("Battery Capacity (Ah) per cell: "))
-            voltage = float(input("Battery Voltage (V) per cell: "))
-            quantity = int(input("Number of cells: "))
-            series_strings = int(input("Number of series strings: "))
-        except ValueError as e:
-            logging.error(f"Invalid input during manual battery configuration: {e}")
-            print("Error: Invalid input. Please enter numeric values where required.")
-            return self.manual_battery_input()  # Restart manual input on error
-
-        battery_info = self.extra_calculations.calculate_battery_capacity(
-            capacity_ah=capacity_ah,
-            voltage=voltage,
-            quantity=quantity,
-            series_strings=series_strings
+        # Perform battery calculations
+        calculated_battery_info = self.extra_calculations.calculate_battery_capacity(
+            capacity_ah=self.battery_info["capacity_ah"],
+            voltage=self.battery_info["voltage"],
+            quantity=self.battery_info["quantity"],
+            series_strings=self.battery_info["series_strings"]
         )
+        if "error" in calculated_battery_info:
+            self.logger.error(f"Error calculating battery info: {calculated_battery_info['error']}")
+            QMessageBox.critical(None, "Calculation Error", f"Error calculating battery info: {calculated_battery_info['error']}")
+            self.app.quit()
+            return
 
-        if "error" in battery_info:
-            logging.error(f"Error in manual battery calculation: {battery_info['error']}")
-            print(f"Error calculating battery info: {battery_info['error']}")
-            return self.manual_battery_input()  # Restart if the calculation fails
-
-        logging.info("Battery info successfully entered manually.")
-        print(f"Manual Battery Input Complete: {battery_info}")
-        return battery_info
-
-    def load_battery_info_from_file(self, file_path):
-        """
-        Parses a text file to extract battery capacity, nominal voltage, cell count, and string count.
-        """
-        try:
-            with open(file_path, 'r') as file:
-                battery_data = {}
-                for line in file:
-                    key, value = line.strip().split(", ")
-                    battery_data[key] = float(value) if "voltage" in key or "amps" in key else int(value)
-
-                # Extract the values required for capacity calculation
-                capacity_ah = float(battery_data["Battery capacity amps"])
-                voltage = float(battery_data["Battery nominal voltage"])
-                quantity = int(battery_data["Amount of battery cells"])
-                series_strings = int(battery_data["Number of battery strings"])
-
-                logging.debug(f"Battery data extracted from file: {battery_data}")
-                return self.extra_calculations.calculate_battery_capacity(capacity_ah, voltage, quantity, series_strings)
-
-        except (FileNotFoundError, KeyError, ValueError) as e:
-            logging.error(f"Error reading file {file_path}: {e}")
-            print(f"Error reading file {file_path}: {e}")
-            return None
-
-    def toggle_logging_level(self, level):
-        """
-        Delegates logging level change to the CustomLogger instance.
-        """
-        self.logger.toggle_logging_level(level)
-
-    def select_port(self):
-        ports = list(serial.tools.list_ports.comports())
-        if not ports:
-            logging.error("No serial ports found.")
-            print("No serial ports found.")
-            return None
-        print("Available ports:")
-        for i, port in enumerate(ports):
-            print(f"{i}. {port.device}")
-        try:
-            choice = int(input("Select port number: "))
-            selected_port = ports[choice].device if 0 <= choice < len(ports) else None
-            logging.info(f"Selected port: {selected_port}")
-            return selected_port
-        except (ValueError, IndexError):
-            logging.error("Invalid port selection.")
-            print("Invalid port selection.")
-            return None
+        self.logger.info(f"Calculated Battery Info: {calculated_battery_info}")
+        self.battery_info.update(calculated_battery_info)
 
     def start(self):
+        """
+        Starts the telemetry application by running the main application logic.
+        """
         # Run the application logic directly
-        self.run_application()
+        startup_success = self.run_application()
+        return startup_success
 
     def run_application(self):
-         # Show configuration dialog
+        """
+        Runs the main application logic, handling GUI configuration and initializing components.
+
+        :return: True if startup is successful, False otherwise.
+        """
+        # Show configuration dialog
         config_dialog = ConfigDialog()
+        config_dialog.config_data_signal.connect(self.set_battery_info)
+
         if config_dialog.exec():
-            # User clicked OK
-            self.battery_info = config_dialog.battery_info
-            self.port = config_dialog.selected_port
-            self.logging_level = config_dialog.logging_level
-            # Set logging level
-            self.custom_logger.toggle_logging_level(self.logging_level)
-            self.logger.info(f"Logging level set to {logging.getLevelName(self.logging_level)}")
+            # Check if battery_info was set
+            if not self.battery_info or not self.selected_port:
+                self.logger.error("Incomplete configuration. Exiting.")
+                QMessageBox.critical(None, "Configuration Error", "Incomplete configuration. Exiting application.")
+                return False
         else:
             # User canceled
             self.logger.error("Configuration canceled by user. Exiting.")
-            return
+            QMessageBox.warning(None, "Configuration Canceled", "Configuration was canceled by the user. Exiting application.")
+            return False
 
-        if not self.battery_info:
-            self.logger.error("No valid battery information provided. Exiting.")
-            return
+        # Set logging level (already set in set_battery_info)
+        if self.central_logger:
+            self.central_logger.set_level(logging.getLevelName(self.logging_level))
+        self.logger.info(f"Logging level set to {logging.getLevelName(self.logging_level)}")
 
-        if not self.port:
-            self.logger.error("No valid port selected. Exiting.")
-            return
-
-        # Now initialize GUI
-        self.gui = TelemetryGUI(data_keys=[])
+        # Initialize GUI
+        self.gui = TelemetryGUI(data_keys=[], csv_handler=self.csv_handler)  # Pass csv_handler here
         # Show the GUI
         self.gui.show()
+
+        # Connect signals
+        self.gui.save_csv_signal.connect(self.finalize_csv)  # Connect CSV save signal
+        self.gui.change_log_level_signal.connect(self.central_logger.set_level)  # Connect log level change
 
         # Proceed with the rest of the application
         try:
             self.serial_reader_thread = SerialReaderThread(
-                self.port,
+                self.selected_port,
                 self.baudrate,
                 process_data_callback=self.process_data,
                 process_raw_data_callback=self.process_raw_data
             )
             self.serial_reader_thread.start()
-            self.logger.info(f"Telemetry application started on {self.port}.")
-            print(f"Telemetry application started on {self.port}.")
+            self.logger.info(f"Telemetry application started on {self.selected_port}.")
+            print(f"Telemetry application started on {self.selected_port}.")
         except Exception as e:
             self.logger.error(f"Failed to start serial reader thread: {e}")
-            print(f"Failed to start serial reader thread: {e}")
-            return
+            QMessageBox.critical(None, "Serial Reader Error", f"Failed to start serial reader thread: {e}")
+            return False
 
         # Connect to the application's aboutToQuit signal for cleanup
         QApplication.instance().aboutToQuit.connect(self.cleanup)
 
+        return True
+
     def cleanup(self):
+        """
+        Cleans up resources before application exit, such as stopping threads and finalizing CSV files.
+        """
         if self.serial_reader_thread:
             self.serial_reader_thread.stop()
             self.serial_reader_thread.join()
@@ -285,7 +215,9 @@ class TelemetryApplication:
 
     def process_data(self, data):
         """
-        Process incoming telemetry data and buffer it.
+        Processes incoming telemetry data and buffers it for CSV writing and GUI updating.
+
+        :param data: Raw telemetry data string.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -310,6 +242,14 @@ class TelemetryApplication:
             # Add timestamps
             processed_data['timestamp'] = timestamp
 
+            # Example: Update used_Ah based on current data
+            if 'BP_PVS_Ah' in processed_data:
+                try:
+                    self.used_Ah += float(processed_data['BP_PVS_Ah'])
+                    self.logger.debug(f"Updated used_Ah: {self.used_Ah}")
+                except ValueError as e:
+                    self.logger.error(f"Invalid BP_PVS_Ah value: {processed_data['BP_PVS_Ah']}, Exception: {e}")
+
             # Add data to the buffer and check if it's ready to flush
             try:
                 ready_to_flush = self.buffer.add_data(processed_data)
@@ -325,12 +265,27 @@ class TelemetryApplication:
                         self.display_data(combined_data)
                         # Emit signal to update GUI
                         self.gui.update_data_signal.emit(combined_data)
+
+                        # Example: Calculate remaining capacity
+                        try:
+                            remaining_capacity = self.extra_calculations.calculate_remaining_capacity_from_ah(
+                                used_ah=self.used_Ah,
+                                total_capacity_ah=self.battery_info['Total_Capacity_Ah'],
+                                bp_pvs_ah=float(combined_data.get('BP_PVS_Ah', 0))
+                            )
+                            combined_data['Remaining_Capacity_Ah'] = remaining_capacity
+                            self.gui.update_data_signal.emit(combined_data)
+                        except ValueError as e:
+                            self.logger.error(f"Invalid BP_PVS_Ah value for capacity calculation: {combined_data.get('BP_PVS_Ah')}, Exception: {e}")
+
             except Exception as e:
                 self.logger.error(f"Error processing data: {processed_data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
         """
-        Process raw hex data and buffer it.
+        Processes raw hex data and buffers it for CSV writing.
+
+        :param raw_data: Raw hex data string.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         raw_data_entry = {"timestamp": timestamp, "raw_data": raw_data}
@@ -340,10 +295,11 @@ class TelemetryApplication:
         except Exception as e:
             self.logger.error(f"Error processing raw data: {raw_data_entry}, Exception: {e}")
 
-
     def display_data(self, combined_data):
         """
         Delegates data display to the DataDisplay class.
+
+        :param combined_data: Dictionary containing combined telemetry data.
         """
         try:
             self.logger.debug(f"Combined data to display: {combined_data}")
@@ -353,13 +309,29 @@ class TelemetryApplication:
         except Exception as e:
             self.logger.error(f"Error displaying data: {combined_data}, Exception: {e}")
 
-
     def finalize_csv(self):
         """
-        Finalize the CSV by renaming the file to user-specified name.
+        Finalizes the CSV by renaming the file to a user-specified name via GUI.
         """
         try:
-            custom_filename = input("Enter a filename to save the CSV data (without extension): ") + ".csv"
-            self.csv_handler.finalize_csv(self.csv_file, custom_filename)
+            # Open a save file dialog
+            options = QFileDialog.Options()
+            options |= QFileDialog.Option.DontUseNativeDialog
+            custom_filename, _ = QFileDialog.getSaveFileName(
+                None,
+                "Save CSV Data",
+                "",
+                "CSV Files (*.csv);;All Files (*)",
+                options=options
+            )
+            if custom_filename:
+                if not custom_filename.endswith('.csv'):
+                    custom_filename += '.csv'
+                self.csv_handler.finalize_csv(self.csv_file, custom_filename)
+                self.logger.info(f"CSV data saved as {custom_filename}.")
+                print(f"CSV data saved as {custom_filename}.")
+            else:
+                self.logger.warning("CSV finalization canceled by user.")
+                print("CSV finalization canceled.")
         except Exception as e:
             self.logger.error(f"Error finalizing CSV file: {e}")

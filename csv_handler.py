@@ -1,9 +1,26 @@
+# csv_handler.py
+
 import csv
+import os
 import logging
 
 class CSVHandler:
-    def __init__(self):
+    def __init__(self, default_directory='csv_data'):
+        """
+        Initializes the CSVHandler with a default save directory.
+        """
+        self.default_directory = default_directory
+        self.ensure_directory_exists(self.default_directory)
+        self.current_csv_file = os.path.join(self.default_directory, "telemetry_data.csv")
         self.logger = logging.getLogger(__name__)
+
+    def ensure_directory_exists(self, directory):
+        """
+        Ensures that the specified directory exists; creates it if it doesn't.
+        """
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            self.logger.info(f"Created directory for CSV files: {directory}")
 
     def setup_csv(self, filename, headers):
         """
@@ -17,6 +34,21 @@ class CSVHandler:
         except Exception as e:
             self.logger.error(f"Error setting up CSV file '{filename}': {e}")
 
+    def set_csv_save_directory(self, directory):
+        """
+        Sets a new directory for saving CSV files.
+        """
+        self.ensure_directory_exists(directory)
+        self.default_directory = directory
+        self.current_csv_file = os.path.join(self.default_directory, "telemetry_data.csv")
+        self.logger.info(f"CSV save directory set to: {directory}")
+
+    def get_csv_file_path(self):
+        """
+        Returns the current CSV file path.
+        """
+        return self.current_csv_file
+    
     def append_to_csv(self, filename, headers, data):
         """
         Append a single row of data to the specified CSV file.
