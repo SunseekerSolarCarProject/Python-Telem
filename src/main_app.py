@@ -1,11 +1,12 @@
 # main_app.py
 
 import sys
+import os
 import logging
 import argparse
-from telemetry_application import TelemetryApplication
+from src.telemetry_application import TelemetryApplication
 from PyQt6.QtWidgets import QApplication
-from central_logger import CentralLogger  # Import the CentralLogger class
+from src.central_logger import CentralLogger  # Import the CentralLogger class
 
 def main():
     # Parse command-line arguments
@@ -16,6 +17,9 @@ def main():
 
     # Map string log level to logging module levels
     log_level = getattr(logging, args.loglevel.upper(), logging.INFO)
+
+    # Add the parent directory to the system path
+    sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
     # Initialize the centralized logger
     central_logger = CentralLogger(log_file='telemetry_application.log', level=log_level)

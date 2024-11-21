@@ -3,9 +3,9 @@
 import time
 from datetime import datetime
 import logging
-from data_processor import DataProcessor
-from extra_calculations import ExtraCalculations
-from csv_handler import CSVHandler
+from src.data_processor import DataProcessor
+from src.extra_calculations import ExtraCalculations
+from src.csv_handler import CSVHandler
 
 class BufferData:
     def __init__(self, csv_handler, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):

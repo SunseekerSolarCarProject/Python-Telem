@@ -1,16 +1,17 @@
 # telemetry_application.py
 
+import sys
 import os
 import logging
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
-from serial_reader import SerialReaderThread
-from data_processor import DataProcessor
-from data_display import DataDisplay
-from buffer_data import BufferData
-from extra_calculations import ExtraCalculations
-from gui_files.gui_display import TelemetryGUI, ConfigDialog
-from csv_handler import CSVHandler
+from src.serial_reader import SerialReaderThread
+from src.data_processor import DataProcessor
+from src.data_display import DataDisplay
+from src.buffer_data import BufferData
+from src.extra_calculations import ExtraCalculations
+from src.gui_files.gui_display import TelemetryGUI, ConfigDialog
+from src.csv_handler import CSVHandler
 
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
