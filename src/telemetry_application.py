@@ -86,8 +86,9 @@ class TelemetryApplication:
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
         self.used_Ah = 0.0
 
-        # Initialize BufferData
+        # Initialize BufferData with the existing CSVHandler
         self.buffer = BufferData(
+            csv_handler=self.csv_handler,
             csv_headers=self.csv_headers,
             secondary_csv_headers=self.secondary_csv_headers,
             buffer_size=buffer_size,
@@ -296,8 +297,15 @@ class TelemetryApplication:
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         raw_data_entry = {"timestamp": timestamp, "raw_data": raw_data}
+        # Debugging: Log the type of raw_data_entry
+        if not isinstance(raw_data_entry, dict):
+            self.logger.error(f"raw_data_entry is not a dict: {raw_data_entry} (type: {type(raw_data_entry)})")
+            return
+
+        self.logger.debug(f"Processed raw_data_entry: {raw_data_entry}")
+    
         try:
-            self.csv_handler.append_to_csv(self.secondary_csv_file, raw_data_entry)  # Correct call
+            self.buffer.add_raw_data(raw_data_entry, self.secondary_csv_file)  # Pass dict instead of string
         except Exception as e:
             self.logger.error(f"Error processing raw data: {raw_data_entry}, Exception: {e}")
 

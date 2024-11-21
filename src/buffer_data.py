@@ -3,17 +3,25 @@
 import time
 from datetime import datetime
 import logging
-import csv
 from data_processor import DataProcessor
 from extra_calculations import ExtraCalculations
 from csv_handler import CSVHandler
 
 class BufferData:
-    def __init__(self, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
+    def __init__(self, csv_handler, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
+        """
+        Initializes the BufferData with the given parameters and CSVHandler.
+
+        :param csv_handler: Instance of CSVHandler to manage CSV operations.
+        :param csv_headers: List of headers for the primary CSV file.
+        :param secondary_csv_headers: List of headers for the secondary CSV file.
+        :param buffer_size: Number of data points before the buffer flushes.
+        :param buffer_timeout: Time in seconds before the buffer flushes data.
+        """
         self.logger = logging.getLogger(__name__)
         self.dataprocessor = DataProcessor()
         self.extra_calculations = ExtraCalculations()
-        self.csv_handler = CSVHandler()
+        self.csv_handler = csv_handler  # Use the passed CSVHandler instance
         self.csv_headers = csv_headers
         self.secondary_csv_headers = secondary_csv_headers
         self.buffer_size = buffer_size
@@ -27,6 +35,9 @@ class BufferData:
     def add_data(self, data):
         """
         Add processed telemetry data to the buffer and update combined_data.
+
+        :param data: Dictionary containing processed telemetry data.
+        :return: True if the buffer is ready to flush, False otherwise.
         """
         self.data_buffer.append(data)
         self.logger.debug(f"Data added to data_buffer: {data}")
@@ -45,6 +56,8 @@ class BufferData:
     def update_combined_data(self, new_data):
         """
         Updates the combined_data dictionary with new data.
+
+        :param new_data: Dictionary containing new telemetry data.
         """
         self.combined_data.update(new_data)
         self.logger.debug(f"Combined data updated with: {new_data}")
@@ -52,6 +65,9 @@ class BufferData:
     def add_raw_data(self, raw_data, filename):
         """
         Add raw hex data to the raw data buffer and flush if needed.
+
+        :param raw_data: Dictionary containing raw hex data.
+        :param filename: Path to the secondary CSV file.
         """
         self.raw_data_buffer.append(raw_data)
         self.logger.debug(f"Raw data added to raw_data_buffer: {raw_data}")
@@ -62,13 +78,18 @@ class BufferData:
     def flush_raw_data_buffer(self, filename):
         """
         Flush the raw hex data buffer to the secondary CSV file.
+
+        :param filename: Path to the secondary CSV file.
         """
         if not self.raw_data_buffer:
             self.logger.debug("Raw data buffer is empty. Nothing to flush.")
             return  # Nothing to flush
 
         for raw_data_entry in self.raw_data_buffer:
-            self.csv_handler.append_to_csv(filename, raw_data_entry)  # Corrected to pass two arguments
+            if not isinstance(raw_data_entry, dict):
+                self.logger.error(f"raw_data_entry is not a dict: {raw_data_entry} (type: {type(raw_data_entry)})")
+                continue  # Skip this entry or handle it accordingly
+            self.csv_handler.append_to_csv(filename, raw_data_entry)  # Pass dict
 
         self.raw_data_buffer.clear()
         self.logger.debug("Raw data buffer cleared after flushing.")
@@ -76,6 +97,11 @@ class BufferData:
     def flush_buffer(self, filename, battery_info, used_ah):
         """
         Flush the combined data to the primary CSV file.
+
+        :param filename: Path to the primary CSV file.
+        :param battery_info: Dictionary containing battery-related information.
+        :param used_ah: Float representing used Amp-Hours.
+        :return: Combined data dictionary after processing.
         """
         if not self.data_buffer:
             self.logger.debug("Data buffer is empty. Nothing to flush.")
@@ -110,7 +136,7 @@ class BufferData:
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
         # Append data to CSV
-        self.csv_handler.append_to_csv(filename, self.combined_data)  # Corrected to pass two arguments
+        self.csv_handler.append_to_csv(filename, self.combined_data)  # Pass dict
         self.data_buffer.clear()
         self.last_flush_time = time.time()
         self.logger.debug("Data buffer cleared and last_flush_time reset.")
@@ -120,6 +146,10 @@ class BufferData:
     def safe_float(self, value, default=0.0):
         """
         Safely convert a value to a float, returning a default if conversion fails.
+
+        :param value: The value to convert.
+        :param default: The default value to return if conversion fails.
+        :return: Float value or default.
         """
         try:
             result = float(value)

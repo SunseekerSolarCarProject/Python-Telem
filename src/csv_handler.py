@@ -2,6 +2,7 @@
 
 import csv
 import os
+import threading
 import logging
 
 class CSVHandler:
@@ -9,6 +10,7 @@ class CSVHandler:
         """
         Initializes the CSVHandler with a default save directory.
         """
+        self.lock = threading.Lock()
         self.default_directory = default_directory
         self.ensure_directory_exists(self.default_directory)
         self.current_csv_file = os.path.join(self.default_directory, "telemetry_data.csv")
@@ -26,6 +28,9 @@ class CSVHandler:
     def setup_csv(self, csv_file, headers):
         """
         Sets up the CSV file with headers if it doesn't exist.
+
+        :param csv_file: Path to the CSV file.
+        :param headers: List of header strings.
         """
         if not os.path.exists(csv_file):
             try:
@@ -39,6 +44,8 @@ class CSVHandler:
     def set_csv_save_directory(self, directory):
         """
         Sets a new directory for saving CSV files.
+
+        :param directory: New directory path.
         """
         self.ensure_directory_exists(directory)
         self.default_directory = directory
@@ -65,23 +72,30 @@ class CSVHandler:
         :param csv_file: Path to the CSV file.
         :param data: Dictionary containing the data to append.
         """
-        try:
-            with open(csv_file, 'a', newline='') as file:
-                # Use existing fieldnames if possible
+        with self.lock:
+            try:
+                if not isinstance(data, dict):
+                    self.logger.error(f"Data to append is not a dict: {data} (type: {type(data)})")
+                    return  # Early exit to prevent further errors
+
+                # Determine fieldnames from existing headers
                 if os.path.exists(csv_file):
                     with open(csv_file, 'r', newline='') as read_file:
                         reader = csv.DictReader(read_file)
                         fieldnames = reader.fieldnames
                 else:
+                    # If file doesn't exist, use keys from data
                     fieldnames = data.keys()
+                    self.logger.warning(f"CSV file {csv_file} does not exist. Using data keys as headers.")
 
-                writer = csv.DictWriter(file, fieldnames=fieldnames)
-                # Ensure all keys in data match the fieldnames
-                row = {key: data.get(key, "") for key in fieldnames}
-                writer.writerow(row)
-            self.logger.debug(f"Data appended to CSV: {csv_file}")
-        except Exception as e:
-            self.logger.error(f"Error appending to CSV {csv_file}: {e}")
+                with open(csv_file, 'a', newline='') as file:
+                    writer = csv.DictWriter(file, fieldnames=fieldnames)
+                    # Ensure all keys in data match the fieldnames
+                    row = {key: data.get(key, "") for key in fieldnames}
+                    writer.writerow(row)
+                self.logger.debug(f"Data appended to CSV: {csv_file}, Data: {row}")
+            except Exception as e:
+                self.logger.error(f"Error appending to CSV {csv_file}: {e}")
 
     def finalize_csv(self, original_csv, new_csv_path):
         """
