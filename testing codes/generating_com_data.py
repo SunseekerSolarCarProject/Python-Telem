@@ -173,7 +173,7 @@ def main():
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-    print("gerating values starting!")
+    print("generating values starting!")
     # Set up selected COM port
     port = selected_port
     baud_rate = 115200  # Increased baud rate
