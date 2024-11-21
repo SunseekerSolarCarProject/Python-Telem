@@ -1,6 +1,6 @@
 # data_display_tab.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
-from src.data_display import DataDisplay
+from data_display import DataDisplay
 
 class DataDisplayTab(QWidget):
     """

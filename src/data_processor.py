@@ -2,7 +2,7 @@
 
 import struct
 import logging
-from src.extra_calculations import ExtraCalculations
+from extra_calculations import ExtraCalculations
 
 # Error and limit flag descriptions
 error_flags_desc = [

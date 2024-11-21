@@ -4,9 +4,9 @@ import sys
 import os
 import logging
 import argparse
-from src.telemetry_application import TelemetryApplication
+from telemetry_application import TelemetryApplication
 from PyQt6.QtWidgets import QApplication
-from src.central_logger import CentralLogger  # Import the CentralLogger class
+from central_logger import CentralLogger  # Import the CentralLogger class
 
 def main():
     # Parse command-line arguments

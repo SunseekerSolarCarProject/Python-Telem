@@ -5,13 +5,13 @@ import os
 import logging
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
-from src.serial_reader import SerialReaderThread
-from src.data_processor import DataProcessor
-from src.data_display import DataDisplay
-from src.buffer_data import BufferData
-from src.extra_calculations import ExtraCalculations
-from src.gui_files.gui_display import TelemetryGUI, ConfigDialog
-from src.csv_handler import CSVHandler
+from serial_reader import SerialReaderThread
+from data_processor import DataProcessor
+from data_display import DataDisplay
+from buffer_data import BufferData
+from extra_calculations import ExtraCalculations
+from gui_files.gui_display import TelemetryGUI, ConfigDialog
+from csv_handler import CSVHandler
 
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
@@ -91,8 +91,8 @@ class TelemetryApplication:
         self.Data_Display = DataDisplay(self.units)
         self.csv_handler = CSVHandler()  # Initialized with default directory
         self.csv_headers = self.csv_handler.generate_csv_headers()
+        self.secondary_csv_headers = ["timestamp", "raw_data"]
         self.csv_file = self.csv_handler.get_csv_file_path()
-        self.secondary_csv_header = ["timestamp", "raw_data"]
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
         self.used_Ah = 0.0
         self.gui_display = TelemetryGUI(self.data_keys, self.csv_handler, self.logger, self.units)
@@ -109,6 +109,9 @@ class TelemetryApplication:
         # Setup CSV files
         self.csv_handler.setup_csv(self.csv_file, self.csv_headers)
         self.csv_handler.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
+
+        self.gui_display.save_csv_signal.connect(self.finalize_csv)
+        self.gui_display.change_log_level_signal.connect(self.central_logger.set_level)
 
         # Flag to prevent multiple signal connections
         self.signals_connected = False
@@ -170,7 +173,7 @@ class TelemetryApplication:
             config_dialog.config_data_signal.connect(self.set_battery_info)
 
             if config_dialog.exec():
-                # Check if battery_info was set
+                # Check if battery_info and selected_port were set
                 if not self.battery_info or not self.selected_port:
                     self.logger.error("Incomplete configuration. Exiting.")
                     QMessageBox.critical(None, "Configuration Error", "Incomplete configuration. Exiting application.")
@@ -186,9 +189,13 @@ class TelemetryApplication:
                 self.central_logger.set_level(logging.getLevelName(self.logging_level))
             self.logger.info(f"Logging level set to {logging.getLevelName(self.logging_level)}")
 
-            # Initialize GUI
-            self.gui = TelemetryGUI(data_keys=[], csv_handler=self.csv_handler)  # Pass csv_handler here
-            # Show the GUI
+            # Validate configuration before initializing GUI
+            if not self.battery_info or not self.selected_port:
+                QMessageBox.critical(None, "Configuration Error", "Incomplete configuration. Exiting application.")
+                return False
+
+            # Initialize the GUI
+            self.gui = TelemetryGUI(self.data_keys, self.csv_handler, self.logger, self.units)
             self.gui.show()
             self.logger.debug("TelemetryGUI initialized and displayed.")
 
@@ -326,7 +333,7 @@ class TelemetryApplication:
         :param data: Dictionary of telemetry data.
         """
         self.logger.debug(f"Processing telemetry data: {data}")
-        self.gui.update_data_display(data)
+        self.gui_display.update_data_display(data)
 
     def update_com_and_baud(self, port, baudrate):
         """

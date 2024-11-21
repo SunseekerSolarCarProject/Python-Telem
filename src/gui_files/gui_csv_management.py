@@ -1,6 +1,5 @@
 # csv_management.py
 from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget, QFileDialog, QMessageBox
-from src.csv_handler import CSVHandler
 
 
 class CSVManagementTab(QWidget):
@@ -26,9 +25,20 @@ class CSVManagementTab(QWidget):
         layout.addWidget(change_location_button)
 
     def save_csv_data(self):
-        # Logic to save CSV data
-        pass
+        try:
+            filename, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv);;All Files (*)")
+            if filename:
+                if not filename.endswith('.csv'):
+                    filename += '.csv'
+                self.csv_handler.finalize_csv(self.csv_handler.get_csv_file_path(), filename)
+                QMessageBox.information(self, "Success", f"CSV saved as {filename}.")
+        except Exception as e:
+            self.logger.error(f"Error saving CSV: {e}")
+            QMessageBox.critical(self, "Error", f"Error saving CSV: {e}")
 
     def change_csv_save_location(self):
-        # Logic to change save location
-        pass
+        directory = QFileDialog.getExistingDirectory(self, "Select Directory")
+        if directory:
+            self.csv_handler.set_csv_save_directory(directory)
+            self.csv_path_label.setText(f"Current CSV File: {self.csv_handler.get_csv_file_path()}")
+            QMessageBox.information(self, "Success", f"CSV save directory changed to {directory}.")
