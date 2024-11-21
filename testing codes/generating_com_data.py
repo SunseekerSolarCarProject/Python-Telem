@@ -151,11 +151,31 @@ TL_TIM,{runtime}
 UVWXYZ
 """
 
-
 def main():
     """Main function to send data over serial port."""
-    # Initialize COM port (replace with your port name and baud rate)
-    port = 'COM4'  # Change as needed
+    import serial.tools.list_ports
+
+    # List available COM ports
+    ports = serial.tools.list_ports.comports()
+    print("Available COM Ports:")
+    for i, port in enumerate(ports):
+        print(f"{i + 1}: {port.device}")
+
+    # Allow user to select a COM port
+    selected_port = None
+    while selected_port is None:
+        try:
+            choice = int(input("Select the COM port by number: "))
+            if 1 <= choice <= len(ports):
+                selected_port = ports[choice - 1].device
+            else:
+                print("Invalid choice. Please select a valid port number.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+    print("gerating values starting!")
+    # Set up selected COM port
+    port = selected_port
     baud_rate = 115200  # Increased baud rate
     ser = None
 
