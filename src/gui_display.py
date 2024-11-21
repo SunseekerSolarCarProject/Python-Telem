@@ -24,7 +24,7 @@ class TelemetryGUI(QWidget):
 
         self.plot_manager = PlotManager(self.tabs, self.logger)
         self.settings_tab = SettingsTab(self.update_com_and_baud, self.logger)
-        self.csv_management_tab = CSVManagementTab(self.csv_handler, self.logger)
+        self.csv_management_tab = CSVManagementTab(csv_handler=self.csv_handler, logger=self.logger)
 
         self.tabs.addTab(self.settings_tab, "Settings")
         self.tabs.addTab(self.csv_management_tab, "CSV Management")

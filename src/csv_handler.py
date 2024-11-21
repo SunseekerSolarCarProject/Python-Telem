@@ -47,16 +47,37 @@ class CSVHandler:
         """
         Appends a row of data to the specified CSV file.
         """
+        predefined_headers = [
+        "timestamp", "device_timestamp", "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM",
+        "MC1VEL_Velocity", "MC1VEL_Speed", "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_Velocity",
+        "MC2VEL_RPM", "MC2VEL_Speed", "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint",
+        "DC_SWC_Position", "DC_SWC_Value", "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID",
+        "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature", "BP_ISH_SOC", "BP_ISH_Amps",
+        "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah", "MC1LIM_CAN Receive Error Count",
+        "MC1LIM_CAN Transmit Error Count", "MC1LIM_Active Motor Info", "MC1LIM_Errors",
+        "MC1LIM_Limits", "MC2LIM_CAN Receive Error Count", "MC2LIM_CAN Transmit Error Count",
+        "MC2LIM_Active Motor Info", "MC2LIM_Errors", "MC2LIM_Limits", "Total_Capacity_Wh",
+        "Total_Capacity_Ah", "Total_Voltage", "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah",
+        "Shunt_Remaining_wh", "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
+        "Remaining_Capacity_Ah"
+        ]
+
+        # Ensure headers exist in the CSV file
+        self.setup_csv(csv_file, predefined_headers)
+
+        # Sanitize the data dictionary
+        sanitized_data = {key: data.get(key, "N/A") for key in predefined_headers}
+
         with self.lock:
             try:
                 if not os.path.exists(csv_file):
                     self.logger.warning(f"CSV file {csv_file} does not exist. Setting up with inferred headers.")
                     self.setup_csv(csv_file, data.keys())
-                
+            
                 with open(csv_file, 'a', newline='') as file:
-                    writer = csv.DictWriter(file, fieldnames=data.keys())
-                    writer.writerow(data)
-                self.logger.debug(f"Appended data to {csv_file}: {data}")
+                    writer = csv.DictWriter(file, fieldnames=predefined_headers)
+                    writer.writerow(sanitized_data)
+                self.logger.debug(f"Appended data to {csv_file}: {sanitized_data}")
             except Exception as e:
                 self.logger.error(f"Error appending to CSV {csv_file}: {e}")
 
