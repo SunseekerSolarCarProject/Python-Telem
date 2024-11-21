@@ -1,6 +1,6 @@
 # csv_management.py
 from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget, QFileDialog, QMessageBox
-from csv_handler import CSVHandler
+from src.csv_handler import CSVHandler
 
 
 class CSVManagementTab(QWidget):

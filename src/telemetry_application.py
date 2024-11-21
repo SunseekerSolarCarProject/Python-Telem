@@ -1,9 +1,7 @@
 # telemetry_application.py
 
-import sys
 import os
 import logging
-import threading
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from serial_reader import SerialReaderThread
@@ -11,46 +9,8 @@ from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
 from extra_calculations import ExtraCalculations
-from gui_display import TelemetryGUI, ConfigDialog
+from gui_files.gui_display import TelemetryGUI, ConfigDialog
 from csv_handler import CSVHandler
-from central_logger import CentralLogger  # Ensure CentralLogger is correctly implemented
-
-# Updated units and key descriptions
-units = {
-    'DC_DRV_Motor_Velocity_setpoint': '#',
-    'DC_DRV_Motor_Current_setpoint': '#',
-    'DC_SWC_Position': ' ',
-    'DC_SWC_Value': '#',
-    'MC1BUS_Voltage': 'V',
-    'MC1BUS_Current': 'A',
-    'MC2BUS_Voltage': 'V',
-    'MC2BUS_Current': 'A',
-    'MC1VEL_Velocity': 'M/s',
-    'MC1VEL_Speed': 'Mph',
-    'MC1VEL_RPM': 'RPM',
-    'MC2VEL_Velocity': 'M/s',
-    'MC2VEL_Speed': 'Mph',
-    'MC2VEL_RPM': 'RPM',
-    'BP_VMX_ID': '#',
-    'BP_VMX_Voltage': 'V',
-    'BP_VMN_ID': '#',
-    'BP_VMN_Voltage': 'V',
-    'BP_TMX_ID': '#',
-    'BP_TMX_Temperature': '°F',
-    'BP_PVS_Voltage': 'V',
-    'BP_PVS_milliamp/s': 'mA/s',
-    'BP_PVS_Ah': 'Ah',
-    'BP_ISH_Amps': 'A',
-    'BP_ISH_SOC': '%',
-    'Shunt_Remaining_wh': 'Wh',
-    'Used_Ah_Remaining_wh': 'Wh',
-    'Shunt_Remaining_Ah': 'Ah',
-    'Used_Ah_Remaining_Ah': 'Ah',
-    'Shunt_Remaining_Time': 'hours',
-    'Used_Ah_Remaining_Time': 'hours',
-    'timestamp': 'hh:mm:ss',
-    'device_timestamp': 'hh:mm:ss'
-}
 
 class TelemetryApplication:
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
@@ -74,18 +34,55 @@ class TelemetryApplication:
         # Obtain a logger for this module
         self.logger = self.central_logger.get_logger(__name__) if self.central_logger else logging.getLogger(__name__)
 
+        #units to be passed around in the code
+        self.units = {
+            'DC_DRV_Motor_Velocity_setpoint': '#',
+            'DC_DRV_Motor_Current_setpoint': '#',
+            'DC_SWC_Position': ' ',
+            'DC_SWC_Value': '#',
+            'MC1BUS_Voltage': 'V',
+            'MC1BUS_Current': 'A',
+            'MC2BUS_Voltage': 'V',
+            'MC2BUS_Current': 'A',
+            'MC1VEL_Velocity': 'M/s',
+            'MC1VEL_Speed': 'Mph',
+            'MC1VEL_RPM': 'RPM',
+            'MC2VEL_Velocity': 'M/s',
+            'MC2VEL_Speed': 'Mph',
+            'MC2VEL_RPM': 'RPM',
+            'BP_VMX_ID': '#',
+            'BP_VMX_Voltage': 'V',
+            'BP_VMN_ID': '#',
+            'BP_VMN_Voltage': 'V',
+            'BP_TMX_ID': '#',
+            'BP_TMX_Temperature': '°F',
+            'BP_PVS_Voltage': 'V',
+            'BP_PVS_milliamp/s': 'mA/s',
+            'BP_PVS_Ah': 'Ah',
+            'BP_ISH_Amps': 'A',
+            'BP_ISH_SOC': '%',
+            'Shunt_Remaining_wh': 'Wh',
+            'Used_Ah_Remaining_wh': 'Wh',
+            'Shunt_Remaining_Ah': 'Ah',
+            'Used_Ah_Remaining_Ah': 'Ah',
+            'Shunt_Remaining_Time': 'hours',
+            'Used_Ah_Remaining_Time': 'hours',
+            'timestamp': 'hh:mm:ss',
+            'device_timestamp': 'hh:mm:ss'
+        }
+
         # Initialize other attributes
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
         self.extra_calculations = ExtraCalculations()
-        self.Data_Display = DataDisplay(units)
+        self.Data_Display = DataDisplay(self.units)
         self.csv_handler = CSVHandler()  # Initialized with default directory
         self.csv_headers = self.csv_handler.generate_csv_headers()
         self.secondary_csv_headers = ["timestamp", "raw_data"]
         self.csv_file = self.csv_handler.get_csv_file_path()
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
         self.used_Ah = 0.0
-        self.gui_display = TelemetryGUI(self.logger, self.csv_handler)
+        self.gui_display = TelemetryGUI(self.csv_handler, self.logger, self.units)
 
         # Initialize BufferData with the existing CSVHandler
         self.buffer = BufferData(
@@ -310,19 +307,13 @@ class TelemetryApplication:
         except Exception as e:
             self.logger.error(f"Error processing raw data: {raw_data_entry}, Exception: {e}")
 
-    def display_data(self, combined_data):
+    def process_telemetry_data(self, data):
         """
-        Delegates data display to the DataDisplay class.
-
-        :param combined_data: Dictionary containing combined telemetry data.
+        Processes telemetry data and updates the GUI.
+        :param data: Dictionary of telemetry data.
         """
-        try:
-            self.logger.debug(f"Combined data to display: {combined_data}")
-            display_output = self.Data_Display.display(combined_data)
-            print(display_output)
-            self.logger.debug("Data displayed successfully.")
-        except Exception as e:
-            self.logger.error(f"Error displaying data: {combined_data}, Exception: {e}")
+        self.logger.debug(f"Processing telemetry data: {data}")
+        self.gui.update_data_display(data)
 
     def update_com_and_baud(self, port, baudrate):
         """

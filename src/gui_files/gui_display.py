@@ -5,13 +5,15 @@ from gui_config_dialog import ConfigDialog
 from gui_csv_management import CSVManagementTab
 from gui_plot_manager import PlotManager
 from gui_settings_tab import SettingsTab
+from gui_data_display_tab import DataDisplayTab
 
 
 class TelemetryGUI(QWidget):
-    def __init__(self, csv_handler, logger):
+    def __init__(self, csv_handler, logger, units):
         super().__init__()
         self.logger = logger
         self.csv_handler = csv_handler
+        self.units = units
 
         self.init_ui()
 
@@ -23,12 +25,21 @@ class TelemetryGUI(QWidget):
         layout.addWidget(self.tabs)
 
         self.plot_manager = PlotManager(self.tabs, self.logger)
+        self.data_display_tab = DataDisplayTab(self.units, self.logger)
         self.settings_tab = SettingsTab(self.update_com_and_baud, self.logger)
         self.csv_management_tab = CSVManagementTab(csv_handler=self.csv_handler, logger=self.logger)
 
+        self.tabs.addTab(self.data_display_tab, "Data Display")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
 
     def update_com_and_baud(self, port, baudrate):
         # Update logic for COM Port and Baud Rate
         self.logger.info(f"Updated to COM Port: {port}, Baud Rate: {baudrate}")
+
+    def update_data_display(self, telemetry_data):
+        """
+        Updates the Data Display tab with new telemetry data.
+        :param telemetry_data: Dictionary of telemetry data.
+        """
+        self.data_display_tab.update_display(telemetry_data)
