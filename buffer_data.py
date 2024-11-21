@@ -68,7 +68,7 @@ class BufferData:
             return  # Nothing to flush
 
         for raw_data_entry in self.raw_data_buffer:
-            self.csv_handler.append_to_csv(filename, self.secondary_csv_headers, raw_data_entry)
+            self.csv_handler.append_to_csv(filename, raw_data_entry)  # Corrected to pass two arguments
 
         self.raw_data_buffer.clear()
         self.logger.debug("Raw data buffer cleared after flushing.")
@@ -105,12 +105,12 @@ class BufferData:
         self.combined_data['Used_Ah_Remaining_wh'] = self.extra_calculations.calculate_watt_hours(
             self.combined_data['Used_Ah_Remaining_Ah'], self.safe_float(self.combined_data.get('BP_PVS_Voltage', 0.0)))
         self.combined_data['Used_Ah_Remaining_Time'] = self.extra_calculations.calculate_remaining_time_from_ah_hours(
-        self.combined_data['Used_Ah_Remaining_Ah'], bp_pvs_ah)
+            self.combined_data['Used_Ah_Remaining_Ah'], bp_pvs_ah)
 
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
         # Append data to CSV
-        self.csv_handler.append_to_csv(filename, self.csv_headers, self.combined_data)
+        self.csv_handler.append_to_csv(filename, self.combined_data)  # Corrected to pass two arguments
         self.data_buffer.clear()
         self.last_flush_time = time.time()
         self.logger.debug("Data buffer cleared and last_flush_time reset.")

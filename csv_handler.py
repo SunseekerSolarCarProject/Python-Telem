@@ -12,6 +12,7 @@ class CSVHandler:
         self.default_directory = default_directory
         self.ensure_directory_exists(self.default_directory)
         self.current_csv_file = os.path.join(self.default_directory, "telemetry_data.csv")
+        self.secondary_csv_file = os.path.join(self.default_directory, "raw_hex_data.csv")
         self.logger = logging.getLogger(__name__)
 
     def ensure_directory_exists(self, directory):
@@ -22,17 +23,18 @@ class CSVHandler:
             os.makedirs(directory)
             self.logger.info(f"Created directory for CSV files: {directory}")
 
-    def setup_csv(self, filename, headers):
+    def setup_csv(self, csv_file, headers):
         """
-        Initialize a CSV file with headers.
+        Sets up the CSV file with headers if it doesn't exist.
         """
-        try:
-            with open(filename, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(headers)
-            self.logger.info(f"CSV file '{filename}' initialized with headers.")
-        except Exception as e:
-            self.logger.error(f"Error setting up CSV file '{filename}': {e}")
+        if not os.path.exists(csv_file):
+            try:
+                with open(csv_file, 'w', newline='') as file:
+                    writer = csv.DictWriter(file, fieldnames=headers)
+                    writer.writeheader()
+                self.logger.info(f"CSV file created with headers: {csv_file}")
+            except Exception as e:
+                self.logger.error(f"Error setting up CSV file {csv_file}: {e}")
 
     def set_csv_save_directory(self, directory):
         """
@@ -41,41 +43,64 @@ class CSVHandler:
         self.ensure_directory_exists(directory)
         self.default_directory = directory
         self.current_csv_file = os.path.join(self.default_directory, "telemetry_data.csv")
+        self.secondary_csv_file = os.path.join(self.default_directory, "raw_hex_data.csv")
         self.logger.info(f"CSV save directory set to: {directory}")
 
     def get_csv_file_path(self):
         """
-        Returns the current CSV file path.
+        Returns the current primary CSV file path.
         """
         return self.current_csv_file
-    
-    def append_to_csv(self, filename, headers, data):
-        """
-        Append a single row of data to the specified CSV file.
-        """
-        row = [data.get(header, '') for header in headers]
-        try:
-            with open(filename, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(row)
-            self.logger.debug(f"Appended row to CSV file {filename}: {row}")
-        except Exception as e:
-            self.logger.error(f"Error appending row to CSV file '{filename}': {e}")
 
-    def finalize_csv(self, original_file, new_file):
+    def get_secondary_csv_file_path(self):
         """
-        Copy the content of the original CSV to a new file with a custom name.
+        Returns the current secondary CSV file path.
+        """
+        return self.secondary_csv_file
+
+    def append_to_csv(self, csv_file, data):
+        """
+        Appends a single row of data to the specified CSV file without rewriting headers.
+
+        :param csv_file: Path to the CSV file.
+        :param data: Dictionary containing the data to append.
         """
         try:
-            with open(original_file, 'r') as original, open(new_file, 'w', newline='') as new_file_obj:
-                new_file_obj.write(original.read())
-            self.logger.info(f"Data successfully saved to {new_file}.")
+            with open(csv_file, 'a', newline='') as file:
+                # Use existing fieldnames if possible
+                if os.path.exists(csv_file):
+                    with open(csv_file, 'r', newline='') as read_file:
+                        reader = csv.DictReader(read_file)
+                        fieldnames = reader.fieldnames
+                else:
+                    fieldnames = data.keys()
+
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                # Ensure all keys in data match the fieldnames
+                row = {key: data.get(key, "") for key in fieldnames}
+                writer.writerow(row)
+            self.logger.debug(f"Data appended to CSV: {csv_file}")
         except Exception as e:
-            self.logger.error(f"Error finalizing CSV file: {e}")
+            self.logger.error(f"Error appending to CSV {csv_file}: {e}")
+
+    def finalize_csv(self, original_csv, new_csv_path):
+        """
+        Finalizes the CSV by renaming it to a new path.
+
+        :param original_csv: The original CSV file path.
+        :param new_csv_path: The new CSV file path.
+        """
+        try:
+            os.rename(original_csv, new_csv_path)
+            self.logger.info(f"CSV file renamed to: {new_csv_path}")
+        except Exception as e:
+            self.logger.error(f"Error finalizing CSV file from {original_csv} to {new_csv_path}: {e}")
 
     def generate_csv_headers(self):
         """
-        Generate a list of headers for the CSV file based on telemetry fields and battery information.
+        Generates CSV headers based on telemetry fields and battery information.
+
+        :return: List of header strings.
         """
         telemetry_headers = [
             "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
@@ -83,14 +108,18 @@ class CSVHandler:
             "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC_Position", "DC_SWC_Value",
             "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
             "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
-            "MC1LIM", "MC2LIM"
+            "MC1LIM_CAN Receive Error Count", "MC1LIM_CAN Transmit Error Count",
+            "MC1LIM_Active Motor Info", "MC1LIM_Errors", "MC1LIM_Limits",
+            "MC2LIM_CAN Receive Error Count", "MC2LIM_CAN Transmit Error Count",
+            "MC2LIM_Active Motor Info", "MC2LIM_Errors", "MC2LIM_Limits"
         ]
 
         # Add additional calculated fields
         battery_headers = [
             "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
             "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
-            "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"
+            "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
+            "Remaining_Capacity_Ah"
         ]
 
         # Add timestamp fields

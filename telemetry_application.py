@@ -4,11 +4,8 @@ import sys
 import os
 import logging
 import threading
-import serial
-import serial.tools.list_ports
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
-from PyQt6.QtCore import QObject, pyqtSignal
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
 from data_display import DataDisplay
@@ -16,7 +13,7 @@ from buffer_data import BufferData
 from extra_calculations import ExtraCalculations
 from gui_display import TelemetryGUI, ConfigDialog
 from csv_handler import CSVHandler
-from central_logger import CentralLogger  # Import CentralLogger
+from central_logger import CentralLogger  # Ensure CentralLogger is correctly implemented
 
 # Updated units and key descriptions
 units = {
@@ -86,7 +83,7 @@ class TelemetryApplication:
         self.csv_headers = self.csv_handler.generate_csv_headers()
         self.secondary_csv_headers = ["timestamp", "raw_data"]
         self.csv_file = self.csv_handler.get_csv_file_path()
-        self.secondary_csv_file = os.path.join(self.csv_handler.default_directory, "raw_hex_data.csv")
+        self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
         self.used_Ah = 0.0
 
         # Initialize BufferData
@@ -97,8 +94,12 @@ class TelemetryApplication:
             buffer_timeout=buffer_timeout
         )
 
+        # Setup CSV files
         self.csv_handler.setup_csv(self.csv_file, self.csv_headers)
         self.csv_handler.setup_csv(self.secondary_csv_file, self.secondary_csv_headers)
+
+        # Flag to prevent multiple signal connections
+        self.signals_connected = False
 
     def set_battery_info(self, config_data):
         """
@@ -151,38 +152,42 @@ class TelemetryApplication:
 
         :return: True if startup is successful, False otherwise.
         """
-        # Show configuration dialog
-        config_dialog = ConfigDialog()
-        config_dialog.config_data_signal.connect(self.set_battery_info)
-
-        if config_dialog.exec():
-            # Check if battery_info was set
-            if not self.battery_info or not self.selected_port:
-                self.logger.error("Incomplete configuration. Exiting.")
-                QMessageBox.critical(None, "Configuration Error", "Incomplete configuration. Exiting application.")
-                return False
-        else:
-            # User canceled
-            self.logger.error("Configuration canceled by user. Exiting.")
-            QMessageBox.warning(None, "Configuration Canceled", "Configuration was canceled by the user. Exiting application.")
-            return False
-
-        # Set logging level (already set in set_battery_info)
-        if self.central_logger:
-            self.central_logger.set_level(logging.getLevelName(self.logging_level))
-        self.logger.info(f"Logging level set to {logging.getLevelName(self.logging_level)}")
-
-        # Initialize GUI
-        self.gui = TelemetryGUI(data_keys=[], csv_handler=self.csv_handler)  # Pass csv_handler here
-        # Show the GUI
-        self.gui.show()
-
-        # Connect signals
-        self.gui.save_csv_signal.connect(self.finalize_csv)  # Connect CSV save signal
-        self.gui.change_log_level_signal.connect(self.central_logger.set_level)  # Connect log level change
-
-        # Proceed with the rest of the application
         try:
+            # Show configuration dialog
+            config_dialog = ConfigDialog()
+            config_dialog.config_data_signal.connect(self.set_battery_info)
+
+            if config_dialog.exec():
+                # Check if battery_info was set
+                if not self.battery_info or not self.selected_port:
+                    self.logger.error("Incomplete configuration. Exiting.")
+                    QMessageBox.critical(None, "Configuration Error", "Incomplete configuration. Exiting application.")
+                    return False
+            else:
+                # User canceled
+                self.logger.error("Configuration canceled by user. Exiting.")
+                QMessageBox.warning(None, "Configuration Canceled", "Configuration was canceled by the user. Exiting application.")
+                return False
+
+            # Set logging level (already set in set_battery_info)
+            if self.central_logger:
+                self.central_logger.set_level(logging.getLevelName(self.logging_level))
+            self.logger.info(f"Logging level set to {logging.getLevelName(self.logging_level)}")
+
+            # Initialize GUI
+            self.gui = TelemetryGUI(data_keys=[], csv_handler=self.csv_handler)  # Pass csv_handler here
+            # Show the GUI
+            self.gui.show()
+            self.logger.debug("TelemetryGUI initialized and displayed.")
+
+            # Connect signals directly without checking
+            if not self.signals_connected:
+                self.gui.save_csv_signal.connect(self.finalize_csv)
+                self.gui.change_log_level_signal.connect(self.central_logger.set_level)
+                self.signals_connected = True  # Update the flag to prevent reconnection
+                self.logger.debug("Connected GUI signals to TelemetryApplication slots.")
+
+            # Proceed with the rest of the application
             self.serial_reader_thread = SerialReaderThread(
                 self.selected_port,
                 self.baudrate,
@@ -193,8 +198,8 @@ class TelemetryApplication:
             self.logger.info(f"Telemetry application started on {self.selected_port}.")
             print(f"Telemetry application started on {self.selected_port}.")
         except Exception as e:
-            self.logger.error(f"Failed to start serial reader thread: {e}")
-            QMessageBox.critical(None, "Serial Reader Error", f"Failed to start serial reader thread: {e}")
+            self.logger.error(f"Failed to run application: {e}")
+            QMessageBox.critical(None, "Application Error", f"Failed to run application: {e}")
             return False
 
         # Connect to the application's aboutToQuit signal for cleanup
@@ -278,6 +283,8 @@ class TelemetryApplication:
                         except ValueError as e:
                             self.logger.error(f"Invalid BP_PVS_Ah value for capacity calculation: {combined_data.get('BP_PVS_Ah')}, Exception: {e}")
 
+                        # Append to primary CSV
+                        self.csv_handler.append_to_csv(self.csv_file, combined_data)  # Correct call
             except Exception as e:
                 self.logger.error(f"Error processing data: {processed_data}, Exception: {e}")
 
@@ -290,8 +297,7 @@ class TelemetryApplication:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         raw_data_entry = {"timestamp": timestamp, "raw_data": raw_data}
         try:
-            self.buffer.add_raw_data(raw_data_entry, self.secondary_csv_file)
-            self.logger.debug(f"Raw data added to buffer: {raw_data_entry}")
+            self.csv_handler.append_to_csv(self.secondary_csv_file, raw_data_entry)  # Correct call
         except Exception as e:
             self.logger.error(f"Error processing raw data: {raw_data_entry}, Exception: {e}")
 
@@ -315,7 +321,7 @@ class TelemetryApplication:
         """
         try:
             # Open a save file dialog
-            options = QFileDialog.Options()
+            options = QFileDialog.Option()  # Changed from QFileDialog.Options()
             options |= QFileDialog.Option.DontUseNativeDialog
             custom_filename, _ = QFileDialog.getSaveFileName(
                 None,
@@ -327,11 +333,27 @@ class TelemetryApplication:
             if custom_filename:
                 if not custom_filename.endswith('.csv'):
                     custom_filename += '.csv'
-                self.csv_handler.finalize_csv(self.csv_file, custom_filename)
+
+                # Check if file already exists to prevent overwriting without confirmation
+                if os.path.exists(custom_filename):
+                    reply = QMessageBox.question(
+                        None,
+                        "Overwrite Confirmation",
+                        f"The file '{custom_filename}' already exists. Do you want to overwrite it?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No
+                    )
+                    if reply != QMessageBox.StandardButton.Yes:
+                        self.logger.info("User chose not to overwrite the existing CSV file.")
+                        QMessageBox.information(None, "Canceled", "CSV finalization was canceled by the user.")
+                        return
+
+                self.csv_handler.finalize_csv(self.csv_file, custom_filename)  # Correct call
                 self.logger.info(f"CSV data saved as {custom_filename}.")
                 print(f"CSV data saved as {custom_filename}.")
             else:
                 self.logger.warning("CSV finalization canceled by user.")
-                print("CSV finalization canceled.")
+                QMessageBox.warning(None, "Canceled", "CSV finalization was canceled by the user.")
         except Exception as e:
             self.logger.error(f"Error finalizing CSV file: {e}")
+            QMessageBox.critical(None, "CSV Finalization Error", f"An error occurred while finalizing the CSV file: {e}")

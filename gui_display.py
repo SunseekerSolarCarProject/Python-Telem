@@ -229,15 +229,6 @@ class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()  # Signal for saving CSV
     change_log_level_signal = pyqtSignal(str)  # Signal for changing log level
 
-    # gui_display.py
-
-class TelemetryGUI(QWidget):
-    # Define signals
-    update_data_signal = pyqtSignal(dict)
-    battery_info_signal = pyqtSignal(dict)
-    save_csv_signal = pyqtSignal()  # Signal for saving CSV
-    change_log_level_signal = pyqtSignal(str)  # Signal for changing log level
-
     def __init__(self, data_keys, csv_handler):
         super().__init__()
         self.data_keys = data_keys
@@ -256,8 +247,8 @@ class TelemetryGUI(QWidget):
         self.init_ui()
         # Connect the signal to the update method
         self.update_data_signal.connect(self.update_plots)
-        # Connect the log level change signal
-        self.change_log_level_signal.connect(self.change_log_level_from_settings)
+        # Removed faulty connection
+        # self.change_log_level_signal.connect(self.handle_log_level_change)
 
     def init_ui(self):
         self.logger.debug("Setting up GUI layout and plots with tabs.")
@@ -277,24 +268,26 @@ class TelemetryGUI(QWidget):
             'MC1VEL_Velocity': 'M/s',
             'MC1VEL_Speed': 'Mph',
             'MC1VEL_RPM': 'RPM',
-            'MC1LIM': '',
             'MC2BUS_Voltage': 'V',
             'MC2BUS_Current': 'A',
             'MC2VEL_Velocity': 'M/s',
             'MC2VEL_Speed': 'Mph',
             'MC2VEL_RPM': 'RPM',
-            'MC2LIM': '',
+            'DC_DRV_Motor_Velocity_setpoint': '#',
+            'DC_DRV_Motor_Current_setpoint': '#',
+            'DC_SWC_Position': ' ',
+            'DC_SWC_Value': '#',
             'BP_VMX_ID': '#',
             'BP_VMX_Voltage': 'V',
             'BP_VMN_ID': '#',
             'BP_VMN_Voltage': 'V',
             'BP_TMX_ID': '#',
             'BP_TMX_Temperature': '°F',
+            'BP_ISH_SOC': '%',
+            'BP_ISH_Amps': 'A',
             'BP_PVS_Voltage': 'V',
             'BP_PVS_milliamp/s': 'mA/s',
             'BP_PVS_Ah': 'Ah',
-            'BP_ISH_Amps': 'A',
-            'BP_ISH_SOC': '%',
             'Shunt_Remaining_wh': 'Wh',
             'Used_Ah_Remaining_wh': 'Wh',
             'Shunt_Remaining_Ah': 'Ah',
@@ -302,12 +295,7 @@ class TelemetryGUI(QWidget):
             'Shunt_Remaining_Time': 'hours',
             'Used_Ah_Remaining_Time': 'hours',
             'timestamp': 'hh:mm:ss',
-            'device_timestamp': 'hh:mm:ss',
-            'DC_DRV_Motor_Velocity_setpoint': '#',
-            'DC_DRV_Motor_Current_setpoint': '#',
-            'DC_SWC_Position': ' ',
-            'DC_SWC_Value': '#',
-            # ... add all other data keys with their units ...
+            'device_timestamp': 'hh:mm:ss'
         }
 
         # Define the tabs and the data keys for each tab
@@ -326,7 +314,6 @@ class TelemetryGUI(QWidget):
                 'MC2VEL_RPM',
                 'MC2VEL_Velocity',
                 'MC2VEL_Speed',
-                
                 # Add other MC2 data keys
             ],
             'Battery Pack Part 1': [
@@ -394,19 +381,24 @@ class TelemetryGUI(QWidget):
         csv_tab.setLayout(csv_layout)
         self.tabs.addTab(csv_tab, 'CSV Management')
 
-        # Display Current CSV File Path
-        self.csv_path_label = QLabel(f"Current CSV File: {self.csv_handler.get_csv_file_path()}")
-        csv_layout.addWidget(self.csv_path_label)
+        if self.csv_handler:
+            # Display Current CSV File Path
+            self.csv_path_label = QLabel(f"Current CSV File: {self.csv_handler.get_csv_file_path()}")
+            csv_layout.addWidget(self.csv_path_label)
 
-        # Button to Save CSV Data
-        save_csv_button = QPushButton("Save CSV Data")
-        save_csv_button.clicked.connect(self.save_csv_data)
-        csv_layout.addWidget(save_csv_button)
+            # Button to Save CSV Data
+            save_csv_button = QPushButton("Save CSV Data")
+            save_csv_button.clicked.connect(self.save_csv_data)
+            csv_layout.addWidget(save_csv_button)
 
-        # Button to Change CSV Save Location
-        change_csv_location_button = QPushButton("Change CSV Save Location")
-        change_csv_location_button.clicked.connect(self.change_csv_save_location)
-        csv_layout.addWidget(change_csv_location_button)
+            # Button to Change CSV Save Location
+            change_csv_location_button = QPushButton("Change CSV Save Location")
+            change_csv_location_button.clicked.connect(self.change_csv_save_location)
+            csv_layout.addWidget(change_csv_location_button)
+        else:
+            self.logger.warning("CSVHandler not provided. CSV Management features are disabled.")
+            warning_label = QLabel("CSV Management is disabled because CSVHandler is not provided.")
+            csv_layout.addWidget(warning_label)
 
     def create_plot_tabs(self):
         self.plot_widgets = {}
@@ -500,8 +492,16 @@ class TelemetryGUI(QWidget):
         """
         Slot to handle logging level changes from the Settings tab.
         """
-        self.logger.info(f"Logging level changed to: {level_str} from Settings tab.")
-        self.change_log_level_signal.emit(level_str)
+        try:
+            self.logger.debug(f"Received request to change logging level to: {level_str}")
+            self.settings_log_level_dropdown.setEnabled(False)  # Disable dropdown to prevent multiple emissions
+            self.change_log_level_signal.emit(level_str)  # Emit the signal with the new level
+            self.logger.debug(f"Emitted change_log_level_signal with level: {level_str}")
+            self.settings_log_level_dropdown.setEnabled(True)  # Re-enable dropdown
+        except Exception as e:
+            self.logger.error(f"Error emitting log level change signal: {e}")
+            QMessageBox.critical(self, "Logging Level Change Error", f"An error occurred while changing the logging level: {e}")
+            self.settings_log_level_dropdown.setEnabled(True)  # Ensure dropdown is re-enabled even if an error occurs
 
     def save_csv_data(self):
         """
@@ -514,22 +514,31 @@ class TelemetryGUI(QWidget):
         """
         Allows the user to change the default CSV save directory.
         """
-        options = QFileDialog.Options()
-        options |= QFileDialog.Option.DontUseNativeDialog
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select CSV Save Directory",
-            "",
-            options=options
-        )
-        if directory:
-            self.csv_handler.set_csv_save_directory(directory)
-            self.csv_path_label.setText(f"Current CSV File: {self.csv_handler.get_csv_file_path()}")
-            self.logger.info(f"CSV save directory changed to: {directory}")
-            QMessageBox.information(self, "Success", f"CSV save directory changed to: {directory}")
-        else:
-            self.logger.warning("CSV save location change canceled by user.")
-            QMessageBox.warning(self, "Canceled", "CSV save location change was canceled.")
+        try:
+            options = QFileDialog.Option()  # Changed from QFileDialog.Options()
+            options |= QFileDialog.Option.DontUseNativeDialog
+            directory = QFileDialog.getExistingDirectory(
+                self,
+                "Select CSV Save Directory",
+                "",
+                options=options
+            )
+            if directory:
+                # Check if directory is writable
+                if os.access(directory, os.W_OK):
+                    self.csv_handler.set_csv_save_directory(directory)
+                    self.csv_path_label.setText(f"Current CSV File: {self.csv_handler.get_csv_file_path()}")
+                    self.logger.info(f"CSV save directory changed to: {directory}")
+                    QMessageBox.information(self, "Success", f"CSV save directory changed to: {directory}")
+                else:
+                    self.logger.error(f"Selected directory is not writable: {directory}")
+                    QMessageBox.critical(self, "Permission Error", f"The selected directory is not writable: {directory}")
+            else:
+                self.logger.warning("CSV save location change canceled by user.")
+                QMessageBox.warning(self, "Canceled", "CSV save location change was canceled by the user.")
+        except Exception as e:
+            self.logger.error(f"Error changing CSV save location: {e}")
+            QMessageBox.critical(self, "CSV Save Location Error", f"An error occurred while changing the CSV save location: {e}")
 
     def update_plots(self, data):
         self.logger.debug(f"Received data for updating plots: {data}")

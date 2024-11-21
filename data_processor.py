@@ -127,7 +127,7 @@ class DataProcessor:
         """
         try:
             # Interpret the SWC Position hex as a description
-            swc_description = self.steering_wheel_desc.get(hex1, "Testing")
+            swc_description = self.steering_wheel_desc.get(hex1, "Unkown")
             bits2 = self.hex_to_bits(hex2)
 
             # Format the final dictionary to include both description and hex values

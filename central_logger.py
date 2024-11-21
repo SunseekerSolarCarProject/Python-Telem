@@ -3,6 +3,7 @@
 import logging
 from logging.handlers import RotatingFileHandler
 import sys
+from PyQt6.QtWidgets import QMessageBox
 
 class CentralLogger:
     def __init__(self, log_file='telemetry_application.log', level=logging.INFO):
@@ -28,7 +29,7 @@ class CentralLogger:
             file_handler = RotatingFileHandler(
                 self.log_file,
                 maxBytes=5*1024*1024,  # 5 MB
-                backupCount=3
+                backupCount=5
             )
             file_handler.setLevel(self.level)
             file_formatter = logging.Formatter(
@@ -46,17 +47,42 @@ class CentralLogger:
             console_handler.setFormatter(console_formatter)
             self.logger.addHandler(console_handler)
 
-    def set_level(self, level):
+    def set_level(self, level_str):
         """
-        Sets the logging level for all handlers.
+        Sets the logging level for all handlers based on a string input.
 
-        :param level: The desired logging level (e.g., logging.DEBUG, logging.INFO).
+        :param level_str: String representing the desired logging level.
         """
-        self.level = level
-        self.logger.setLevel(self.level)
-        for handler in self.logger.handlers:
-            handler.setLevel(self.level)
-        self.logger.info(f"Logging level set to {logging.getLevelName(self.level)}.")
+        try:
+            self.logger.debug(f"Attempting to set logging level to: {level_str}")
+            # Validate logging level
+            if not hasattr(logging, level_str.upper()):
+                raise AttributeError(f"Invalid logging level: {level_str}")
+
+            level = getattr(logging, level_str.upper(), logging.INFO)
+            self.level = level
+            self.logger.setLevel(self.level)
+            for handler in self.logger.handlers:
+                handler.setLevel(self.level)
+            
+            # Log the level change
+            # To ensure this message is logged, temporarily set the handler levels to DEBUG
+            original_levels = [handler.level for handler in self.logger.handlers]
+            for handler in self.logger.handlers:
+                handler.setLevel(logging.DEBUG)
+            self.logger.info(f"Logging level set to {logging.getLevelName(self.level)}.")
+            # Restore original handler levels
+            for handler, orig_level in zip(self.logger.handlers, original_levels):
+                handler.setLevel(orig_level)
+            self.logger.debug(f"Successfully set logging level to {logging.getLevelName(self.level)}.")
+        except AttributeError as e:
+            # Handle invalid level strings gracefully
+            self.logger.error(f"Invalid logging level: {level_str}. Exception: {e}")
+            QMessageBox.critical(None, "Logging Level Error", f"Invalid logging level: {level_str}. Please select a valid level.")
+        except Exception as e:
+            # Catch all other exceptions to prevent crashes
+            self.logger.error(f"Error setting logging level to {level_str}: {e}")
+            QMessageBox.critical(None, "Logging Configuration Error", f"An error occurred while setting the logging level: {e}")
 
     def get_logger(self, name=None):
         """
@@ -89,4 +115,3 @@ class CentralLogger:
         """
         self.logger.removeHandler(handler)
         self.logger.info(f"Removed handler: {handler}")
-
