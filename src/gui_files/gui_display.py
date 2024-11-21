@@ -1,16 +1,17 @@
 # gui_display.py
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
-from gui_config_dialog import ConfigDialog
-from gui_csv_management import CSVManagementTab
-from gui_plot_manager import PlotManager
-from gui_settings_tab import SettingsTab
-from gui_data_display_tab import DataDisplayTab
+from gui_files.gui_config_dialog import ConfigDialog
+from gui_files.gui_csv_management import CSVManagementTab
+from gui_files.gui_plot_manager import PlotManager
+from gui_files.gui_settings_tab import SettingsTab
+from gui_files.gui_data_display_tab import DataDisplayTab
 
 
 class TelemetryGUI(QWidget):
-    def __init__(self, csv_handler, logger, units):
+    def __init__(self,data_keys, csv_handler, logger, units):
         super().__init__()
+        self.data_keys = data_keys
         self.logger = logger
         self.csv_handler = csv_handler
         self.units = units

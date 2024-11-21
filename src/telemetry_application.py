@@ -71,6 +71,18 @@ class TelemetryApplication:
             'device_timestamp': 'hh:mm:ss'
         }
 
+        self.data_keys = [
+            "MC1BUS_Voltage","MC1BUS_Current","MC1VEL_RPM","MC1VEL_Velocity","MC1VEL_Speed",                  
+            "MC2BUS_Voltage","MC2BUS_Current","MC2VEL_RPM","MC2VEL_Velocity","MC2VEL_Speed",                  
+            "MC1LIM","MC2LIM","Total_Capacity_Ah","Total_Capacity_Wh","Total_Voltage",                 
+            "DC_DRV_Motor_Velocity_Setpoint","DC_DRV_Motor_Current_Setpoint", 
+            "DC_Switch_Position","DC_SWC_Value","BP_VMX_ID","BP_VMX_Voltage","BP_VMN_ID","BP_VMN_Voltage",                 
+            "BP_TMX_Temperature","BP_TMX_ID","BP_ISH_SOC","BP_ISH_Amps","BP_PVS_Voltage",                
+            "BP_PVS_Ah", "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah","Shunt_Remaining_wh",            
+            "Used_Ah_Remaining_wh","Shunt_Remaining_Time",          
+            "Used_Ah_Remaining_Time","device_timestamp","timestamp"                       
+        ]
+
         # Initialize other attributes
         self.serial_reader_thread = None
         self.data_processor = DataProcessor()
@@ -78,11 +90,11 @@ class TelemetryApplication:
         self.Data_Display = DataDisplay(self.units)
         self.csv_handler = CSVHandler()  # Initialized with default directory
         self.csv_headers = self.csv_handler.generate_csv_headers()
-        self.secondary_csv_headers = ["timestamp", "raw_data"]
         self.csv_file = self.csv_handler.get_csv_file_path()
+        self.secondary_csv_header = ["timestamp", "raw_data"]
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
         self.used_Ah = 0.0
-        self.gui_display = TelemetryGUI(self.csv_handler, self.logger, self.units)
+        self.gui_display = TelemetryGUI(self.data_keys, self.csv_handler, self.logger, self.units)
 
         # Initialize BufferData with the existing CSVHandler
         self.buffer = BufferData(
