@@ -2,6 +2,7 @@
 
 import struct
 import logging
+import numpy as np
 from extra_calculations import ExtraCalculations
 
 # Error and limit flag descriptions
@@ -53,16 +54,21 @@ class DataProcessor:
         Convert a 32-bit hex string to a float.
         """
         try:
-            if hex_data == '0xHHHHHHHH' or len(hex_data) < 8:
+            # Handle invalid data early
+            if not isinstance(hex_data, str) or hex_data in ['0xHHHHHHHH', 'N/A', None]:
                 self.logger.debug(f"Invalid hex data for float conversion: {hex_data}")
-                return 0.0
-            int_value = int(hex_data, 16)
+                return 0.0  # Return a default value or consider skipping
+
+            int_value = int(hex_data, 16)  # Convert to integer
             if int_value > 0x7FFFFFFF:  # Check for signed values
                 int_value -= 0x100000000
-            float_value = float(int_value)
-            self.logger.debug(f"Converted hex to float: {hex_data} -> {float_value}")
+
+            float_value = float(int_value)  # Convert to float
+            if not np.isfinite(float_value):  # Check for finite numbers
+                self.logger.warning(f"Non-finite float conversion: {hex_data}")
+                return 0.0
             return float_value
-        except (ValueError, struct.error) as e:
+        except (ValueError, TypeError, struct.error) as e:
             self.logger.error(f"Error converting hex to float: {hex_data}, Exception: {e}")
             return 0.0
 
@@ -158,6 +164,14 @@ class DataProcessor:
             return {}
 
         key = parts[0].strip()
+        hex1 = parts[1].strip() if len(parts) > 1 else "0x00000000"
+        hex2 = parts[2].strip() if len(parts) > 2 else "0x00000000"
+
+        # Skip invalid hex data
+        if hex1 in ['N/A', None] or hex2 in ['N/A', None]:
+            self.logger.warning(f"Skipping invalid hex data: {data_line}")
+            return {}
+        
         self.logger.debug(f"Parsing data line for key: {key}")
         try:
             # Handle TL_TIM (device_timestamp) case
@@ -173,9 +187,6 @@ class DataProcessor:
             if len(parts) < 3:
                 self.logger.warning(f"Data line does not have enough parts: {data_line}")
                 return {}
-            
-            hex1 = parts[1].strip() if len(parts) > 1 else "0x00000000"
-            hex2 = parts[2].strip() if len(parts) > 2 else "0x00000000"
 
             self.logger.debug(f"Parsing data for key: {key}, hex1: {hex1}, hex2: {hex2}")
 

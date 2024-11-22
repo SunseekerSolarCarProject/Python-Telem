@@ -3,7 +3,6 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
 from PyQt6.QtCore import Qt
 
-
 class DataTableTab(QWidget):
     """
     A tab for displaying telemetry data in a three-column format: Parameter, Value, Unit.
@@ -45,11 +44,16 @@ class DataTableTab(QWidget):
 
         self.logger.debug(f"Updating Data Table with telemetry data: {telemetry_data}")
 
-        self.table_widget.setRowCount(len(telemetry_data))
+        # Flatten the telemetry_data to handle nested lists
+        flat_data = self.flatten_telemetry_data(telemetry_data)
 
-        for row, (key, value) in enumerate(telemetry_data.items()):
+        self.table_widget.setRowCount(len(flat_data))
+
+        for row, (key, value) in enumerate(flat_data.items()):
             # Populate Parameter column
-            self.table_widget.setItem(row, 0, QTableWidgetItem(key))
+            param_item = QTableWidgetItem(key)
+            param_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.table_widget.setItem(row, 0, param_item)
 
             # Populate Value column
             value_item = QTableWidgetItem(str(value))
@@ -61,3 +65,19 @@ class DataTableTab(QWidget):
             unit_item = QTableWidgetItem(unit)
             unit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table_widget.setItem(row, 2, unit_item)
+
+    def flatten_telemetry_data(self, telemetry_data):
+        """
+        Flattens the telemetry data by converting list-type values into comma-separated strings.
+
+        :param telemetry_data: Original telemetry data dictionary.
+        :return: Flattened telemetry data dictionary.
+        """
+        flat_data = {}
+        for key, value in telemetry_data.items():
+            if isinstance(value, list):
+                # Join list elements into a comma-separated string
+                flat_data[key] = ', '.join(value) if value else 'None'
+            else:
+                flat_data[key] = value
+        return flat_data

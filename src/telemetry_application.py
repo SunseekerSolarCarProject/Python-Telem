@@ -16,6 +16,7 @@ from csv_handler import CSVHandler
 
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
+
     def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
         """
         Initializes the TelemetryApplication.
@@ -85,7 +86,7 @@ class TelemetryApplication(QObject):
         self.data_keys = [
             "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
             "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed",
-            "MC1LIM", "MC2LIM", "Total_Capacity_Ah", "Total_Capacity_Wh", "Total_Voltage",
+            "Total_Capacity_Ah", "Total_Capacity_Wh", "Total_Voltage",
             "DC_DRV_Motor_Velocity_Setpoint", "DC_DRV_Motor_Current_Setpoint",
             "DC_Switch_Position", "DC_SWC_Value", "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage",
             "BP_TMX_Temperature", "BP_TMX_ID", "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage",
@@ -167,7 +168,10 @@ class TelemetryApplication(QObject):
 
             self.gui.show()
             self.connect_signals()
-            self.update_data_signal.connect(self.gui.update_data_display)  # Connect the signal to the GUI method
+            
+            # Connect the update_data_signal to the GUI's update_all_tabs method
+            self.update_data_signal.connect(self.gui.update_all_tabs)
+            
             self.start_serial_reader()
             return True
         except Exception as e:
@@ -207,11 +211,8 @@ class TelemetryApplication(QObject):
                     )
 
                     if combined_data:
-                        self.gui.mc1_tab.update_graphs(combined_data)
-                        self.gui.mc2_tab.update_graphs(combined_data)
-                        self.gui.pack1_tab.update_graphs(combined_data)
-                        self.gui.pack2_tab.update_graphs(combined_data)
-                        self.gui.remaining_tab.update_graphs(combined_data)
+                        # Emit signal to update GUI
+                        self.update_data_signal.emit(combined_data)
 
         except Exception as e:
             self.logger.error(f"Error processing data: {data}, Exception: {e}")
