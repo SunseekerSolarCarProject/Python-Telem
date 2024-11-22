@@ -138,9 +138,11 @@ class TelemetryApplication(QObject):
         self.battery_info = config_data.get("battery_info")
         self.selected_port = config_data.get("selected_port")
         self.logging_level = config_data.get("logging_level")
+        self.baudrate = config_data.get("baud_rate", 9600)  # Update baudrate based on config data
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")
         self.logger.info(f"Logging level: {logging.getLevelName(self.logging_level)}")
+        self.logger.info(f"Baud rate: {self.baudrate}")
 
         # Perform calculations
         if self.battery_info:
@@ -152,6 +154,13 @@ class TelemetryApplication(QObject):
             )
             self.logger.info(f"Calculated battery info: {calculated_battery_info}")
             self.battery_info.update(calculated_battery_info)
+
+        # Set initial settings in settings tab
+        config_data_copy = config_data.copy()
+        # Ensure baud_rate is present
+        if "baud_rate" not in config_data_copy:
+            config_data_copy["baud_rate"] = self.baudrate
+        self.gui.set_initial_settings(config_data_copy)
 
     def start(self):
         return self.run_application()
@@ -175,6 +184,7 @@ class TelemetryApplication(QObject):
 
             # Connect the update_data_signal to BufferData's add_data method
             self.update_data_signal.connect(self.buffer.add_data)
+            self.update_data_signal.connect(self.gui.update_all_tabs)
 
             self.gui.show()
             self.start_serial_reader(self.selected_port, self.baudrate)
@@ -192,7 +202,9 @@ class TelemetryApplication(QObject):
             process_data_callback=self.process_data,
             process_raw_data_callback=self.process_raw_data
         )
-        self.serial_reader_thread.data_received.connect(self.update_data_signal.emit)  # Expects dict
+        # Connect data_received signal to process_data method
+        self.serial_reader_thread.data_received.connect(self.process_data)  # Expects str
+        # Connect raw_data_received to process_raw_data
         self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)  # Handle raw data separately
         self.serial_reader_thread.start()
         self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
@@ -240,7 +252,7 @@ class TelemetryApplication(QObject):
                 process_data_callback=self.process_data,
                 process_raw_data_callback=self.process_raw_data
             )
-            self.serial_reader_thread.data_received.connect(self.update_data_signal.emit)
+            self.serial_reader_thread.data_received.connect(self.process_data)
             self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)
             self.serial_reader_thread.start()
             self.logger.info(f"Restarted SerialReaderThread on {port} with baudrate {baudrate}")
@@ -269,9 +281,12 @@ class TelemetryApplication(QObject):
                     )
 
                     if combined_data:
-                        # Emit signal to update GUI
-                        self.update_data_signal.emit(combined_data)
-
+                        # Verify the type of combined_data before emitting
+                        if isinstance(combined_data, dict):
+                            self.update_data_signal.emit(combined_data)
+                            self.logger.debug(f"Emitted combined_data: {combined_data}")
+                        else:
+                            self.logger.error(f"Combined data is not a dict: {combined_data} (type: {type(combined_data)})")
         except Exception as e:
             self.logger.error(f"Error processing data: {data}, Exception: {e}")
 

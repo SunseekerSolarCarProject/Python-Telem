@@ -3,7 +3,7 @@
 import time
 from datetime import datetime
 import logging
-from extra_calculations import Extra_calculations
+from extra_calculations import ExtraCalculations
 
 class BufferData:
     def __init__(self, csv_handler, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
@@ -17,7 +17,7 @@ class BufferData:
         :param buffer_timeout: Time in seconds before the buffer flushes data.
         """
         self.logger = logging.getLogger(__name__)
-        self.extra_calculations = Extra_calculations()
+        self.extra_calculations = ExtraCalculations()
         self.csv_handler = csv_handler  # Use the passed CSVHandler instance
         self.csv_headers = csv_headers
         self.secondary_csv_headers = secondary_csv_headers

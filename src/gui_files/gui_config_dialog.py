@@ -1,4 +1,5 @@
 # config_dialog.py
+
 import os
 import logging
 from PyQt6.QtWidgets import (
@@ -20,12 +21,14 @@ class ConfigDialog(QDialog):
         self.battery_info = None
         self.selected_port = None
         self.logging_level = logging.INFO
+        self.baud_rate = 9600  # Default baud rate
 
         self.init_ui()
 
     def init_ui(self):
         layout = QFormLayout(self)
 
+        # Battery Configuration Dropdown
         self.config_dropdown = QComboBox()
         self.populate_config_dropdown()
         layout.addRow("Battery Configuration:", self.config_dropdown)
@@ -34,15 +37,24 @@ class ConfigDialog(QDialog):
         load_button.clicked.connect(self.load_configuration)
         layout.addRow(load_button)
 
+        # COM Port Dropdown
         self.port_dropdown = QComboBox()
         self.populate_com_port_dropdown()
         layout.addRow("Select COM Port:", self.port_dropdown)
 
+        # Logging Level Dropdown
         self.log_level_dropdown = QComboBox()
         self.log_level_dropdown.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
         self.log_level_dropdown.setCurrentText('INFO')
         layout.addRow("Logging Level:", self.log_level_dropdown)
 
+        # Baud Rate Dropdown
+        self.baud_rate_dropdown = QComboBox()
+        self.baud_rate_dropdown.addItems(['9600', '19200', '38400', '57600', '115200'])
+        self.baud_rate_dropdown.setCurrentText('9600')  # Default baud rate
+        layout.addRow("Baud Rate:", self.baud_rate_dropdown)
+
+        # Dialog Buttons
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=self
@@ -86,11 +98,13 @@ class ConfigDialog(QDialog):
 
     def emit_config_data(self):
         """
-        Emit the configuration data signal with battery info, selected COM port, and logging level.
+        Emit the configuration data signal with battery info, selected COM port, baud rate, and logging level.
         """
         selected_port = self.port_dropdown.currentText()
         log_level_str = self.log_level_dropdown.currentText()
         log_level = getattr(logging, log_level_str.upper(), logging.INFO)
+        baud_rate_str = self.baud_rate_dropdown.currentText()
+        baud_rate = int(baud_rate_str)
 
         if selected_port == "No COM ports available":
             selected_port = None
@@ -100,7 +114,8 @@ class ConfigDialog(QDialog):
         config_data = {
             "battery_info": self.battery_info,
             "selected_port": selected_port,
-            "logging_level": log_level
+            "logging_level": log_level,
+            "baud_rate": baud_rate
         }
 
         self.logger.debug(f"Emitting configuration data: {config_data}")
@@ -136,7 +151,6 @@ class ConfigDialog(QDialog):
         except Exception as e:
             self.logger.error(f"Failed to load configuration: {e}")
             QMessageBox.critical(self, "Error", f"Failed to load configuration: {e}")
-
 
     def manual_battery_input(self):
         """

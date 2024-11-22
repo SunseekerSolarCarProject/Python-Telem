@@ -124,7 +124,7 @@ class TelemetryGUI(QWidget):
         self.csv_management_tab = CSVManagementTab(csv_handler=self.csv_handler, logger=self.logger)
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
 
-    def update_all_tabs(self, telemetry_data):
+    def update_all_tabs(self, telemetry_data: dict):
         """
         Updates all tabs with telemetry data.
         """
@@ -142,7 +142,7 @@ class TelemetryGUI(QWidget):
         except Exception as e:
             self.logger.error(f"Error updating all tabs: {e}")
 
-    def update_color_mapping(self, key, color):
+    def update_color_mapping(self, key: str, color: str):
         """
         Update the color mapping for a specific key and update graph curves accordingly.
         """
@@ -155,7 +155,7 @@ class TelemetryGUI(QWidget):
         self.update_graph_tab_color(self.pack2_tab, key, color)
         self.update_graph_tab_color(self.remaining_tab, key, color)
 
-    def update_graph_tab_color(self, graph_tab, key, color):
+    def update_graph_tab_color(self, graph_tab, key: str, color: str):
         """
         Update the color of a specific curve in a graph tab.
         """
@@ -165,6 +165,15 @@ class TelemetryGUI(QWidget):
             self.logger.info(f"Updated color for {key} in {tab_name}: {color}")
         else:
             self.logger.warning(f"Graph tab {graph_tab} does not have set_curve_color method.")
+
+    def set_initial_settings(self, config_data: dict):
+        """
+        Set the initial settings in the SettingsTab based on configuration data.
+        """
+        try:
+            self.settings_tab.set_initial_settings(config_data)
+        except Exception as e:
+            self.logger.error(f"Failed to set initial settings in SettingsTab: {e}")
 
     def closeEvent(self, event):
         """
