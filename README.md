@@ -20,10 +20,10 @@ If wanting to add new battery configs to the software dropdown follow these step
 
 1. create a txt file and name the battery config file.
 2. make sure the battery config files has these names in them:
-    Battery capacity amps hours, A value
-    Battery nominal voltage, A value
-    Amount of battery cells, A value
-    Number of battery strings, A value
+    - Battery capacity amps hours, A value 
+    - Battery nominal voltage, A value
+    - Amount of battery cells, A value
+    - Number of battery strings, A value
 3. save that file and put it in the configs file folder where the "main_app.exe is there.
 4. now it shows up in the drop down config for the battery to load.
 
