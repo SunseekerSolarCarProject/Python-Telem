@@ -11,13 +11,13 @@ from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
 from extra_calculations import ExtraCalculations
-from gui_files.gui_display import TelemetryGUI, ConfigDialog
+from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Ensure correct import paths
 from csv_handler import CSVHandler
 
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
 
-    def __init__(self, baudrate, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
+    def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
         """
         Initializes the TelemetryApplication.
         """
@@ -45,6 +45,13 @@ class TelemetryApplication(QObject):
     def init_logger(self):
         self.logger = self.central_logger.get_logger(__name__) if self.central_logger else logging.getLogger(__name__)
         self.logger.setLevel(self.logging_level)
+        # Add console handler if not present
+        if not self.logger.handlers:
+            ch = logging.StreamHandler()
+            ch.setLevel(self.logging_level)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            ch.setFormatter(formatter)
+            self.logger.addHandler(ch)
 
     def init_units_and_keys(self):
         self.units = {
@@ -98,8 +105,8 @@ class TelemetryApplication(QObject):
         self.csv_handler = CSVHandler()
         self.csv_file = self.csv_handler.get_csv_file_path()
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
-        self.csv_headers = self.csv_handler.generate_csv_headers()
-        self.secondary_csv_headers = ["timestamp", "raw_data"]
+        self.csv_headers = self.csv_handler.primary_headers
+        self.secondary_csv_headers = self.csv_handler.secondary_headers
 
     def init_buffer(self):
         self.buffer = BufferData(
@@ -118,7 +125,9 @@ class TelemetryApplication(QObject):
     def connect_signals(self):
         if not self.signals_connected:
             self.gui.save_csv_signal.connect(self.finalize_csv)
-            self.gui.change_log_level_signal.connect(self.central_logger.set_level)
+            self.gui.change_log_level_signal.connect(self.update_logging_level)
+            self.gui.settings_applied_signal.connect(self.handle_settings_applied)
+            self.update_data_signal.connect(self.gui.update_all_tabs)
             self.signals_connected = True
             self.logger.debug("Connected GUI signals.")
 
@@ -162,33 +171,82 @@ class TelemetryApplication(QObject):
                 return False
 
             self.gui = TelemetryGUI(self.data_keys, self.csv_handler, self.logger, self.units)
+            self.connect_signals()
 
-            # Connect the logging level signal
-            self.gui.settings_tab.log_level_signal.connect(self.update_logging_level)
+            # Connect the update_data_signal to BufferData's add_data method
+            self.update_data_signal.connect(self.buffer.add_data)
 
             self.gui.show()
-            self.connect_signals()
-            
-            # Connect the update_data_signal to the GUI's update_all_tabs method
-            self.update_data_signal.connect(self.gui.update_all_tabs)
-            
-            self.start_serial_reader()
+            self.start_serial_reader(self.selected_port, self.baudrate)
             return True
         except Exception as e:
             self.logger.error(f"Failed to start application: {e}")
             return False
 
-    def start_serial_reader(self):
-        if not self.selected_port:
+    def start_serial_reader(self, port, baudrate):
+        if not port:
             raise ValueError("No COM port selected.")
         self.serial_reader_thread = SerialReaderThread(
-            self.selected_port,
-            self.baudrate,
+            port,
+            baudrate,
             process_data_callback=self.process_data,
             process_raw_data_callback=self.process_raw_data
         )
+        self.serial_reader_thread.data_received.connect(self.update_data_signal.emit)  # Expects dict
+        self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)  # Handle raw data separately
         self.serial_reader_thread.start()
-        self.logger.info(f"Serial reader started on {self.selected_port}")
+        self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
+
+    def handle_settings_applied(self, port, baudrate, log_level):
+        """
+        Handles updates to COM port, baud rate, and logging level.
+        """
+        self.logger.info(f"Applying new settings: COM Port={port}, Baud Rate={baudrate}, Log Level={log_level}")
+        # Update logging level
+        self.update_logging_level(log_level)
+        # Restart serial reader with new COM port and baud rate
+        self.restart_serial_reader(port, baudrate)
+
+    def update_logging_level(self, level):
+        """
+        Updates the logging level at runtime.
+        """
+        try:
+            log_level = getattr(logging, level.upper(), None)
+            if isinstance(log_level, int):
+                self.logger.setLevel(log_level)
+                if self.central_logger:
+                    self.central_logger.set_level(level.upper())  # Update central logger if applicable
+                self.logger.info(f"Logging level updated to {level}")
+            else:
+                self.logger.error(f"Invalid logging level: {level}")
+        except Exception as e:
+            self.logger.error(f"Failed to update logging level: {e}")
+
+    def restart_serial_reader(self, port, baudrate):
+        """
+        Restarts the SerialReaderThread with new COM port and baud rate.
+        """
+        try:
+            if self.serial_reader_thread and self.serial_reader_thread.isRunning():
+                self.serial_reader_thread.stop()
+                self.serial_reader_thread.wait()
+                self.logger.info("Stopped existing SerialReaderThread.")
+
+            # Start a new SerialReaderThread with updated settings
+            self.serial_reader_thread = SerialReaderThread(
+                port,
+                baudrate,
+                process_data_callback=self.process_data,
+                process_raw_data_callback=self.process_raw_data
+            )
+            self.serial_reader_thread.data_received.connect(self.update_data_signal.emit)
+            self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)
+            self.serial_reader_thread.start()
+            self.logger.info(f"Restarted SerialReaderThread on {port} with baudrate {baudrate}")
+        except Exception as e:
+            self.logger.error(f"Failed to restart SerialReaderThread with COM Port={port}, Baud Rate={baudrate}: {e}")
+            QMessageBox.critical(None, "Error", f"Failed to connect to COM Port {port} with baud rate {baudrate}.\nError: {e}")
 
     def process_data(self, data):
         """
@@ -218,40 +276,39 @@ class TelemetryApplication(QObject):
             self.logger.error(f"Error processing data: {data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
+        """
+        Processes raw hex data and buffers it for secondary CSV writing.
+        """
         try:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            raw_entry = {"timestamp": timestamp, "raw_data": raw_data}
-            self.buffer.add_raw_data(raw_entry, self.secondary_csv_file)
+            self.buffer.add_raw_data(raw_data, self.secondary_csv_file)
         except Exception as e:
             self.logger.error(f"Error processing raw data: {e}")
-
-    def update_logging_level(self, level):
-        """
-        Updates the logging level at runtime.
-        """
-        try:
-            log_level = getattr(logging, level.upper(), None)
-            if isinstance(log_level, int):
-                self.logger.setLevel(log_level)
-                self.central_logger.set_level(level.upper())  # Update central logger
-                self.logger.info(f"Logging level updated to {level}")
-            else:
-                self.logger.error(f"Invalid logging level: {level}")
-        except Exception as e:
-            self.logger.error(f"Failed to update logging level: {e}")
 
     def finalize_csv(self):
         try:
             options = QFileDialog.Option.DontUseNativeDialog
             custom_filename, _ = QFileDialog.getSaveFileName(None, "Save CSV", "", "CSV Files (*.csv);;All Files (*)", options=options)
             if custom_filename:
+                if not custom_filename.endswith('.csv'):
+                    custom_filename += '.csv'
                 self.csv_handler.finalize_csv(self.csv_file, custom_filename)
+                self.logger.info(f"CSV saved as {custom_filename}.")
+                QMessageBox.information(None, "Success", f"CSV saved as {custom_filename}.")
         except Exception as e:
             self.logger.error(f"Error finalizing CSV: {e}")
+            QMessageBox.critical(None, "Error", f"Error finalizing CSV: {e}")
 
     def cleanup(self):
-        if self.serial_reader_thread:
+        if self.serial_reader_thread and self.serial_reader_thread.isRunning():
             self.serial_reader_thread.stop()
-            self.serial_reader_thread.join()
+            self.serial_reader_thread.wait()
+            self.logger.info("SerialReaderThread stopped.")
         self.finalize_csv()
         self.logger.info("Cleanup completed.")
+
+    def closeEvent(self, event):
+        """
+        Override the closeEvent to perform cleanup before exiting.
+        """
+        self.cleanup()
+        event.accept()

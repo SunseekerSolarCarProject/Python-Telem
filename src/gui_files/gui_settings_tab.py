@@ -1,4 +1,4 @@
-# settings_tab.py
+# gui_settings_tab.py
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,
@@ -10,10 +10,10 @@ import serial.tools.list_ports
 class SettingsTab(QWidget):
     log_level_signal = pyqtSignal(str)  # Signal for logging level changes
     color_changed_signal = pyqtSignal(str, str)  # Signal for color changes (key, color)
+    settings_applied_signal = pyqtSignal(str, int, str)  # Signal for COM port, baud rate, log level changes
 
-    def __init__(self, update_com_and_baud_callback, logger, data_keys, color_mapping):
+    def __init__(self, logger, data_keys, color_mapping):
         super().__init__()
-        self.update_com_and_baud_callback = update_com_and_baud_callback
         self.logger = logger
         self.data_keys = data_keys
         self.color_mapping = color_mapping.copy()  # Make a copy to use
@@ -45,6 +45,7 @@ class SettingsTab(QWidget):
 
         self.baud_rate_dropdown = QComboBox()
         self.baud_rate_dropdown.addItems(['9600', '19200', '38400', '57600', '115200'])
+        self.baud_rate_dropdown.setCurrentText('9600')  # Set default baud rate
         layout.addWidget(self.baud_rate_dropdown)
 
         # Color Selection
@@ -97,24 +98,35 @@ class SettingsTab(QWidget):
             self.color_mapping[key] = selected_color
             self.color_changed_signal.emit(key, selected_color)
             self.logger.info(f"Color for {key} changed to {selected_color}")
-            print(f"Emitting color_changed_signal for {key}: {selected_color}")  # Debug print
         else:
             self.logger.info(f"Color selection canceled for {key}")
-            print(f"Color selection canceled for {key}")  # Debug print
 
     def apply_settings(self):
         """
         Apply settings including logging level, COM port, baud rate, and graph colors.
         """
         com_port = self.com_port_dropdown.currentText()
-        baud_rate = self.baud_rate_dropdown.currentText()
+        baud_rate_str = self.baud_rate_dropdown.currentText()
         selected_log_level = self.log_level_dropdown.currentText()  # Get the logging level
 
-        if com_port and baud_rate and com_port != "No COM ports available":
-            self.update_com_and_baud_callback(com_port, int(baud_rate))
-            self.log_level_signal.emit(selected_log_level)  # Emit the selected logging level
-            self.logger.info(f"Settings applied: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}")
-            print(f"Emitting log_level_signal: {selected_log_level}")  # Debug print
-        else:
-            QMessageBox.warning(self, "Invalid Settings", "Please select a valid COM port and baud rate.")
-            self.logger.warning("Invalid settings applied.")
+        # Validate COM port selection
+        if com_port == "No COM ports available":
+            QMessageBox.warning(self, "Invalid COM Port", "No COM ports are available. Please connect a device.")
+            self.logger.warning("Attempted to apply settings with no available COM ports.")
+            return
+
+        # Validate baud rate
+        try:
+            baud_rate = int(baud_rate_str)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Baud Rate", "Please select a valid baud rate.")
+            self.logger.warning(f"Invalid baud rate selected: {baud_rate_str}")
+            return
+
+        # Emit signals for logging level and color changes
+        self.log_level_signal.emit(selected_log_level)
+        # Color changes are already emitted individually via color_changed_signal
+
+        # Emit signal for COM port and baud rate changes along with log level
+        self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level)
+        self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}")

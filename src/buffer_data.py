@@ -3,8 +3,7 @@
 import time
 from datetime import datetime
 import logging
-from data_processor import DataProcessor
-from extra_calculations import ExtraCalculations
+from extra_calculations import Extra_calculations
 
 class BufferData:
     def __init__(self, csv_handler, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
@@ -18,15 +17,14 @@ class BufferData:
         :param buffer_timeout: Time in seconds before the buffer flushes data.
         """
         self.logger = logging.getLogger(__name__)
-        self.dataprocessor = DataProcessor()
-        self.extra_calculations = ExtraCalculations()
+        self.extra_calculations = Extra_calculations()
         self.csv_handler = csv_handler  # Use the passed CSVHandler instance
         self.csv_headers = csv_headers
         self.secondary_csv_headers = secondary_csv_headers
         self.buffer_size = buffer_size
         self.buffer_timeout = buffer_timeout
-        self.data_buffer = []  # Holds processed data entries
-        self.raw_data_buffer = []  # Holds raw hex data entries
+        self.data_buffer = []  # Holds processed data entries for primary CSV
+        self.raw_data_buffer = []  # Holds raw hex data entries for secondary CSV
         self.last_flush_time = time.time()
         self.combined_data = {}  # Holds the latest values for each telemetry field
         self.logger.info(f"BufferData initialized with buffer_size={buffer_size}, buffer_timeout={buffer_timeout}")
@@ -44,7 +42,7 @@ class BufferData:
 
         # Determine if buffer is ready to flush based on size or timeout
         buffer_ready = len(self.data_buffer) >= self.buffer_size or \
-                (time.time() - self.last_flush_time) >= self.buffer_timeout
+                       (time.time() - self.last_flush_time) >= self.buffer_timeout
         self.logger.debug(f"Buffer size: {len(self.data_buffer)}, Time since last flush: {time.time() - self.last_flush_time:.2f}s")
         if buffer_ready:
             self.logger.debug("Buffer is ready to flush.")
@@ -64,21 +62,25 @@ class BufferData:
     def is_ready_to_flush(self):
         """
         Determines if the buffer is ready to flush based on timeout or size.
+
         :return: True if the buffer is ready to flush, False otherwise.
         """
         current_time = time.time()
-        elapsed_time = current_time - self.last_flush_time  # Use float values from time.time()
+        elapsed_time = current_time - self.last_flush_time
         return len(self.data_buffer) >= self.buffer_size or elapsed_time >= self.buffer_timeout
 
     def add_raw_data(self, raw_data, filename):
         """
         Add raw hex data to the raw data buffer and flush if needed.
 
-        :param raw_data: Dictionary containing raw hex data.
+        :param raw_data: String containing raw hex data.
         :param filename: Path to the secondary CSV file.
         """
-        self.raw_data_buffer.append(raw_data)
-        self.logger.debug(f"Raw data added to raw_data_buffer: {raw_data}")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        raw_entry = {"timestamp": timestamp, "raw_data": raw_data}
+        self.raw_data_buffer.append(raw_entry)
+        self.logger.debug(f"Raw data added to raw_data_buffer: {raw_entry}")
+        
         if len(self.raw_data_buffer) >= self.buffer_size:
             self.logger.debug("Raw data buffer is full. Flushing raw data buffer.")
             self.flush_raw_data_buffer(filename)
@@ -128,14 +130,12 @@ class BufferData:
             self.combined_data['Shunt_Remaining_Ah'], self.safe_float(self.combined_data.get('BP_PVS_Voltage', 0.0)))
         self.combined_data['Shunt_Remaining_Time'] = self.extra_calculations.calculate_remaining_time_hours(
             self.combined_data['Shunt_Remaining_Ah'], shunt_current)
-        
-        # New: Calculate remaining time using BP_PVS_Ah
-        # Ensure BP_PVS_Ah is safely retrieved from combined_data
-        bp_pvs_ah = self.safe_float(self.combined_data.get('BP_PVS_Ah', 0))  # Get the value, not a key or list
+
+        # Calculate remaining time using BP_PVS_Ah
+        bp_pvs_ah = self.safe_float(self.combined_data.get('BP_PVS_Ah', 0))
         self.combined_data['Used_Ah_Remaining_Ah'] = self.extra_calculations.calculate_remaining_capacity_from_ah(
             used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah')), bp_pvs_ah)
-        self.logger.debug(f"this is the used Ah {bp_pvs_ah}")
-        self.logger.debug(f"this is the used total_Ah {self.combined_data.get('Total_Capacity_Ah')}")
+        self.logger.debug(f"Used Ah: {used_ah}, BP_PVS_Ah: {bp_pvs_ah}")
         self.combined_data['Used_Ah_Remaining_wh'] = self.extra_calculations.calculate_watt_hours(
             self.combined_data['Used_Ah_Remaining_Ah'], self.safe_float(self.combined_data.get('BP_PVS_Voltage', 0.0)))
         self.combined_data['Used_Ah_Remaining_Time'] = self.extra_calculations.calculate_remaining_time_from_ah_hours(
@@ -143,8 +143,8 @@ class BufferData:
 
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
-        # Append data to CSV
-        self.csv_handler.append_to_csv(filename, self.combined_data)  # Pass dict
+        # Append data to primary CSV
+        self.csv_handler.append_to_csv(filename, self.combined_data)
         self.data_buffer.clear()
         self.last_flush_time = time.time()
         self.logger.debug("Data buffer cleared and last_flush_time reset.")

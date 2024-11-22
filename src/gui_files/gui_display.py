@@ -17,6 +17,7 @@ import os
 class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
+    settings_applied_signal = pyqtSignal(str, int, str)  # COM port, baud rate, log level
 
     def __init__(self, data_keys, csv_handler, logger, units, config_file='config.json'):
         super().__init__()
@@ -113,18 +114,15 @@ class TelemetryGUI(QWidget):
         self.tabs.addTab(self.data_display_tab, "Data Display")
 
         # Settings Tab
-        self.settings_tab = SettingsTab(self.update_com_and_baud, self.logger, self.data_keys, self.color_mapping)
+        self.settings_tab = SettingsTab(self.logger, self.data_keys, self.color_mapping)
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
+        self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)  # Relay the signal
         self.tabs.addTab(self.settings_tab, "Settings")
 
         # CSV Management Tab
         self.csv_management_tab = CSVManagementTab(csv_handler=self.csv_handler, logger=self.logger)
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
-
-    def update_com_and_baud(self, port, baudrate):
-        self.logger.info(f"Updated to COM Port: {port}, Baud Rate: {baudrate}")
-        # Implement actual COM port and baud rate update logic here
 
     def update_all_tabs(self, telemetry_data):
         """
