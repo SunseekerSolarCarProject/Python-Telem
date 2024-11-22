@@ -27,6 +27,8 @@ limit_flags_desc = [
     "IPM/Motor Temperature"
 ]
 
+PLACEHOLDER_MARKERS = {"ABCDEF", "UVWXYZ"}  # Define placeholders to ignore
+
 class DataProcessor:
     def __init__(self):
         # Define steering wheel descriptions within the class
@@ -143,13 +145,35 @@ class DataProcessor:
 
     def parse_data(self, data_line):
         parts = data_line.strip().split(',')
-        if len(parts) < 3:
-            self.logger.warning(f"Data line does not have enough parts: {data_line}")
+        processed_data = {}
+
+        # Check if line contains placeholder markers
+        if any(marker in data_line for marker in PLACEHOLDER_MARKERS):
+            self.logger.info(f"Ignored placeholder line: {data_line}")
+            return {}
+        
+        # Ensure at least a key exists in the line
+        if len(parts) < 1:
+            self.logger.warning(f"Data line does not contain any key: {data_line}")
             return {}
 
-        processed_data = {}
         key = parts[0].strip()
+        self.logger.debug(f"Parsing data line for key: {key}")
         try:
+            # Handle TL_TIM (device_timestamp) case
+            if key == "TL_TIM":
+                if len(parts) >= 2:
+                    processed_data["device_timestamp"] = parts[1].strip()
+                    self.logger.debug(f"Processed device_timestamp: {processed_data['device_timestamp']}")
+                else:
+                    self.logger.warning(f"TL_TIM data line is incomplete: {data_line}")
+                return processed_data
+
+            # Handle other lines with at least 3 parts
+            if len(parts) < 3:
+                self.logger.warning(f"Data line does not have enough parts: {data_line}")
+                return {}
+            
             hex1 = parts[1].strip() if len(parts) > 1 else "0x00000000"
             hex2 = parts[2].strip() if len(parts) > 2 else "0x00000000"
 

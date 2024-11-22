@@ -1,33 +1,49 @@
-# gui_battery_pack_tab
-from PyQt6.QtWidgets import QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView
-from gui_files.gui_graph_tab import GraphTab
+from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget
+import pyqtgraph as pg
 
-class BatteryPackGraphTab(GraphTab):
+class BatteryPackGraphTab(QWidget):
     """
-    A tab for displaying battery pack telemetry as graphs.
+    A tab for displaying battery pack telemetry as separate PyQtGraph plots.
     """
-    def __init__(self, pack_name, data_keys, logger):
-        super().__init__(pack_name, data_keys, logger)
+    def __init__(self, pack_name, keys, logger):
+        super().__init__()
+        self.pack_name = pack_name
+        self.keys = keys
+        self.logger = logger
+        self.data_buffers = {key: [] for key in keys}  # Store data for each key
+        self.max_points = 361  # Max points to display on the graph
+
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-
-        title_label = QLabel(f"{self.pack_id} Data")
+        title_label = QLabel(f"{self.pack_name} Telemetry")
         layout.addWidget(title_label)
 
-        self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(2)
-        self.table_widget.setHorizontalHeaderLabels(["Parameter", "Value"])
-        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.table_widget)
+        self.graph_widgets = {}
+        for key in self.keys:
+            plot_widget = pg.PlotWidget(title=key)
+            plot_widget.setLabel("left", "Value")
+            plot_widget.setLabel("bottom", "Time", units="s")
+            plot_widget.addLegend()
+            layout.addWidget(plot_widget)
 
-    def update_data(self, telemetry_data):
+            self.graph_widgets[key] = {
+                "widget": plot_widget,
+                "curve": plot_widget.plot(pen=pg.mkPen(color="green"), name=key)
+            }
+
+    def update_graphs(self, telemetry_data):
         """
-        Update the table with new telemetry data.
+        Update graphs with telemetry data.
+
+        :param telemetry_data: Dictionary of telemetry data.
         """
-        self.table_widget.setRowCount(len(self.data_keys))
-        for row, key in enumerate(self.data_keys):
-            value = telemetry_data.get(key, "N/A")
-            self.table_widget.setItem(row, 0, QTableWidgetItem(key))
-            self.table_widget.setItem(row, 1, QTableWidgetItem(str(value)))
+        for key in self.keys:
+            if key in telemetry_data:
+                self.data_buffers[key].append(telemetry_data[key])
+                if len(self.data_buffers[key]) > self.max_points:
+                    self.data_buffers[key] = self.data_buffers[key][-self.max_points:]
+                self.graph_widgets[key]["curve"].setData(self.data_buffers[key])
+            else:
+                self.logger.warning(f"Telemetry key '{key}' is missing in the provided data.")

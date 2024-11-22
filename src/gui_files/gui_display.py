@@ -8,6 +8,7 @@ from gui_files.gui_settings_tab import SettingsTab
 from gui_files.gui_csv_management import CSVManagementTab
 from gui_files.gui_data_display_tab import DataDisplayTab
 from gui_files.gui_graph_tab import GraphTab
+from gui_files.gui_data_table import DataTableTab
 
 
 class TelemetryGUI(QWidget):
@@ -53,8 +54,8 @@ class TelemetryGUI(QWidget):
         self.remaining_tab = GraphTab("Remaining Capacity", remaining_keys, self.logger)
         self.tabs.addTab(self.remaining_tab, "Battery Remaining Capacity")
 
-        # Data Table Tab
-        self.data_table_tab = GraphTab("Data Table", self.data_keys, self.logger)
+        # Inside the TelemetryGUI initialization
+        self.data_table_tab = DataTableTab(self.units, self.logger)
         self.tabs.addTab(self.data_table_tab, "Data Table")
 
         # Data Display Tab
@@ -83,3 +84,14 @@ class TelemetryGUI(QWidget):
         self.remaining_tab.update_data(telemetry_data)
         self.data_table_tab.update_data(telemetry_data)
         self.data_display_tab.update_display(telemetry_data)
+
+    def update_data_display(self, telemetry_data):
+        """
+        Updates the Data Display tab with the provided telemetry data.
+        
+        :param telemetry_data: Dictionary of telemetry data.
+        """
+        if hasattr(self, 'data_display_tab'):
+            self.data_display_tab.update_display(telemetry_data)
+        else:
+            self.logger.error("Data Display Tab is not initialized.")

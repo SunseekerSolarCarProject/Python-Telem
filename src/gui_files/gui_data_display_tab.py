@@ -1,6 +1,5 @@
 # data_display_tab.py
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
-from data_display import DataDisplay
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 class DataDisplayTab(QWidget):
     """
@@ -8,27 +7,24 @@ class DataDisplayTab(QWidget):
     """
     def __init__(self, units, logger):
         super().__init__()
+        self.units = units  # Store units for later use
         self.logger = logger
-        self.data_display = DataDisplay(units)
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        self.data_label = QLabel("Data will be displayed here.")
+        layout.addWidget(self.data_label)
 
-        # Create a QTextEdit for displaying data
-        self.display_area = QTextEdit(self)
-        self.display_area.setReadOnly(True)  # Make it read-only
-        layout.addWidget(self.display_area)
+    def update_display(self, telemetry_data):
+        """
+        Update the tab with the telemetry data.
 
-    def update_display(self, data):
+        :param telemetry_data: Dictionary containing telemetry data.
         """
-        Updates the display with new telemetry data.
-        :param data: Dictionary of telemetry data.
-        """
-        try:
-            self.logger.debug("Updating data display.")
-            formatted_output = self.data_display.display(data)
-            self.display_area.setPlainText(formatted_output)
-        except Exception as e:
-            self.logger.error(f"Error updating data display: {e}")
-            self.display_area.setPlainText(f"Error displaying data: {e}")
+        display_text = ""
+        for key, value in telemetry_data.items():
+            unit = self.units.get(key, "")
+            display_text += f"{key}: {value} {unit}\n"
+        self.data_label.setText(display_text)
+        self.logger.info("Data Display updated.")

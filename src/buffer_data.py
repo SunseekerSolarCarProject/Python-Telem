@@ -5,7 +5,6 @@ from datetime import datetime
 import logging
 from data_processor import DataProcessor
 from extra_calculations import ExtraCalculations
-from csv_handler import CSVHandler
 
 class BufferData:
     def __init__(self, csv_handler, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
@@ -61,6 +60,15 @@ class BufferData:
         """
         self.combined_data.update(new_data)
         self.logger.debug(f"Combined data updated with: {new_data}")
+
+    def is_ready_to_flush(self):
+        """
+        Determines if the buffer is ready to flush based on timeout or size.
+        :return: True if the buffer is ready to flush, False otherwise.
+        """
+        current_time = time.time()
+        elapsed_time = current_time - self.last_flush_time  # Use float values from time.time()
+        return len(self.data_buffer) >= self.buffer_size or elapsed_time >= self.buffer_timeout
 
     def add_raw_data(self, raw_data, filename):
         """

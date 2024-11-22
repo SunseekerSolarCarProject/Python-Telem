@@ -16,7 +16,7 @@ def main():
     args = parser.parse_args()
 
     # Map string log level to logging module levels
-    log_level = getattr(logging, args.loglevel.upper(), logging.INFO)
+    log_level = getattr(logging, args.loglevel.upper(), logging.DEBUG)
 
     # Add the parent directory to the system path
     sys.path.append(os.path.abspath(os.path.dirname(__file__)))
