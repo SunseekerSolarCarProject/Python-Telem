@@ -80,6 +80,16 @@ class TelemetryApplication(QObject):
             'BP_PVS_Ah': 'Ah',
             'BP_ISH_Amps': 'A',
             'BP_ISH_SOC': '%',
+            "MC1LIM_CAN_Receive_Error_Count": "",
+            "MC1LIM_CAN_Transmit_Error_Count": "",
+            "MC1LIM_Active_Motor_Info": "",
+            "MC1LIM_Errors": "",
+            "MC1LIM_Limits": "",
+            "MC2LIM_CAN_Receive_Error_Count": "",
+            "MC2LIM_CAN_Transmit_Error_Count": "",
+            "MC2LIM_Active_Motor_Info": "",
+            "MC2LIM_Errors": "",
+            "MC2LIM_Limits": "",
             'Shunt_Remaining_wh': 'Wh',
             'Used_Ah_Remaining_wh': 'Wh',
             'Shunt_Remaining_Ah': 'Ah',
@@ -98,7 +108,11 @@ class TelemetryApplication(QObject):
             "DC_Switch_Position", "DC_SWC_Value", "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage",
             "BP_TMX_Temperature", "BP_TMX_ID", "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage",
             "BP_PVS_Ah", "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
-            "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time", "device_timestamp", "timestamp"
+            "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time", "device_timestamp", "timestamp",
+            "MC1LIM_CAN_Receive_Error_Count", "MC1LIM_CAN_Transmit_Error_Count", "MC1LIM_Active_Motor_Info",
+            "MC1LIM_Errors", "MC1LIM_Limits",
+            "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count", "MC2LIM_Active_Motor_Info",
+            "MC2LIM_Errors", "MC2LIM_Limits"
         ]
 
     def init_csv_handler(self):

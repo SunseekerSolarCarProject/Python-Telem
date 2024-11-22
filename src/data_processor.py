@@ -94,11 +94,14 @@ class DataProcessor:
             self.logger.error(f"Error parsing error and limit flags: Exception: {e}")
             return [], []
 
-    def parse_motor_controller_data(self, hex1, hex2):
+    def parse_motor_controller_data(self, hex1, hex2, key_prefix):
         """
         Parse the first and second hex strings for motor controller data.
         First hex: CAN receive/transmit errors and active motor.
         Second hex: Error flags and limit flags.
+        
+        :param key_prefix: Prefix string ('MC1LIM' or 'MC2LIM') to flatten keys.
+        :return: Dictionary with flattened keys.
         """
         try:
             bits1 = self.hex_to_bits(hex1)  # Convert hex1 to 32 bits
@@ -114,18 +117,20 @@ class DataProcessor:
             limit_bits = bits2[16:32]  # Limit flags (bits 15-0)
             errors, limits = self.parse_error_and_limit_flags(error_bits, limit_bits)
 
-            motor_data = {
-                "CAN Receive Error Count": can_receive_error_count,
-                "CAN Transmit Error Count": can_transmit_error_count,
-                "Active Motor Info": active_motor_info,
-                "Errors": errors,
-                "Limits": limits
+            # Flatten the motor_data with key_prefix
+            flattened_data = {
+                f"{key_prefix}_CAN_Receive_Error_Count": can_receive_error_count,
+                f"{key_prefix}_CAN_Transmit_Error_Count": can_transmit_error_count,
+                f"{key_prefix}_Active_Motor_Info": active_motor_info,
+                f"{key_prefix}_Errors": ', '.join(errors) if errors else '',
+                f"{key_prefix}_Limits": ', '.join(limits) if limits else ''
             }
-            self.logger.debug(f"Parsed motor controller data: {motor_data}")
-            return motor_data
+            self.logger.debug(f"Parsed and flattened motor controller data: {flattened_data}")
+            return flattened_data
         except Exception as e:
             self.logger.error(f"Error parsing motor controller data: hex1={hex1}, hex2={hex2}, Exception: {e}")
             return {}
+
 
     def parse_swc_data(self, hex1, hex2):
         """
@@ -192,10 +197,11 @@ class DataProcessor:
 
             # Special cases for data types that should remain hex and be processed separately
             if key in ['MC1LIM', 'MC2LIM']:
-                # Parse motor controller limits
-                motor_data = self.parse_motor_controller_data(hex1, hex2)
+                # Parse motor controller limits with appropriate prefix
+                motor_data = self.parse_motor_controller_data(hex1, hex2, key)
                 if motor_data:
-                    processed_data[key] = motor_data
+                    # Integrate flattened motor_data into processed_data
+                    processed_data.update(motor_data)
                     self.logger.debug(f"Processed motor controller data for {key}: {motor_data}")
                 else:
                     self.logger.error(f"Failed to parse {key} data.")

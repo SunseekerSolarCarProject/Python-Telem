@@ -25,10 +25,10 @@ class CSVHandler:
             "MC2VEL_RPM", "MC2VEL_Speed", "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint",
             "DC_SWC_Position", "DC_SWC_Value", "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID",
             "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature", "BP_ISH_SOC", "BP_ISH_Amps",
-            "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah", "MC1LIM_CAN Receive Error Count",
-            "MC1LIM_CAN Transmit Error Count", "MC1LIM_Active Motor Info", "MC1LIM_Errors",
-            "MC1LIM_Limits", "MC2LIM_CAN Receive Error Count", "MC2LIM_CAN Transmit Error Count",
-            "MC2LIM_Active Motor Info", "MC2LIM_Errors", "MC2LIM_Limits",
+            "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah", "MC1LIM_CAN_Receive_Error_Count",
+            "MC1LIM_CAN_Transmit_Error_Count", "MC1LIM_Active_Motor_Info", "MC1LIM_Errors",
+            "MC1LIM_Limits", "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count",
+            "MC2LIM_Active_Motor_Info", "MC2LIM_Errors", "MC2LIM_Limits",
             "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
             "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
             "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
@@ -159,10 +159,10 @@ class CSVHandler:
             "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID",
             "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
             "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
-            "MC1LIM_CAN Receive Error Count", "MC1LIM_CAN Transmit Error Count",
-            "MC1LIM_Active Motor Info", "MC1LIM_Errors", "MC1LIM_Limits",
-            "MC2LIM_CAN Receive Error Count", "MC2LIM_CAN Transmit Error Count",
-            "MC2LIM_Active Motor Info", "MC2LIM_Errors", "MC2LIM_Limits"
+            "MC1LIM_CAN_Receive_Error_Count", "MC1LIM_CAN_Transmit_Error_Count",
+            "MC1LIM_Active_Motor_Info", "MC1LIM_Errors", "MC1LIM_Limits",
+            "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count",
+            "MC2LIM_Active_Motor_Info", "MC2LIM_Errors", "MC2LIM_Limits"
         ]
 
         # Add additional calculated fields

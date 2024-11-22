@@ -31,6 +31,7 @@ class TelemetryGUI(QWidget):
         self.color_mapping = self.load_color_mapping(data_keys) or self.initialize_default_colors(data_keys)
 
         self.init_ui()
+        self.apply_dark_mode()
 
     def initialize_default_colors(self, data_keys):
         default_colors = {}
@@ -124,12 +125,29 @@ class TelemetryGUI(QWidget):
         self.csv_management_tab = CSVManagementTab(csv_handler=self.csv_handler, logger=self.logger)
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
 
+    def apply_dark_mode(self):
+        """
+        Applies a global dark stylesheet to the application.
+        """
+        try:
+            # Path to the stylesheet file
+            stylesheet_path = os.path.join(os.path.dirname(__file__), 'dark_stylesheet.qss')
+            if os.path.exists(stylesheet_path):
+                with open(stylesheet_path, 'r') as f:
+                    dark_stylesheet = f.read()
+                self.setStyleSheet(dark_stylesheet)
+                self.logger.info("Applied dark mode stylesheet.")
+            else:
+                self.logger.warning(f"Stylesheet file not found: {stylesheet_path}. Using default styles.")
+        except Exception as e:
+            self.logger.error(f"Failed to apply dark mode stylesheet: {e}")
+
     def update_all_tabs(self, telemetry_data: dict):
         """
         Updates all tabs with telemetry data.
         """
         try:
-            # Separate data for graphs and tables (exclude Errors and Limits)
+            # Separate data for graphs and tables (exclude Errors and Limits if already flattened)
             graph_data = {k: v for k, v in telemetry_data.items() if k not in ['Errors', 'Limits']}
 
             self.mc1_tab.update_graphs(graph_data)
@@ -137,7 +155,7 @@ class TelemetryGUI(QWidget):
             self.pack1_tab.update_graphs(graph_data)
             self.pack2_tab.update_graphs(graph_data)
             self.remaining_tab.update_graphs(graph_data)
-            self.data_table_tab.update_data(graph_data)
+            self.data_table_tab.update_data(telemetry_data)
             self.data_display_tab.update_display(telemetry_data)  # Pass all data to display tab
         except Exception as e:
             self.logger.error(f"Error updating all tabs: {e}")
