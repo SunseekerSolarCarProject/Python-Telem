@@ -20,7 +20,7 @@ class ConfigDialog(QDialog):
 
         self.battery_info = None
         self.selected_port = None
-        self.logging_level = logging.INFO
+        self.logging_level = "INFO"  # Default logging level as string
         self.baud_rate = 9600  # Default baud rate
 
         self.init_ui()
@@ -101,8 +101,7 @@ class ConfigDialog(QDialog):
         Emit the configuration data signal with battery info, selected COM port, baud rate, and logging level.
         """
         selected_port = self.port_dropdown.currentText()
-        log_level_str = self.log_level_dropdown.currentText()
-        log_level = getattr(logging, log_level_str.upper(), logging.INFO)
+        log_level_str = self.log_level_dropdown.currentText().upper()
         baud_rate_str = self.baud_rate_dropdown.currentText()
         baud_rate = int(baud_rate_str)
 
@@ -114,7 +113,7 @@ class ConfigDialog(QDialog):
         config_data = {
             "battery_info": self.battery_info,
             "selected_port": selected_port,
-            "logging_level": log_level,
+            "logging_level": log_level_str,  # Emit as string
             "baud_rate": baud_rate
         }
 

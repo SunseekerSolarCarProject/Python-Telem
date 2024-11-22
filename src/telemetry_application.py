@@ -137,11 +137,11 @@ class TelemetryApplication(QObject):
         """
         self.battery_info = config_data.get("battery_info")
         self.selected_port = config_data.get("selected_port")
-        self.logging_level = config_data.get("logging_level")
+        self.logging_level = config_data.get("logging_level")  # Now a string
         self.baudrate = config_data.get("baud_rate", 9600)  # Update baudrate based on config data
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")
-        self.logger.info(f"Logging level: {logging.getLevelName(self.logging_level)}")
+        self.logger.info(f"Logging level: {self.logging_level}")
         self.logger.info(f"Baud rate: {self.baudrate}")
 
         # Perform calculations
@@ -161,6 +161,9 @@ class TelemetryApplication(QObject):
         if "baud_rate" not in config_data_copy:
             config_data_copy["baud_rate"] = self.baudrate
         self.gui.set_initial_settings(config_data_copy)
+        
+        # Apply logging level immediately
+        self.update_logging_level(self.logging_level)
 
     def start(self):
         return self.run_application()
@@ -224,16 +227,21 @@ class TelemetryApplication(QObject):
         Updates the logging level at runtime.
         """
         try:
-            log_level = getattr(logging, level.upper(), None)
-            if isinstance(log_level, int):
-                self.logger.setLevel(log_level)
-                if self.central_logger:
-                    self.central_logger.set_level(level.upper())  # Update central logger if applicable
-                self.logger.info(f"Logging level updated to {level}")
-            else:
-                self.logger.error(f"Invalid logging level: {level}")
+            self.logger.debug(f"Attempting to set logging level to: {level}")
+            # Validate logging level
+            if not hasattr(logging, level.upper()):
+                raise AttributeError(f"Invalid logging level: {level}")
+
+            self.central_logger.set_level(level.upper())  # Update central logger
+            self.logger.info(f"Logging level updated to {level.upper()}")
+        except AttributeError as e:
+            # Handle invalid level strings gracefully
+            self.logger.error(f"Invalid logging level: {level}. Exception: {e}")
+            QMessageBox.critical(None, "Logging Level Error", f"Invalid logging level: {level}. Please select a valid level.")
         except Exception as e:
+            # Catch all other exceptions to prevent crashes
             self.logger.error(f"Failed to update logging level: {e}")
+            QMessageBox.critical(None, "Logging Configuration Error", f"An error occurred while setting the logging level: {e}")
 
     def restart_serial_reader(self, port, baudrate):
         """

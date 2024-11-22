@@ -148,13 +148,8 @@ class SettingsTab(QWidget):
         """
         try:
             # Set Logging Level
-            log_level = config_data.get("logging_level", logging.INFO)
-            if isinstance(log_level, int):
-                log_level_str = logging.getLevelName(log_level).upper()
-            elif isinstance(log_level, str):
-                log_level_str = log_level.upper()
-            else:
-                log_level_str = 'INFO'
+            log_level = config_data.get("logging_level", "INFO")
+            log_level_str = log_level.upper()
 
             index = self.log_level_dropdown.findText(log_level_str)
             if index != -1:
