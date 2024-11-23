@@ -3,6 +3,10 @@
 import sys
 import os
 import logging
+import serial
+import serial.tools.list_ports
+import numpy
+import pyqtgraph
 import argparse
 from telemetry_application import TelemetryApplication
 from PyQt6.QtWidgets import QApplication
