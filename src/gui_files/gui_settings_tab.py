@@ -11,12 +11,12 @@ import logging
 class SettingsTab(QWidget):
     log_level_signal = pyqtSignal(str)  # Signal for logging level changes
     color_changed_signal = pyqtSignal(str, str)  # Signal for color changes (key, color)
-    settings_applied_signal = pyqtSignal(str, int, str)  # Signal for COM port, baud rate, log level changes
+    settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
 
-    def __init__(self, logger, data_keys, color_mapping):
+    def __init__(self, logger, groups, color_mapping):
         super().__init__()
         self.logger = logger
-        self.data_keys = data_keys
+        self.groups = groups  # Dictionary of group names to keys
         self.color_mapping = color_mapping.copy()  # Make a copy to use
         self.init_ui()
 
@@ -50,30 +50,45 @@ class SettingsTab(QWidget):
         self.baud_rate_dropdown.setCurrentText('9600')  # Default baud rate
         layout.addWidget(self.baud_rate_dropdown)
 
+        # Endianness Dropdown
+        endianness_label = QLabel("Select Endianness:")
+        layout.addWidget(endianness_label)
+
+        self.endianness_dropdown = QComboBox()
+        self.endianness_dropdown.addItems(['Big Endian', 'Little Endian'])
+        self.endianness_dropdown.setCurrentText('Big Endian')  # Default endianness
+        layout.addWidget(self.endianness_dropdown)
+
         # Color Selection
         color_selection_label = QLabel("Select Graph Colors:")
         layout.addWidget(color_selection_label)
 
         self.color_buttons = {}
-        for key in self.data_keys:
-            row_layout = QHBoxLayout()
+        for group_name, keys in self.groups.items():
+            # Insert Group Header
+            group_header = QLabel(group_name)
+            group_header.setStyleSheet("font-weight: bold; color: #1e90ff;")
+            layout.addWidget(group_header)
 
-            key_label = QLabel(key)
-            key_label.setFixedWidth(200)
-            row_layout.addWidget(key_label)
+            for key in keys:
+                row_layout = QHBoxLayout()
 
-            color_display = QLabel()
-            color_display.setFixedSize(50, 20)
-            color_display.setStyleSheet(f"background-color: {self.color_mapping.get(key, 'gray')}")
-            row_layout.addWidget(color_display)
+                key_label = QLabel(key)
+                key_label.setFixedWidth(200)
+                row_layout.addWidget(key_label)
 
-            color_button = QPushButton("Choose Color")
-            # Use a lambda with default arguments to capture current key and color_display
-            color_button.clicked.connect(lambda checked, k=key, disp=color_display: self.choose_color(k, disp))
-            row_layout.addWidget(color_button)
+                color_display = QLabel()
+                color_display.setFixedSize(50, 20)
+                color_display.setStyleSheet(f"background-color: {self.color_mapping.get(key, 'gray')}")
+                row_layout.addWidget(color_display)
 
-            layout.addLayout(row_layout)
-            self.color_buttons[key] = color_button
+                color_button = QPushButton("Choose Color")
+                # Use a lambda with default arguments to capture current key and color_display
+                color_button.clicked.connect(lambda checked, k=key, disp=color_display: self.choose_color(k, disp))
+                row_layout.addWidget(color_button)
+
+                layout.addLayout(row_layout)
+                self.color_buttons[key] = color_button
 
         # Apply Button
         apply_button = QPushButton("Apply Settings")
@@ -105,15 +120,16 @@ class SettingsTab(QWidget):
 
     def apply_settings(self):
         """
-        Apply settings including logging level, COM port, baud rate, and graph colors.
+        Apply settings including logging level, COM port, baud rate, endianness, and graph colors.
         """
         com_port = self.com_port_dropdown.currentText()
         baud_rate_str = self.baud_rate_dropdown.currentText()
         selected_log_level = self.log_level_dropdown.currentText()  # Get the logging level
+        selected_endianness = self.endianness_dropdown.currentText()  # Get endianness
 
         # Validate COM port selection
         if com_port == "No COM ports available":
-            QMessageBox.warning(self, "Invalid COM Port", "No COM ports are available. Please connect a device.")
+            QMessageBox.warning(self, "Invalid COM Port", "No COM ports are available. Please connect a device or select a valid port.")
             self.logger.warning("Attempted to apply settings with no available COM ports.")
             return
 
@@ -125,13 +141,22 @@ class SettingsTab(QWidget):
             self.logger.warning(f"Invalid baud rate selected: {baud_rate_str}")
             return
 
+        # Validate endianness
+        if selected_endianness not in ['Big Endian', 'Little Endian']:
+            QMessageBox.warning(self, "Invalid Endianness", "Please select a valid endianness.")
+            self.logger.warning(f"Invalid endianness selected: {selected_endianness}")
+            return
+
+        # Map endianness string to format specifier
+        endianness = 'big' if selected_endianness == 'Big Endian' else 'little'
+
         # Emit signals for logging level and color changes
         self.log_level_signal.emit(selected_log_level)
         # Color changes are already emitted individually via color_changed_signal
 
-        # Emit signal for COM port and baud rate changes along with log level
-        self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level)
-        self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}")
+        # Emit signal for COM port, baud rate, log level, and endianness changes
+        self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
+        self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}, Endianness={endianness}")
 
     def on_log_level_changed(self, level: str):
         """
@@ -144,7 +169,7 @@ class SettingsTab(QWidget):
         """
         Set the initial settings in the SettingsTab based on configuration data.
 
-        :param config_data: Dictionary containing 'selected_port', 'logging_level', and 'baud_rate'.
+        :param config_data: Dictionary containing 'selected_port', 'logging_level', 'baud_rate', and 'endianness'.
         """
         try:
             # Set Logging Level
@@ -188,5 +213,16 @@ class SettingsTab(QWidget):
                     self.logger.debug(f"Added and set baud rate to {baud_rate_str}")
                 else:
                     self.logger.warning(f"Baud rate {baud_rate_str} not available.")
+
+            # Set Endianness
+            endianness = config_data.get("endianness", "big")
+            endianness_str = 'Big Endian' if endianness == 'big' else 'Little Endian'
+            index = self.endianness_dropdown.findText(endianness_str)
+            if index != -1:
+                self.endianness_dropdown.setCurrentIndex(index)
+                self.logger.debug(f"Set endianness to {endianness_str}")
+            else:
+                self.logger.warning(f"Endianness {endianness_str} not found in dropdown. Using default.")
+
         except Exception as e:
             self.logger.error(f"Failed to set initial settings: {e}")

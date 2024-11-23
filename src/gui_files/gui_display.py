@@ -13,11 +13,12 @@ from gui_files.gui_data_table import DataTableTab
 import pyqtgraph as pg
 import json
 import os
+import logging
 
 class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
-    settings_applied_signal = pyqtSignal(str, int, str)  # COM port, baud rate, log level
+    settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
 
     def __init__(self, data_keys, csv_handler, logger, units, config_file='config.json'):
         super().__init__()
@@ -56,7 +57,8 @@ class TelemetryGUI(QWidget):
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
-                    color_mapping = json.load(f)
+                    config_data = json.load(f)
+                color_mapping = config_data.get("color_mapping", {})
                 # Ensure all keys are present
                 for key in data_keys:
                     if key not in color_mapping:
@@ -70,8 +72,18 @@ class TelemetryGUI(QWidget):
 
     def save_color_mapping(self):
         try:
+            # Load existing config to preserve other settings
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    config_data = json.load(f)
+            else:
+                config_data = {}
+
+            # Update color mapping
+            config_data["color_mapping"] = self.color_mapping
+
             with open(self.config_file, 'w') as f:
-                json.dump(self.color_mapping, f, indent=4)
+                json.dump(config_data, f, indent=4)
             self.logger.info(f"Color mapping saved to {self.config_file}")
         except Exception as e:
             self.logger.error(f"Failed to save color mapping to {self.config_file}: {e}")
@@ -83,39 +95,71 @@ class TelemetryGUI(QWidget):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        # Motor Controller Tabs
-        mc1_keys = ["MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed"]
-        mc2_keys = ["MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed"]
+        # Define graph-related groups
+        graph_groups = {
+            "Motor Controller 1": ["MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed"],
+            "Motor Controller 2": ["MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed"],
+            "Battery Pack 1": ["BP_VMX_Voltage", "BP_VMN_Voltage", "BP_PVS_Voltage", "BP_TMX_Temperature"],
+            "Battery Pack 2": ["BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Ah", "BP_PVS_milliamp/s"],
+            "Remaining Capacity": ["Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh", "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"]
+        }
 
-        self.mc1_tab = MotorControllerGraphTab("Motor Controller 1", mc1_keys, self.units, self.logger, self.color_mapping)
-        self.mc2_tab = MotorControllerGraphTab("Motor Controller 2", mc2_keys, self.units, self.logger, self.color_mapping)
+        # Motor Controller Tabs
+        self.mc1_tab = MotorControllerGraphTab("Motor Controller 1", graph_groups["Motor Controller 1"], self.units, self.logger, self.color_mapping)
+        self.mc2_tab = MotorControllerGraphTab("Motor Controller 2", graph_groups["Motor Controller 2"], self.units, self.logger, self.color_mapping)
         self.tabs.addTab(self.mc1_tab, "Motor Controller 1")
         self.tabs.addTab(self.mc2_tab, "Motor Controller 2")
 
         # Battery Pack Tabs
-        pack1_keys = ["BP_PVS_Voltage", "BP_PVS_Ah", "BP_TMX_Temperature"]
-        pack2_keys = ["BP_VMX_Voltage", "BP_VMN_Voltage", "BP_ISH_SOC"]
-
-        self.pack1_tab = BatteryPackGraphTab("Battery Pack 1", pack1_keys, self.units, self.logger, self.color_mapping)
-        self.pack2_tab = BatteryPackGraphTab("Battery Pack 2", pack2_keys, self.units, self.logger, self.color_mapping)
+        self.pack1_tab = BatteryPackGraphTab("Battery Pack 1", graph_groups["Battery Pack 1"], self.units, self.logger, self.color_mapping)
+        self.pack2_tab = BatteryPackGraphTab("Battery Pack 2", graph_groups["Battery Pack 2"], self.units, self.logger, self.color_mapping)
         self.tabs.addTab(self.pack1_tab, "Battery Pack 1")
         self.tabs.addTab(self.pack2_tab, "Battery Pack 2")
 
         # Remaining Capacity Tab
-        remaining_keys = ["Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"]
-        self.remaining_tab = GraphTab("Remaining Capacity", remaining_keys, self.units, self.logger, self.color_mapping)
+        self.remaining_tab = GraphTab("Remaining Capacity", graph_groups["Remaining Capacity"], self.units, self.logger, self.color_mapping)
         self.tabs.addTab(self.remaining_tab, "Battery Remaining Capacity")
 
         # Data Table Tab
-        self.data_table_tab = DataTableTab(self.units, self.logger)
+        data_table_groups = {
+            "Motor Controllers": [
+                "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
+                "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed"
+            ],
+            "Battery Packs": [
+                "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage",
+                "BP_TMX_ID", "BP_TMX_Temperature", "BP_PVS_Voltage", "BP_PVS_Ah", "BP_PVS_milliamp/s",
+                "BP_ISH_SOC", "BP_ISH_Amps"
+            ],
+            "Shunt Remaining": [
+                "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
+                "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"
+            ],
+            "DC Controls": [
+                "DC_DRV_Motor_Velocity_Setpoint", "DC_DRV_Motor_Current_Setpoint",
+                "DC_Switch_Position", "DC_SWC_Value"
+            ],
+            "Limiter Information": [
+                "MC1LIM_CAN_Receive_Error_Count", "MC1LIM_CAN_Transmit_Error_Count",
+                "MC1LIM_Active_Motor_Info", "MC1LIM_Errors", "MC1LIM_Limits",
+                "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count",
+                "MC2LIM_Active_Motor_Info", "MC2LIM_Errors", "MC2LIM_Limits"
+            ],
+            "General": [
+                "Total_Capacity_Ah", "Total_Capacity_Wh", "Total_Voltage",
+                "device_timestamp", "timestamp"
+            ]
+        }
+
+        self.data_table_tab = DataTableTab(self.units, self.logger, data_table_groups)
         self.tabs.addTab(self.data_table_tab, "Data Table")
 
         # Data Display Tab
         self.data_display_tab = DataDisplayTab(self.units, self.logger)
         self.tabs.addTab(self.data_display_tab, "Data Display")
 
-        # Settings Tab
-        self.settings_tab = SettingsTab(self.logger, self.data_keys, self.color_mapping)
+        # Settings Tab - Pass only graph-related groups
+        self.settings_tab = SettingsTab(self.logger, graph_groups, self.color_mapping)
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)  # Relay the signal
@@ -187,6 +231,8 @@ class TelemetryGUI(QWidget):
     def set_initial_settings(self, config_data: dict):
         """
         Set the initial settings in the SettingsTab based on configuration data.
+
+        :param config_data: Dictionary containing 'selected_port', 'logging_level', 'baud_rate', and 'endianness'.
         """
         try:
             self.settings_tab.set_initial_settings(config_data)

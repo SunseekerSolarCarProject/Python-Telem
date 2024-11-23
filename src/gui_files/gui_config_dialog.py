@@ -3,7 +3,7 @@
 import os
 import logging
 from PyQt6.QtWidgets import (
-    QDialog, QFormLayout, QComboBox, QPushButton, QDialogButtonBox, QMessageBox, QInputDialog
+    QDialog, QFormLayout, QComboBox, QPushButton, QDialogButtonBox, QMessageBox, QInputDialog, QLabel
 )
 from PyQt6.QtCore import pyqtSignal
 import serial.tools.list_ports
@@ -20,8 +20,9 @@ class ConfigDialog(QDialog):
 
         self.battery_info = None
         self.selected_port = None
-        self.logging_level = "INFO"  # Default logging level as string
+        self.logging_level = "INFO"  # Default logging level
         self.baud_rate = 9600  # Default baud rate
+        self.endianness = "big"  # Default endianness
 
         self.init_ui()
 
@@ -53,6 +54,15 @@ class ConfigDialog(QDialog):
         self.baud_rate_dropdown.addItems(['9600', '19200', '38400', '57600', '115200'])
         self.baud_rate_dropdown.setCurrentText('9600')  # Default baud rate
         layout.addRow("Baud Rate:", self.baud_rate_dropdown)
+
+        # Endianness Dropdown
+        endianness_label = QLabel("Select Endianness:")
+        layout.addRow(endianness_label)
+
+        self.endianness_dropdown = QComboBox()
+        self.endianness_dropdown.addItems(['Big Endian', 'Little Endian'])
+        self.endianness_dropdown.setCurrentText('Big Endian')  # Default endianness
+        layout.addRow(self.endianness_dropdown)
 
         # Dialog Buttons
         buttons = QDialogButtonBox(
@@ -98,23 +108,35 @@ class ConfigDialog(QDialog):
 
     def emit_config_data(self):
         """
-        Emit the configuration data signal with battery info, selected COM port, baud rate, and logging level.
+        Emit the configuration data signal with battery info, selected COM port, baud rate, log level, and endianness.
         """
         selected_port = self.port_dropdown.currentText()
         log_level_str = self.log_level_dropdown.currentText().upper()
         baud_rate_str = self.baud_rate_dropdown.currentText()
-        baud_rate = int(baud_rate_str)
+        endianness_str = self.endianness_dropdown.currentText()
+
+        # Map endianness string to format specifier
+        endianness = 'big' if endianness_str == 'Big Endian' else 'little'
 
         if selected_port == "No COM ports available":
             selected_port = None
             QMessageBox.warning(self, "Warning", "No COM ports available. Please connect a device or select a valid port.")
             self.logger.warning("No COM ports available.")
 
+        # Validate baud rate
+        try:
+            baud_rate = int(baud_rate_str)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Baud Rate", "Please select a valid baud rate.")
+            self.logger.warning(f"Invalid baud rate selected: {baud_rate_str}")
+            return
+
         config_data = {
             "battery_info": self.battery_info,
             "selected_port": selected_port,
             "logging_level": log_level_str,  # Emit as string
-            "baud_rate": baud_rate
+            "baud_rate": baud_rate,
+            "endianness": endianness  # Emit as 'big' or 'little'
         }
 
         self.logger.debug(f"Emitting configuration data: {config_data}")

@@ -31,6 +31,7 @@ class TelemetryApplication(QObject):
         self.logging_level = log_level
         self.battery_info = None
         self.selected_port = None
+        self.endianness = 'big'  # Default endianness
         self.gui = None
         self.serial_reader_thread = None
         self.signals_connected = False
@@ -55,9 +56,9 @@ class TelemetryApplication(QObject):
 
     def init_units_and_keys(self):
         self.units = {
-            'DC_DRV_Motor_Velocity_setpoint': '#',
-            'DC_DRV_Motor_Current_setpoint': '#',
-            'DC_SWC_Position': ' ',
+            'DC_DRV_Motor_Velocity_Setpoint': '#',
+            'DC_DRV_Motor_Current_Setpoint': '#',
+            'DC_Switch_Position': ' ',
             'DC_SWC_Value': '#',
             'MC1BUS_Voltage': 'V',
             'MC1BUS_Current': 'A',
@@ -132,7 +133,7 @@ class TelemetryApplication(QObject):
         )
 
     def init_data_processors(self):
-        self.data_processor = DataProcessor()
+        self.data_processor = DataProcessor(endianness=self.endianness)
         self.extra_calculations = ExtraCalculations()
         self.Data_Display = DataDisplay(self.units)
 
@@ -153,10 +154,15 @@ class TelemetryApplication(QObject):
         self.selected_port = config_data.get("selected_port")
         self.logging_level = config_data.get("logging_level")  # Now a string
         self.baudrate = config_data.get("baud_rate", 9600)  # Update baudrate based on config data
+        self.endianness = config_data.get("endianness", "big")  # Update endianness based on config data
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")
         self.logger.info(f"Logging level: {self.logging_level}")
         self.logger.info(f"Baud rate: {self.baudrate}")
+        self.logger.info(f"Endianness: {self.endianness}")
+
+        # Update DataProcessor's endianness
+        self.data_processor.set_endianness(self.endianness)
 
         # Perform calculations
         if self.battery_info:
@@ -171,11 +177,13 @@ class TelemetryApplication(QObject):
 
         # Set initial settings in settings tab
         config_data_copy = config_data.copy()
-        # Ensure baud_rate is present
+        # Ensure baud_rate and endianness are present
         if "baud_rate" not in config_data_copy:
             config_data_copy["baud_rate"] = self.baudrate
+        if "endianness" not in config_data_copy:
+            config_data_copy["endianness"] = self.endianness
         self.gui.set_initial_settings(config_data_copy)
-        
+
         # Apply logging level immediately
         self.update_logging_level(self.logging_level)
 
@@ -186,7 +194,7 @@ class TelemetryApplication(QObject):
         try:
             config_dialog = ConfigDialog()
             config_dialog.config_data_signal.connect(self.set_battery_info)
-            
+
             if not config_dialog.exec():
                 self.logger.warning("Configuration canceled.")
                 return False
@@ -226,13 +234,15 @@ class TelemetryApplication(QObject):
         self.serial_reader_thread.start()
         self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
 
-    def handle_settings_applied(self, port, baudrate, log_level):
+    def handle_settings_applied(self, port, baudrate, log_level, endianness):
         """
-        Handles updates to COM port, baud rate, and logging level.
+        Handles updates to COM port, baud rate, logging level, and endianness.
         """
-        self.logger.info(f"Applying new settings: COM Port={port}, Baud Rate={baudrate}, Log Level={log_level}")
+        self.logger.info(f"Applying new settings: COM Port={port}, Baud Rate={baudrate}, Log Level={log_level}, Endianness={endianness}")
         # Update logging level
         self.update_logging_level(log_level)
+        # Update endianness in DataProcessor
+        self.data_processor.set_endianness(endianness)
         # Restart serial reader with new COM port and baud rate
         self.restart_serial_reader(port, baudrate)
 

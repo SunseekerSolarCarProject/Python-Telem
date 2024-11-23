@@ -1,6 +1,11 @@
 import serial
 import time
 import random
+import serial.tools.list_ports
+import struct
+
+# Endianness configuration: 'big' or 'little'
+ENDIANNESS = 'big'  # Default endianness
 
 # Descriptions for steering wheel positions
 steering_wheel_desc = {
@@ -43,28 +48,37 @@ limit_flags_bits = {
 MAX_VALUE = 150  # Upper limit for random data generation
 cycle_index = {'steering': 0, 'error': 0, 'limit': 0}  # Indices for cycling
 
-def random_hex_with_limit(min_value=0, max_value=100):
+def set_endianness():
+    """Prompt user to set the desired endianness."""
+    global ENDIANNESS
+    while True:
+        choice = input("Select endianness ('big' or 'little'): ").strip().lower()
+        if choice in ['big', 'little']:
+            ENDIANNESS = choice
+            print(f"Endianness set to {ENDIANNESS}.")
+            break
+        else:
+            print("Invalid choice. Please enter 'big' or 'little'.")
+
+def float_to_hex(value):
     """
-    Generate a random 8-digit hexadecimal value.
-    Limits the range to ensure realistic values.
+    Convert a float to an 8-character hexadecimal string representing IEEE 754 float in little endian.
+    - value: The float value to convert.
     """
-    value = random.randint(min_value, max_value)
-    return to_8bit_hex(value)
+    # Pack the float into 4 bytes using little endian
+    packed = struct.pack('<f', value)
+    
+    # If big endian is selected, reverse the byte order
+    if ENDIANNESS == 'big':
+        packed = packed[::-1]
+    
+    # Convert bytes to hexadecimal string
+    hex_str = '0x' + packed.hex().upper()
+    return hex_str
 
 def generate_active_motor_info():
     """Generate random motor controller info."""
     return random.randint(0, MAX_VALUE)
-
-def to_8bit_hex(value):
-    """
-    Ensure the given value is a valid 8-character hexadecimal string.
-    - Truncate if longer than 32 bits.
-    - Pad with leading zeros if shorter.
-    """
-    # Mask to ensure only 32 bits
-    value = value & 0xFFFFFFFF
-    # Format as 8-character hex string
-    return f"0x{value:08X}"
 
 def next_steering_wheel_desc():
     """Cycle through steering wheel descriptions."""
@@ -72,7 +86,7 @@ def next_steering_wheel_desc():
     keys = list(steering_wheel_desc.keys())
     key = keys[cycle_index['steering'] % len(keys)]
     cycle_index['steering'] += 1
-    return key, steering_wheel_desc[key]
+    return key
 
 def cycle_flags(flag_bits, cycle_index_key):
     """
@@ -95,7 +109,7 @@ def generate_motor_controller_data():
     active_motor_info = random.randint(0, 100)  # Random motor information ID
 
     # Generate error flags as a 16-bit integer
-     # Cycle through error flags (16 bits: 31–16 in the combined structure)
+    # Cycle through error flags (16 bits: 31–16 in the combined structure)
     error_bits = cycle_flags(error_flags_bits, 'error')
 
     # Cycle through limit flags (16 bits: 15–0 in the combined structure)
@@ -104,47 +118,105 @@ def generate_motor_controller_data():
     # Combine error and limit flags into a single 32-bit value
     combined_flags = (error_bits << 16) | limit_bits
 
-    # Convert data to hex values
-    hex1 = to_8bit_hex((can_receive_error_count << 24) | (can_transmit_error_count << 16) | active_motor_info)
-    hex2 = to_8bit_hex(combined_flags)
+    # Convert data to hex values as float
+    hex1 = float_to_hex((can_receive_error_count << 24) | (can_transmit_error_count << 16) | active_motor_info)
+    hex2 = float_to_hex(combined_flags)
 
     return hex1, hex2
 
-    return hex1, hex2
 def get_runtime(start_time):
     """Get elapsed runtime in HH:MM:SS format."""
     elapsed_time = int(time.time() - start_time)
     return time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
 
-def interpret_dcswc(value_hex):
-    """Interpret DC_SWC value into human-readable format."""
-    description = steering_wheel_desc.get(value_hex, "Unknown")
-    return description
-
 def generate_data_block(runtime):
     """
     Generate a formatted data block for telemetry transmission.
-    Uses realistic ranges for data fields.
+    Uses IEEE 754 floating-point representations for all hex fields.
     """
     mc1lim_hex1, mc1lim_hex2 = generate_motor_controller_data()
     mc2lim_hex1, mc2lim_hex2 = generate_motor_controller_data()
 
-    dc_swc_position, dcswc_description = next_steering_wheel_desc()
+    # MC1BUS: Voltage (0-160 V), Current (-20 to 90 A)
+    mc1bus_voltage = random.uniform(0, 160)  # 0 to 160 V
+    mc1bus_current = random.uniform(-20, 90)  # -20 to 90 A
+    mc1bus_hex1 = float_to_hex(mc1bus_voltage)
+    mc1bus_hex2 = float_to_hex(mc1bus_current)
+
+    # MC1VEL: RPM (0-4000 RPM), Velocity (0-100 m/s)
+    mc1vel_rpm = float(random.randint(0, 4000))  # Represented as float
+    mc1vel_velocity = random.uniform(0, 100)  # 0 to 100 m/s
+    mc1vel_hex1 = float_to_hex(mc1vel_rpm)
+    mc1vel_hex2 = float_to_hex(mc1vel_velocity)
+
+    # MC2BUS: Voltage (0-160 V), Current (-20 to 90 A)
+    mc2bus_voltage = random.uniform(0, 160)  # 0 to 160 V
+    mc2bus_current = random.uniform(-20, 90)  # -20 to 90 A
+    mc2bus_hex1 = float_to_hex(mc2bus_voltage)
+    mc2bus_hex2 = float_to_hex(mc2bus_current)
+
+    # MC2VEL: RPM (0-4000 RPM), Velocity (0-100 m/s)
+    mc2vel_rpm = float(random.randint(0, 4000))  # Represented as float
+    mc2vel_velocity = random.uniform(0, 100)  # 0 to 100 m/s
+    mc2vel_hex1 = float_to_hex(mc2vel_rpm)
+    mc2vel_hex2 = float_to_hex(mc2vel_velocity)
+
+    # DC_DRV: Setpoint (-20000 to 20000), 0-100
+    dc_drv_setpoint = random.uniform(-20000, 20000)  # -20000 to 20000
+    dc_drv_value = random.uniform(0, 100)  # 0 to 100
+    dc_drv_hex1 = float_to_hex(dc_drv_setpoint)
+    dc_drv_hex2 = float_to_hex(dc_drv_value)
+
+    # DC_SWC
+    dc_swc_position = next_steering_wheel_desc()
     dc_swc_value1 = random.getrandbits(32)
-    dc_swc_value1_hex = to_8bit_hex(dc_swc_value1)
+    # Convert the 32-bit integer to float
+    dc_swc_float = struct.unpack('<f', dc_swc_value1.to_bytes(4, byteorder='little'))[0]
+    dc_swc_value1_hex = float_to_hex(dc_swc_float)
+
+    # BP_VMX & BP_VMN: ID (0-50), Value (0-5) with 6 decimal places
+    bp_vmx_id = random.uniform(0, 50)
+    bp_vmx_value = random.uniform(0, 5)
+    bp_vmx_hex1 = float_to_hex(bp_vmx_id)
+    bp_vmx_hex2 = float_to_hex(bp_vmx_value)
+
+    bp_vmn_id = random.uniform(0, 50)
+    bp_vmn_value = random.uniform(0, 5)
+    bp_vmn_hex1 = float_to_hex(bp_vmn_id)
+    bp_vmn_hex2 = float_to_hex(bp_vmn_value)
+
+    # BP_TMX: ID (0-50), Temperature (-40 to 180) with 8 decimal places
+    bp_tmx_id = random.uniform(0, 50)
+    bp_tmx_temp = random.uniform(-40, 180)
+    bp_tmx_hex1 = float_to_hex(bp_tmx_id)
+    bp_tmx_hex2 = float_to_hex(bp_tmx_temp)
+
+    # BP_ISH: Value (0-100), Current (-20 to 90) with 8 decimal places
+    bp_ish_value = random.uniform(0, 100)
+    bp_ish_current = random.uniform(-20, 90)
+    bp_ish_hex1 = float_to_hex(bp_ish_value)
+    bp_ish_hex2 = float_to_hex(bp_ish_current)
+
+    # BP_PVS: 0-160, 0-10,000,000 with 8 decimal places
+    bp_pvs_first = random.uniform(0, 160)
+    bp_pvs_second = random.uniform(0, 10_000_000)
+    bp_pvs_hex1 = float_to_hex(bp_pvs_first)
+    bp_pvs_hex2 = float_to_hex(bp_pvs_second)
+
+    # MC1LIM & MC2LIM handled by generate_motor_controller_data()
 
     return f"""ABCDEF
-MC1BUS,{random_hex_with_limit(0, 600)},{random_hex_with_limit(-300, 300)}
-MC1VEL,{random_hex_with_limit(0, 10000)},{random_hex_with_limit(0, 100)}
-MC2BUS,{random_hex_with_limit(0, 600)},{random_hex_with_limit(-300, 300)}
-MC2VEL,{random_hex_with_limit(0, 10000)},{random_hex_with_limit(0, 100)}
-DC_DRV,{random_hex_with_limit(-300, 300)},{random_hex_with_limit(-300, 300)}
+MC1BUS,{mc1bus_hex1},{mc1bus_hex2}
+MC1VEL,{mc1vel_hex1},{mc1vel_hex2}
+MC2BUS,{mc2bus_hex1},{mc2bus_hex2}
+MC2VEL,{mc2vel_hex1},{mc2vel_hex2}
+DC_DRV,{dc_drv_hex1},{dc_drv_hex2}
 DC_SWC,{dc_swc_position},{dc_swc_value1_hex}
-BP_VMX,{random_hex_with_limit(0, 50)},{random_hex_with_limit(0, 50)}
-BP_VMN,{random_hex_with_limit(0, 50)},{random_hex_with_limit(0, 50)}
-BP_TMX,{random_hex_with_limit(0, 50)},{random_hex_with_limit(-40, 100)}
-BP_ISH,{random_hex_with_limit(-300, 300)},{random_hex_with_limit(-300, 300)}
-BP_PVS,{random_hex_with_limit(0, 146)},{random_hex_with_limit(0, 100000000)}
+BP_VMX,{bp_vmx_hex1},{bp_vmx_hex2}
+BP_VMN,{bp_vmn_hex1},{bp_vmn_hex2}
+BP_TMX,{bp_tmx_hex1},{bp_tmx_hex2}
+BP_ISH,{bp_ish_hex1},{bp_ish_hex2}
+BP_PVS,{bp_pvs_hex1},{bp_pvs_hex2}
 MC1LIM,{mc1lim_hex1},{mc1lim_hex2}
 MC2LIM,{mc2lim_hex1},{mc2lim_hex2}
 TL_TIM,{runtime}
@@ -153,11 +225,16 @@ UVWXYZ
 
 def main():
     """Main function to send data over serial port."""
-    import serial.tools.list_ports
+    # Set endianness based on user input
+    set_endianness()
 
     # List available COM ports
     ports = serial.tools.list_ports.comports()
-    print("Available COM Ports:")
+    if not ports:
+        print("No COM ports found.")
+        return
+
+    print("\nAvailable COM Ports:")
     for i, port in enumerate(ports):
         print(f"{i + 1}: {port.device}")
 
@@ -173,7 +250,7 @@ def main():
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-    print("generating values starting!")
+    print("\nGenerating values starting!")
     # Set up selected COM port
     port = selected_port
     baud_rate = 115200  # Increased baud rate
@@ -192,6 +269,7 @@ def main():
 
             # Send data block
             ser.write(data_block.encode('utf-8'))
+            print(f"Sent data block at {runtime}")
 
             # Measure elapsed time
             elapsed_time = time.time() - loop_start_time
@@ -205,10 +283,11 @@ def main():
     except serial.SerialException as e:
         print(f"Serial error: {e}")
     except KeyboardInterrupt:
-        print("Terminating the script.")
+        print("\nTerminating the script.")
     finally:
-        if ser:
+        if ser and ser.is_open:
             ser.close()
+            print("Serial port closed.")
 
 if __name__ == "__main__":
     main()

@@ -31,7 +31,7 @@ limit_flags_desc = [
 PLACEHOLDER_MARKERS = {"ABCDEF", "UVWXYZ"}  # Define placeholders to ignore
 
 class DataProcessor:
-    def __init__(self):
+    def __init__(self, endianness='big'):
         # Define steering wheel descriptions within the class
         self.logger = logging.getLogger(__name__)
         self.extra_calculations = ExtraCalculations()
@@ -47,11 +47,27 @@ class DataProcessor:
             '0x00000000': 'none',
             '0xHHHHHHHH': 'nonexistent'
         }
-        self.logger.info("DataProcessor initialized.")
+        self.logger.info("DataProcessor initialized with endianness: {}".format(endianness))
+        self.endianness = endianness  # 'big' or 'little'
+
+    def set_endianness(self, endianness):
+        """
+        Update the endianness setting.
+
+        :param endianness: 'big' or 'little'
+        """
+        if endianness not in ['big', 'little']:
+            self.logger.error(f"Invalid endianness specified: {endianness}")
+            return
+        self.endianness = endianness
+        self.logger.info(f"Endianness set to: {endianness}")
 
     def hex_to_float(self, hex_data):
         """
-        Convert a 32-bit hex string to a float.
+        Convert a 32-bit hex string to a float using the current endianness.
+
+        :param hex_data: Hexadecimal string representing the float (e.g., '0x41200000').
+        :return: Floating-point number.
         """
         try:
             # Handle invalid data early
@@ -59,15 +75,37 @@ class DataProcessor:
                 self.logger.debug(f"Invalid hex data for float conversion: {hex_data}")
                 return 0.0  # Return a default value or consider skipping
 
-            int_value = int(hex_data, 16)  # Convert to integer
-            if int_value > 0x7FFFFFFF:  # Check for signed values
-                int_value -= 0x100000000
+            # Remove '0x' prefix if present
+            if hex_data.startswith(('0x', '0X')):
+                hex_data = hex_data[2:]
 
-            float_value = float(int_value)  # Convert to float
-            if not np.isfinite(float_value):  # Check for finite numbers
+            # Ensure the hex_data is exactly 8 characters (32 bits)
+            if len(hex_data) != 8:
+                self.logger.debug(f"Hex data length is not 8 characters: {hex_data}")
+                return 0.0
+
+            # Convert hex string to bytes
+            bytes_data = bytes.fromhex(hex_data)
+
+            # Determine format based on endianness
+            if self.endianness == 'big':
+                fmt = '>f'  # Big endian float
+            elif self.endianness == 'little':
+                fmt = '<f'  # Little endian float
+            else:
+                self.logger.error(f"Invalid endianness set: {self.endianness}")
+                return 0.0
+
+            # Unpack bytes to float
+            float_value = struct.unpack(fmt, bytes_data)[0]
+
+            # Check for finite numbers
+            if not np.isfinite(float_value):
                 self.logger.warning(f"Non-finite float conversion: {hex_data}")
                 return 0.0
+
             return float_value
+
         except (ValueError, TypeError, struct.error) as e:
             self.logger.error(f"Error converting hex to float: {hex_data}, Exception: {e}")
             return 0.0
@@ -99,7 +137,7 @@ class DataProcessor:
         Parse the first and second hex strings for motor controller data.
         First hex: CAN receive/transmit errors and active motor.
         Second hex: Error flags and limit flags.
-        
+
         :param key_prefix: Prefix string ('MC1LIM' or 'MC2LIM') to flatten keys.
         :return: Dictionary with flattened keys.
         """
@@ -131,7 +169,6 @@ class DataProcessor:
             self.logger.error(f"Error parsing motor controller data: hex1={hex1}, hex2={hex2}, Exception: {e}")
             return {}
 
-
     def parse_swc_data(self, hex1, hex2):
         """
         Parse the SWC data from two sources:
@@ -140,7 +177,7 @@ class DataProcessor:
         """
         try:
             # Interpret the SWC Position hex as a description
-            swc_description = self.steering_wheel_desc.get(hex1, "Unkown")
+            swc_description = self.steering_wheel_desc.get(hex1, "Unknown")
             bits2 = self.hex_to_bits(hex2)
 
             # Format the final dictionary to include both description and hex values
@@ -162,7 +199,7 @@ class DataProcessor:
         if any(marker in data_line for marker in PLACEHOLDER_MARKERS):
             self.logger.info(f"Ignored placeholder line: {data_line}")
             return {}
-        
+
         # Ensure at least a key exists in the line
         if len(parts) < 1:
             self.logger.warning(f"Data line does not contain any key: {data_line}")
@@ -176,7 +213,7 @@ class DataProcessor:
         if hex1 in ['N/A', None] or hex2 in ['N/A', None]:
             self.logger.warning(f"Skipping invalid hex data: {data_line}")
             return {}
-        
+
         self.logger.debug(f"Parsing data line for key: {key}")
         try:
             # Handle TL_TIM (device_timestamp) case

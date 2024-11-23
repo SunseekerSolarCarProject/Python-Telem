@@ -9,11 +9,13 @@ import logging
 class DataTableTab(QWidget):
     """
     A tab for displaying telemetry data in a three-column format: Parameter, Value, Unit.
+    Organized into logical groups for better readability.
     """
-    def __init__(self, units, logger):
+    def __init__(self, units, logger, groups):
         super().__init__()
         self.units = units
         self.logger = logger
+        self.groups = groups  # Dictionary of group names to keys
 
         self.init_ui()
 
@@ -30,34 +32,10 @@ class DataTableTab(QWidget):
         self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table_widget.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        
         # Remove alternating row colors
         self.table_widget.setAlternatingRowColors(False)
-        
-        # Set black background, white text, and light gray grid lines
-        self.table_widget.setStyleSheet("""
-            QTableWidget {
-                background-color: #000000; /* Black background */
-                gridline-color: #d3d3d3;    /* Light gray grid lines */
-                color: #FFFFFF;             /* White font */
-                font-size: 12px;
-                selection-background-color: #555555; /* Dark gray selection */
-                selection-color: #FFFFFF;            /* White text on selection */
-            }
-            QHeaderView::section {
-                background-color: #333333; /* Dark gray headers */
-                padding: 4px;
-                border: 1px solid #d3d3d3;
-                font-weight: bold;
-                color: #FFFFFF;            /* White header text */
-            }
-            QTableWidget::item {
-                padding: 4px;
-            }
-            QTableWidget::item:hover {
-                background-color: #444444; /* Slightly lighter gray on hover */
-            }
-        """)
+        # The global stylesheet already handles background and text colors
+        # Additional specific styles can be set here if necessary
 
         # Optional: Set a consistent font for better readability
         font = QFont("Arial", 11)
@@ -68,7 +46,7 @@ class DataTableTab(QWidget):
 
     def update_data(self, telemetry_data):
         """
-        Updates the table with new telemetry data.
+        Updates the table with new telemetry data, organized into groups.
 
         :param telemetry_data: Dictionary containing the latest telemetry data.
         """
@@ -78,52 +56,52 @@ class DataTableTab(QWidget):
 
         self.logger.debug(f"Updating Data Table with telemetry data: {telemetry_data}")
 
-        # Flatten the telemetry_data to handle nested lists and ensure all data is displayed correctly
-        flat_data = self.flatten_telemetry_data(telemetry_data)
+        # Calculate total number of rows: group headers + data rows
+        total_rows = len(self.groups)  # One header per group
+        for keys in self.groups.values():
+            total_rows += len(keys)
+        self.table_widget.setRowCount(total_rows)
 
-        # Set the number of rows based on the flat_data
-        self.table_widget.setRowCount(len(flat_data))
+        current_row = 0
+        for group_name, keys in self.groups.items():
+            # Insert Group Header
+            group_header_item = QTableWidgetItem(group_name)
+            group_header_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            group_header_item.setForeground(QBrush(QColor("#1e90ff")))  # Blue text for headers
+            group_header_item.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+            group_header_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # Non-selectable
+            self.table_widget.setItem(current_row, 0, group_header_item)
+            # Span the header across all three columns
+            self.table_widget.setSpan(current_row, 0, 1, 3)
+            current_row += 1
 
-        for row, (key, value) in enumerate(flat_data.items()):
-            # Populate Parameter column
-            param_item = QTableWidgetItem(key)
-            param_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            # Set white text for parameters
-            param_item.setForeground(QBrush(QColor("#FFFFFF")))
-            self.table_widget.setItem(row, 0, param_item)
+            # Insert Data Rows
+            for key in keys:
+                value = telemetry_data.get(key, "N/A")
+                unit = self.units.get(key, "")
 
-            # Populate Value column
-            value_item = QTableWidgetItem(str(value))
-            value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            # Set white text for values
-            value_item.setForeground(QBrush(QColor("#FFFFFF")))
-            self.table_widget.setItem(row, 1, value_item)
+                # Populate Parameter column
+                param_item = QTableWidgetItem(key)
+                param_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                # Set white text for parameters
+                param_item.setForeground(QBrush(QColor("#FFFFFF")))
+                self.table_widget.setItem(current_row, 0, param_item)
 
-            # Populate Unit column
-            unit = self.units.get(key, "")
-            unit_item = QTableWidgetItem(unit)
-            unit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            # Set white text for units
-            unit_item.setForeground(QBrush(QColor("#FFFFFF")))
-            self.table_widget.setItem(row, 2, unit_item)
+                # Populate Value column
+                value_item = QTableWidgetItem(str(value))
+                value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                # Set white text for values
+                value_item.setForeground(QBrush(QColor("#FFFFFF")))
+                self.table_widget.setItem(current_row, 1, value_item)
 
-    def flatten_telemetry_data(self, telemetry_data):
-        """
-        Flattens the telemetry data by converting list-type values into comma-separated strings.
+                # Populate Unit column
+                unit_item = QTableWidgetItem(unit)
+                unit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                # Set white text for units
+                unit_item.setForeground(QBrush(QColor("#FFFFFF")))
+                self.table_widget.setItem(current_row, 2, unit_item)
 
-        :param telemetry_data: Original telemetry data dictionary.
-        :return: Flattened telemetry data dictionary.
-        """
-        flat_data = {}
-        for key, value in telemetry_data.items():
-            if isinstance(value, list):
-                # Join list elements into a comma-separated string
-                flat_data[key] = ', '.join(value) if value else 'None'
-            elif isinstance(value, dict):
-                # If any nested dictionaries remain (shouldn't be for MC1LIM and MC2LIM), handle accordingly
-                # Here, you can choose to serialize them or skip
-                flat_data[key] = json.dumps(value)
-                self.logger.debug(f"Serialized nested dictionary for key '{key}': {value}")
-            else:
-                flat_data[key] = value
-        return flat_data
+                current_row += 1
+
+            # Optional: Add a blank row after each group for spacing
+            current_row += 1
