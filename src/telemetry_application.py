@@ -1,4 +1,4 @@
-# telemetry_application.py
+# src/telemetry_application.py
 
 import sys
 import os

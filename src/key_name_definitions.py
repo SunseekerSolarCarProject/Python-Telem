@@ -1,4 +1,4 @@
-# key_name_definitions.py
+# src/key_name_definitions.py
 
 from enum import Enum
 
@@ -16,8 +16,8 @@ class TelemetryKey(Enum):
     MC2VEL_SPEED = ("MC2VEL_Speed", "Mph")
     
     # DC Controls
-    DC_DRV_MOTOR_VELOCITY_SETPOINT = ("DC_DRV_Motor_Velocity_Setpoint", "#")
-    DC_DRV_MOTOR_CURRENT_SETPOINT = ("DC_DRV_Motor_Current_Setpoint", "#")
+    DC_DRV_MOTOR_VELOCITY_SETPOINT = ("DC_DRV_Motor_Velocity_Setpoint", " ")
+    DC_DRV_MOTOR_CURRENT_SETPOINT = ("DC_DRV_Motor_Current_Setpoint", "%")
     DC_SWITCH_POSITION = ("DC_SWC_Position", " ")
     DC_SWC_VALUE = ("DC_SWC_Value", "#")
     

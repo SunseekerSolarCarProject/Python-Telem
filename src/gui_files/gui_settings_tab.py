@@ -1,4 +1,4 @@
-# gui_settings_tab.py
+# src/gui_files/gui_settings_tab.py
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,

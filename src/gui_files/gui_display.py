@@ -1,21 +1,20 @@
-# telemetry_gui.py
+# src/gui_files/telemetry_gui.py
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
-from PyQt6.QtCore import pyqtSignal, Qt
-from gui_files.gui_config_dialog import ConfigDialog
+from PyQt6.QtCore import pyqtSignal
 from gui_files.gui_motor_controller_tab import MotorControllerGraphTab
 from gui_files.gui_battery_pack_tab import BatteryPackGraphTab
-from gui_files.gui_settings_tab import SettingsTab
-from gui_files.gui_csv_management import CSVManagementTab
-from gui_files.gui_data_display_tab import DataDisplayTab
 from gui_files.gui_graph_tab import GraphTab
 from gui_files.gui_data_table import DataTableTab
-import pyqtgraph as pg
+from gui_files.gui_data_display_tab import DataDisplayTab
+from gui_files.gui_settings_tab import SettingsTab
+from gui_files.gui_csv_management import CSVManagementTab
+from gui_files.gui_config_dialog import ConfigDialog
 import json
 import os
 import logging
 
-from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
+from key_name_definitions import TelemetryKey, KEY_UNITS  # Ensure correct import
 
 class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
@@ -96,6 +95,8 @@ class TelemetryGUI(QWidget):
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
+        self.tabs.setTabPosition(QTabWidget.TabPosition.North)
+        self.tabs.setMovable(True)
         layout.addWidget(self.tabs)
 
         # Define graph-related groups using TelemetryKey enum

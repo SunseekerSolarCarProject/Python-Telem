@@ -1,4 +1,4 @@
-# gui_csv_management.py
+# src/gui_files/gui_csv_management.py
 
 from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget, QFileDialog, QMessageBox
 

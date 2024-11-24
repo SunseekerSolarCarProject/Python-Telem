@@ -1,4 +1,4 @@
-# gui_data_table.py
+# src/gui_files/gui_data_table.py
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
 from PyQt6.QtCore import Qt

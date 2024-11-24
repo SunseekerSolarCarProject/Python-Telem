@@ -1,4 +1,4 @@
-# gui_data_display_tab.py
+# src/gui_files/gui_data_display_tab.py
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
 from PyQt6.QtCore import Qt

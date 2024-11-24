@@ -1,4 +1,4 @@
-# main_app.py
+# src/main_app.py
 
 import sys
 import os

@@ -1,4 +1,4 @@
-# config_dialog.py
+# src/gui_files/config_dialog.py
 
 import os
 import logging

@@ -1,4 +1,4 @@
-# serial_reader.py
+# src/serial_reader.py
 
 from PyQt6.QtCore import QThread, pyqtSignal
 import serial
