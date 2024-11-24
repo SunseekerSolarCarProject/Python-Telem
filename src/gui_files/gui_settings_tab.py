@@ -2,9 +2,10 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,
-    QColorDialog, QHBoxLayout
+    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtGui import QColor
 import serial.tools.list_ports
 import logging
 
@@ -21,46 +22,68 @@ class SettingsTab(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout(self)
+        # Main layout
+        main_layout = QVBoxLayout(self)
+
+        # Create a scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        main_layout.addWidget(scroll_area)
+
+        # Container widget for scroll area
+        container = QWidget()
+        scroll_area.setWidget(container)
+
+        # Layout for container
+        layout = QVBoxLayout(container)
 
         # Logging Level Controls
         log_level_label = QLabel("Select Logging Level:")
+        log_level_label.setMinimumWidth(200)
         layout.addWidget(log_level_label)
 
         self.log_level_dropdown = QComboBox()
         self.log_level_dropdown.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
         self.log_level_dropdown.setCurrentText('INFO')
         self.log_level_dropdown.currentTextChanged.connect(self.on_log_level_changed)
+        self.log_level_dropdown.setMinimumWidth(200)
         layout.addWidget(self.log_level_dropdown)
 
         # COM Port Dropdown
         com_port_label = QLabel("Select COM Port:")
+        com_port_label.setMinimumWidth(200)
         layout.addWidget(com_port_label)
 
         self.com_port_dropdown = QComboBox()
+        self.com_port_dropdown.setMinimumWidth(200)
         layout.addWidget(self.com_port_dropdown)
         self.populate_com_ports()
 
         # Baud Rate Dropdown
         baud_rate_label = QLabel("Select Baud Rate:")
+        baud_rate_label.setMinimumWidth(200)
         layout.addWidget(baud_rate_label)
 
         self.baud_rate_dropdown = QComboBox()
         self.baud_rate_dropdown.addItems(['9600', '19200', '38400', '57600', '115200'])
         self.baud_rate_dropdown.setCurrentText('9600')  # Default baud rate
+        self.baud_rate_dropdown.setMinimumWidth(200)
         layout.addWidget(self.baud_rate_dropdown)
 
         # Endianness Dropdown
         endianness_label = QLabel("Select Endianness:")
+        endianness_label.setMinimumWidth(200)
         layout.addWidget(endianness_label)
 
         self.endianness_dropdown = QComboBox()
         self.endianness_dropdown.addItems(['Big Endian', 'Little Endian'])
         self.endianness_dropdown.setCurrentText('Big Endian')  # Default endianness
+        self.endianness_dropdown.setMinimumWidth(200)
         layout.addWidget(self.endianness_dropdown)
 
         # Color Selection
         color_selection_label = QLabel("Select Graph Colors:")
+        color_selection_label.setStyleSheet("font-weight: bold;")
         layout.addWidget(color_selection_label)
 
         self.color_buttons = {}
@@ -68,13 +91,15 @@ class SettingsTab(QWidget):
             # Insert Group Header
             group_header = QLabel(group_name)
             group_header.setStyleSheet("font-weight: bold; color: #1e90ff;")
+            group_header.setMinimumWidth(200)
             layout.addWidget(group_header)
 
             for key in keys:
                 row_layout = QHBoxLayout()
 
                 key_label = QLabel(key)
-                key_label.setFixedWidth(200)
+                key_label.setFixedWidth(250)
+                key_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
                 row_layout.addWidget(key_label)
 
                 color_display = QLabel()
@@ -83,6 +108,7 @@ class SettingsTab(QWidget):
                 row_layout.addWidget(color_display)
 
                 color_button = QPushButton("Choose Color")
+                color_button.setMinimumWidth(100)
                 # Use a lambda with default arguments to capture current key and color_display
                 color_button.clicked.connect(lambda checked, k=key, disp=color_display: self.choose_color(k, disp))
                 row_layout.addWidget(color_button)
@@ -92,8 +118,13 @@ class SettingsTab(QWidget):
 
         # Apply Button
         apply_button = QPushButton("Apply Settings")
+        apply_button.setFixedWidth(150)
         apply_button.clicked.connect(self.apply_settings)
-        layout.addWidget(apply_button)
+        apply_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        layout.addWidget(apply_button, alignment=Qt.AlignmentFlag.AlignRight)
+
+        # Add stretch to push content to the top
+        layout.addStretch()
 
     def populate_com_ports(self):
         try:
