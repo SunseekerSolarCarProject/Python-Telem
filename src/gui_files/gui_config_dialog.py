@@ -180,11 +180,11 @@ class ConfigDialog(QDialog):
         try:
             capacity_ah, ok1 = QInputDialog.getDouble(self, "Battery Capacity", "Battery cell capacity (Amps Hours):", decimals=2)
             if not ok1:
-                raise ValueError("Battery capacity input canceled.")
+                raise ValueError("Battery cell capacity input canceled.")
 
             voltage, ok2 = QInputDialog.getDouble(self, "Battery Voltage", "Battery cell nominal voltage (V):", decimals=2)
             if not ok2:
-                raise ValueError("Battery voltage input canceled.")
+                raise ValueError("Battery cell voltage input canceled.")
 
             quantity, ok3 = QInputDialog.getInt(self, "Number of Cells", "Amount of battery cells:", min=1)
             if not ok3:
@@ -192,7 +192,7 @@ class ConfigDialog(QDialog):
 
             series_strings, ok4 = QInputDialog.getInt(self, "Series Strings", "Number of battery series:", min=1)
             if not ok4:
-                raise ValueError("Number of battery strings input canceled.")
+                raise ValueError("Number of battery series input canceled.")
 
             self.battery_info = {
                 "capacity_ah": capacity_ah,
