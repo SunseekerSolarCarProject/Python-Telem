@@ -153,13 +153,13 @@ class ConfigDialog(QDialog):
                     if ', ' in line:
                         key, value = line.strip().split(", ", 1)
                         key = key.lower()
-                        if key.startswith("battery capacity amps hours"):
+                        if key.startswith("battery cell capacity amps hours"):
                             battery_data["capacity_ah"] = float(value)
-                        elif key.startswith("battery nominal voltage"):
+                        elif key.startswith("battery cell nominal voltage"):
                             battery_data["voltage"] = float(value)
                         elif key.startswith("amount of battery cells"):
                             battery_data["quantity"] = int(value)
-                        elif key.startswith("number of battery strings"):
+                        elif key.startswith("number of battery series"):
                             battery_data["series_strings"] = int(value)
 
             required_keys = ["capacity_ah", "voltage", "quantity", "series_strings"]
@@ -178,11 +178,11 @@ class ConfigDialog(QDialog):
         Prompt the user to manually input battery information.
         """
         try:
-            capacity_ah, ok1 = QInputDialog.getDouble(self, "Battery Capacity", "Battery capacity (Amps Hours):", decimals=2)
+            capacity_ah, ok1 = QInputDialog.getDouble(self, "Battery Capacity", "Battery cell capacity (Amps Hours):", decimals=2)
             if not ok1:
                 raise ValueError("Battery capacity input canceled.")
 
-            voltage, ok2 = QInputDialog.getDouble(self, "Battery Voltage", "Battery nominal voltage (V):", decimals=2)
+            voltage, ok2 = QInputDialog.getDouble(self, "Battery Voltage", "Battery cell nominal voltage (V):", decimals=2)
             if not ok2:
                 raise ValueError("Battery voltage input canceled.")
 
@@ -190,7 +190,7 @@ class ConfigDialog(QDialog):
             if not ok3:
                 raise ValueError("Number of battery cells input canceled.")
 
-            series_strings, ok4 = QInputDialog.getInt(self, "Series Strings", "Number of battery strings:", min=1)
+            series_strings, ok4 = QInputDialog.getInt(self, "Series Strings", "Number of battery series:", min=1)
             if not ok4:
                 raise ValueError("Number of battery strings input canceled.")
 
