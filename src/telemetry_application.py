@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
 from data_display import DataDisplay
@@ -13,6 +14,8 @@ from buffer_data import BufferData
 from extra_calculations import ExtraCalculations
 from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Ensure correct import paths
 from csv_handler import CSVHandler
+
+from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
@@ -55,65 +58,69 @@ class TelemetryApplication(QObject):
             self.logger.addHandler(ch)
 
     def init_units_and_keys(self):
-        self.units = {
-            'DC_DRV_Motor_Velocity_Setpoint': '#',
-            'DC_DRV_Motor_Current_Setpoint': '#',
-            'DC_Switch_Position': ' ',
-            'DC_SWC_Value': '#',
-            'MC1BUS_Voltage': 'V',
-            'MC1BUS_Current': 'A',
-            'MC2BUS_Voltage': 'V',
-            'MC2BUS_Current': 'A',
-            'MC1VEL_Velocity': 'M/s',
-            'MC1VEL_Speed': 'Mph',
-            'MC1VEL_RPM': 'RPM',
-            'MC2VEL_Velocity': 'M/s',
-            'MC2VEL_Speed': 'Mph',
-            'MC2VEL_RPM': 'RPM',
-            'BP_VMX_ID': '#',
-            'BP_VMX_Voltage': 'V',
-            'BP_VMN_ID': '#',
-            'BP_VMN_Voltage': 'V',
-            'BP_TMX_ID': '#',
-            'BP_TMX_Temperature': '°F',
-            'BP_PVS_Voltage': 'V',
-            'BP_PVS_milliamp/s': 'mA/s',
-            'BP_PVS_Ah': 'Ah',
-            'BP_ISH_Amps': 'A',
-            'BP_ISH_SOC': '%',
-            "MC1LIM_CAN_Receive_Error_Count": "",
-            "MC1LIM_CAN_Transmit_Error_Count": "",
-            "MC1LIM_Active_Motor_Info": "",
-            "MC1LIM_Errors": "",
-            "MC1LIM_Limits": "",
-            "MC2LIM_CAN_Receive_Error_Count": "",
-            "MC2LIM_CAN_Transmit_Error_Count": "",
-            "MC2LIM_Active_Motor_Info": "",
-            "MC2LIM_Errors": "",
-            "MC2LIM_Limits": "",
-            'Shunt_Remaining_wh': 'Wh',
-            'Used_Ah_Remaining_wh': 'Wh',
-            'Shunt_Remaining_Ah': 'Ah',
-            'Used_Ah_Remaining_Ah': 'Ah',
-            'Shunt_Remaining_Time': 'hours',
-            'Used_Ah_Remaining_Time': 'hours',
-            'timestamp': 'hh:mm:ss',
-            'device_timestamp': 'hh:mm:ss'
-        }
+        """
+        Initializes the units and data keys using key_name_definition.py.
+        """
+        # Utilize the KEY_UNITS dictionary imported from key_name_definition.py
+        self.units = KEY_UNITS.copy()
 
+        # Define data_keys as a list of key names from TelemetryKey Enum
+        # Only include relevant keys as per your application needs
         self.data_keys = [
-            "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
-            "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed",
-            "Total_Capacity_Ah", "Total_Capacity_Wh", "Total_Voltage",
-            "DC_DRV_Motor_Velocity_Setpoint", "DC_DRV_Motor_Current_Setpoint",
-            "DC_Switch_Position", "DC_SWC_Value", "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage",
-            "BP_TMX_Temperature", "BP_TMX_ID", "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage",
-            "BP_PVS_Ah", "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
-            "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time", "device_timestamp", "timestamp",
-            "MC1LIM_CAN_Receive_Error_Count", "MC1LIM_CAN_Transmit_Error_Count", "MC1LIM_Active_Motor_Info",
-            "MC1LIM_Errors", "MC1LIM_Limits",
-            "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count", "MC2LIM_Active_Motor_Info",
-            "MC2LIM_Errors", "MC2LIM_Limits"
+            TelemetryKey.TIMESTAMP.value[0],
+            TelemetryKey.DEVICE_TIMESTAMP.value[0],
+            TelemetryKey.MC1BUS_VOLTAGE.value[0],
+            TelemetryKey.MC1BUS_CURRENT.value[0],
+            TelemetryKey.MC1VEL_RPM.value[0],
+            TelemetryKey.MC1VEL_VELOCITY.value[0],
+            TelemetryKey.MC1VEL_SPEED.value[0],
+            TelemetryKey.MC2BUS_VOLTAGE.value[0],
+            TelemetryKey.MC2BUS_CURRENT.value[0],
+            TelemetryKey.MC2VEL_VELOCITY.value[0],
+            TelemetryKey.MC2VEL_RPM.value[0],
+            TelemetryKey.MC2VEL_SPEED.value[0],
+            TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0],
+            TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT.value[0],
+            TelemetryKey.DC_SWITCH_POSITION.value[0],
+            TelemetryKey.DC_SWC_VALUE.value[0],
+            TelemetryKey.BP_VMX_ID.value[0],
+            TelemetryKey.BP_VMX_VOLTAGE.value[0],
+            TelemetryKey.BP_VMN_ID.value[0],
+            TelemetryKey.BP_VMN_VOLTAGE.value[0],
+            TelemetryKey.BP_TMX_ID.value[0],
+            TelemetryKey.BP_TMX_TEMPERATURE.value[0],
+            TelemetryKey.BP_PVS_VOLTAGE.value[0],
+            TelemetryKey.BP_PVS_AH.value[0],
+            TelemetryKey.BP_PVS_MILLIAMP_S.value[0],
+            TelemetryKey.BP_ISH_SOC.value[0],
+            TelemetryKey.BP_ISH_AMPS.value[0],
+            TelemetryKey.BP_PVS_VOLTAGE.value[0],
+            TelemetryKey.BP_PVS_MILLIAMP_S.value[0],
+            TelemetryKey.BP_PVS_AH.value[0],
+            TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+            TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+            TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO.value[0],
+            TelemetryKey.MC1LIM_ERRORS.value[0],
+            TelemetryKey.MC1LIM_LIMITS.value[0],
+            TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+            TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+            TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0],
+            TelemetryKey.MC2LIM_ERRORS.value[0],
+            TelemetryKey.MC2LIM_LIMITS.value[0],
+            TelemetryKey.TOTAL_CAPACITY_WH.value[0],
+            TelemetryKey.TOTAL_CAPACITY_AH.value[0],
+            TelemetryKey.TOTAL_VOLTAGE.value[0],
+            TelemetryKey.SHUNT_REMAINING_AH.value[0],
+            TelemetryKey.USED_AH_REMAINING_AH.value[0],
+            TelemetryKey.SHUNT_REMAINING_WH.value[0],
+            TelemetryKey.USED_AH_REMAINING_WH.value[0],
+            TelemetryKey.SHUNT_REMAINING_TIME.value[0],
+            TelemetryKey.USED_AH_REMAINING_TIME.value[0],
+            TelemetryKey.REMAINING_CAPACITY_AH.value[0],
+            TelemetryKey.CAPACITY_AH.value[0],
+            TelemetryKey.VOLTAGE.value[0],
+            TelemetryKey.QUANTITY.value[0],
+            TelemetryKey.SERIES_STRINGS.value[0]
         ]
 
     def init_csv_handler(self):

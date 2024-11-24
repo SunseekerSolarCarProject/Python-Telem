@@ -2,6 +2,8 @@
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt
+import html
+from key_name_definitions import TelemetryKey  # Import TelemetryKey enum
 
 class DataDisplayTab(QWidget):
     """
@@ -34,6 +36,10 @@ class DataDisplayTab(QWidget):
         display_text = ""
         for key, value in telemetry_data.items():
             unit = self.units.get(key, "")
+            if key == TelemetryKey.MC1LIM_ERRORS.value[0] or key == TelemetryKey.MC2LIM_ERRORS.value[0]:
+                # Example: Handle error keys differently if needed
+                display_text += f"<b>{html.escape(key)}:</b> {html.escape(str(value))} {html.escape(unit)}\n"
+                continue
             if key == "Errors":
                 display_text += "<b>Errors:</b>\n"
                 if isinstance(value, list) and value:
@@ -48,18 +54,18 @@ class DataDisplayTab(QWidget):
                         # Assuming each limit is a string in the format "Parameter: Description"
                         if ":" in limit:
                             param, desc = limit.split(":", 1)
-                            display_text += f"• <b>{param.strip()}:</b> {desc.strip()}\n"
+                            display_text += f"• <b>{html.escape(param.strip())}:</b> {html.escape(desc.strip())}\n"
                         else:
-                            display_text += f"• {limit}\n"
+                            display_text += f"• {html.escape(limit)}\n"
                 else:
                     display_text += "• None\n"
             else:
                 if isinstance(value, list):
                     # Handle other list-type values if necessary
-                    value_str = ', '.join(value) if value else 'None'
-                    display_text += f"<b>{key}:</b> {value_str} {unit}\n"
+                    value_str = ', '.join(map(str, value)) if value else 'None'
+                    display_text += f"<b>{html.escape(key)}:</b> {html.escape(value_str)} {html.escape(unit)}\n"
                 else:
-                    display_text += f"<b>{key}:</b> {value} {unit}\n"
+                    display_text += f"<b>{html.escape(key)}:</b> {html.escape(str(value))} {html.escape(unit)}\n"
 
         self.data_label.setText(display_text)
         self.logger.info("Data Display updated.")

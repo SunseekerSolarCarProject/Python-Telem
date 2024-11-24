@@ -4,6 +4,7 @@ import csv
 import os
 import threading
 import logging
+from key_name_definitions import TelemetryKey, KEY_UNITS  # Import TelemetryKey enum and KEY_UNITS
 
 class CSVHandler:
     def __init__(self, root_directory='.'):
@@ -13,29 +14,18 @@ class CSVHandler:
         self.lock = threading.Lock()
         self.root_directory = os.path.abspath(root_directory)
         self.ensure_directory_exists(self.root_directory)
+        
+        # Define CSV file paths
         self.primary_csv_file = os.path.join(self.root_directory, "telemetry_data.csv")
         self.secondary_csv_file = os.path.join(self.root_directory, "raw_hex_data.csv")
+        
+        # Initialize logger
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logs
 
-        # Define primary and secondary headers
-        self.primary_headers = [
-            "timestamp", "device_timestamp", "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM",
-            "MC1VEL_Velocity", "MC1VEL_Speed", "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_Velocity",
-            "MC2VEL_RPM", "MC2VEL_Speed", "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint",
-            "DC_SWC_Position", "DC_SWC_Value", "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID",
-            "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature", "BP_ISH_SOC", "BP_ISH_Amps",
-            "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah", "MC1LIM_CAN_Receive_Error_Count",
-            "MC1LIM_CAN_Transmit_Error_Count", "MC1LIM_Active_Motor_Info", "MC1LIM_Errors",
-            "MC1LIM_Limits", "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count",
-            "MC2LIM_Active_Motor_Info", "MC2LIM_Errors", "MC2LIM_Limits",
-            "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
-            "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
-            "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
-            "Remaining_Capacity_Ah"
-        ]
-
-        self.secondary_headers = ["timestamp", "raw_data"]
+        # Define headers using TelemetryKey enum
+        self.primary_headers = self.generate_primary_headers()
+        self.secondary_headers = self.generate_secondary_headers()
 
         # Ensure the default CSV files exist with correct headers
         self.setup_csv(self.primary_csv_file, self.primary_headers)
@@ -49,9 +39,55 @@ class CSVHandler:
             os.makedirs(directory)
             self.logger.info(f"Created directory: {directory}")
 
+    def generate_primary_headers(self):
+        """
+        Generates primary CSV headers based on telemetry keys.
+
+        :return: List of primary CSV headers.
+        """
+        # Define the desired order of telemetry keys
+        ordered_keys = [
+            TelemetryKey.TIMESTAMP.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
+            TelemetryKey.MC1BUS_VOLTAGE.value[0], TelemetryKey.MC1BUS_CURRENT.value[0],
+            TelemetryKey.MC1VEL_RPM.value[0], TelemetryKey.MC1VEL_VELOCITY.value[0], TelemetryKey.MC1VEL_SPEED.value[0],
+            TelemetryKey.MC2BUS_VOLTAGE.value[0], TelemetryKey.MC2BUS_CURRENT.value[0],
+            TelemetryKey.MC2VEL_VELOCITY.value[0], TelemetryKey.MC2VEL_RPM.value[0], TelemetryKey.MC2VEL_SPEED.value[0],
+            TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0], TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT.value[0],
+            TelemetryKey.DC_SWITCH_POSITION.value[0], TelemetryKey.DC_SWC_VALUE.value[0],
+            TelemetryKey.BP_VMX_ID.value[0], TelemetryKey.BP_VMX_VOLTAGE.value[0],
+            TelemetryKey.BP_VMN_ID.value[0], TelemetryKey.BP_VMN_VOLTAGE.value[0],
+            TelemetryKey.BP_TMX_ID.value[0], TelemetryKey.BP_TMX_TEMPERATURE.value[0],
+            TelemetryKey.BP_ISH_SOC.value[0], TelemetryKey.BP_ISH_AMPS.value[0],
+            TelemetryKey.BP_PVS_VOLTAGE.value[0], TelemetryKey.BP_PVS_MILLIAMP_S.value[0], TelemetryKey.BP_PVS_AH.value[0],
+            TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+            TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+            TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO.value[0], TelemetryKey.MC1LIM_ERRORS.value[0], TelemetryKey.MC1LIM_LIMITS.value[0],
+            TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+            TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+            TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0], TelemetryKey.MC2LIM_ERRORS.value[0], TelemetryKey.MC2LIM_LIMITS.value[0],
+            TelemetryKey.TOTAL_CAPACITY_WH.value[0], TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_VOLTAGE.value[0],
+            TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
+            TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
+            TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0],
+            TelemetryKey.REMAINING_CAPACITY_AH.value[0]
+        ]
+        self.logger.debug(f"Primary headers generated: {ordered_keys}")
+        return ordered_keys
+
+    def generate_secondary_headers(self):
+        """
+        Generates secondary CSV headers.
+
+        :return: List of secondary CSV headers.
+        """
+        return ["timestamp", "raw_data"]
+
     def setup_csv(self, csv_file, headers):
         """
         Sets up a CSV file with headers if it doesn't exist.
+
+        :param csv_file: Path to the CSV file.
+        :param headers: List of header strings.
         """
         with self.lock:
             if not os.path.exists(csv_file):
@@ -145,37 +181,3 @@ class CSVHandler:
             self.logger.info(f"CSV file renamed to: {new_csv_path}")
         except Exception as e:
             self.logger.error(f"Error finalizing CSV file from {original_csv} to {new_csv_path}: {e}")
-
-    def generate_csv_headers(self):
-        """
-        Generates CSV headers based on telemetry fields and battery information.
-
-        :return: List of header strings.
-        """
-        telemetry_headers = [
-            "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
-            "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_Velocity", "MC2VEL_RPM", "MC2VEL_Speed",
-            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint", "DC_SWC_Position", "DC_SWC_Value",
-            "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID",
-            "BP_VMN_Voltage", "BP_TMX_ID", "BP_TMX_Temperature",
-            "BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
-            "MC1LIM_CAN_Receive_Error_Count", "MC1LIM_CAN_Transmit_Error_Count",
-            "MC1LIM_Active_Motor_Info", "MC1LIM_Errors", "MC1LIM_Limits",
-            "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count",
-            "MC2LIM_Active_Motor_Info", "MC2LIM_Errors", "MC2LIM_Limits"
-        ]
-
-        # Add additional calculated fields
-        battery_headers = [
-            "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
-            "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
-            "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
-            "Remaining_Capacity_Ah"
-        ]
-
-        # Add timestamp fields
-        timestamp_headers = ["timestamp", "device_timestamp"]
-
-        headers = timestamp_headers + telemetry_headers + battery_headers
-        self.logger.debug(f"CSV headers generated: {headers}")
-        return headers

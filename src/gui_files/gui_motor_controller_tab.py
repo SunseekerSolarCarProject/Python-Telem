@@ -2,6 +2,7 @@
 
 from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget
 import pyqtgraph as pg
+from key_name_definitions import TelemetryKey  # Import TelemetryKey enum
 
 class MotorControllerGraphTab(QWidget):
     """

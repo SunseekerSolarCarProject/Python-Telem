@@ -15,6 +15,8 @@ import json
 import os
 import logging
 
+from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
+
 class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
@@ -95,78 +97,116 @@ class TelemetryGUI(QWidget):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        # Define graph-related groups
+        # Define graph-related groups using TelemetryKey enum
         graph_groups = {
-            "Motor Controller 1": ["MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed"],
-            "Motor Controller 2": ["MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed"],
-            "Battery Pack 1": ["BP_VMX_Voltage", "BP_VMN_Voltage", "BP_PVS_Voltage", "BP_TMX_Temperature"],
-            "Battery Pack 2": ["BP_ISH_SOC", "BP_ISH_Amps", "BP_PVS_Ah", "BP_PVS_milliamp/s"],
-            "Remaining Capacity": ["Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh", "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"]
+            "Motor Controller 1": [
+                TelemetryKey.MC1BUS_VOLTAGE.value[0], TelemetryKey.MC1BUS_CURRENT.value[0],
+                TelemetryKey.MC1VEL_RPM.value[0], TelemetryKey.MC1VEL_VELOCITY.value[0], TelemetryKey.MC1VEL_SPEED.value[0]
+            ],
+            "Motor Controller 2": [
+                TelemetryKey.MC2BUS_VOLTAGE.value[0], TelemetryKey.MC2BUS_CURRENT.value[0],
+                TelemetryKey.MC2VEL_RPM.value[0], TelemetryKey.MC2VEL_VELOCITY.value[0], TelemetryKey.MC2VEL_SPEED.value[0]
+            ],
+            "Battery Pack 1": [
+                TelemetryKey.BP_VMX_VOLTAGE.value[0], TelemetryKey.BP_VMN_VOLTAGE.value[0],
+                TelemetryKey.BP_PVS_VOLTAGE.value[0], TelemetryKey.BP_TMX_TEMPERATURE.value[0]
+            ],
+            "Battery Pack 2": [
+                TelemetryKey.BP_ISH_SOC.value[0], TelemetryKey.BP_ISH_AMPS.value[0],
+                TelemetryKey.BP_PVS_AH.value[0], TelemetryKey.BP_PVS_MILLIAMP_S.value[0]
+            ],
+            "Remaining Capacity": [
+                TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
+                TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
+                TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0]
+            ]
         }
 
         # Motor Controller Tabs
-        self.mc1_tab = MotorControllerGraphTab("Motor Controller 1", graph_groups["Motor Controller 1"], self.units, self.logger, self.color_mapping)
-        self.mc2_tab = MotorControllerGraphTab("Motor Controller 2", graph_groups["Motor Controller 2"], self.units, self.logger, self.color_mapping)
+        self.mc1_tab = MotorControllerGraphTab(
+            "Motor Controller 1", graph_groups["Motor Controller 1"], self.units, self.logger, self.color_mapping
+        )
+        self.mc2_tab = MotorControllerGraphTab(
+            "Motor Controller 2", graph_groups["Motor Controller 2"], self.units, self.logger, self.color_mapping
+        )
         self.tabs.addTab(self.mc1_tab, "Motor Controller 1")
         self.tabs.addTab(self.mc2_tab, "Motor Controller 2")
 
         # Battery Pack Tabs
-        self.pack1_tab = BatteryPackGraphTab("Battery Pack 1", graph_groups["Battery Pack 1"], self.units, self.logger, self.color_mapping)
-        self.pack2_tab = BatteryPackGraphTab("Battery Pack 2", graph_groups["Battery Pack 2"], self.units, self.logger, self.color_mapping)
+        self.pack1_tab = BatteryPackGraphTab(
+            "Battery Pack 1", graph_groups["Battery Pack 1"], self.units, self.logger, self.color_mapping
+        )
+        self.pack2_tab = BatteryPackGraphTab(
+            "Battery Pack 2", graph_groups["Battery Pack 2"], self.units, self.logger, self.color_mapping
+        )
         self.tabs.addTab(self.pack1_tab, "Battery Pack 1")
         self.tabs.addTab(self.pack2_tab, "Battery Pack 2")
 
         # Remaining Capacity Tab
-        self.remaining_tab = GraphTab("Remaining Capacity", graph_groups["Remaining Capacity"], self.units, self.logger, self.color_mapping)
+        self.remaining_tab = GraphTab(
+            "Remaining Capacity", graph_groups["Remaining Capacity"], self.units, self.logger, self.color_mapping
+        )
         self.tabs.addTab(self.remaining_tab, "Battery Remaining Capacity")
 
-        # Data Table Tab
+        # Data Table Tab using TelemetryKey enum
         data_table_groups = {
             "Motor Controllers": [
-                "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
-                "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed"
+                TelemetryKey.MC1BUS_VOLTAGE.value[0], TelemetryKey.MC1BUS_CURRENT.value[0], TelemetryKey.MC1VEL_RPM.value[0],
+                TelemetryKey.MC1VEL_VELOCITY.value[0], TelemetryKey.MC1VEL_SPEED.value[0],
+                TelemetryKey.MC2BUS_VOLTAGE.value[0], TelemetryKey.MC2BUS_CURRENT.value[0], TelemetryKey.MC2VEL_RPM.value[0],
+                TelemetryKey.MC2VEL_VELOCITY.value[0], TelemetryKey.MC2VEL_SPEED.value[0]
             ],
             "Battery Packs": [
-                "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage",
-                "BP_TMX_ID", "BP_TMX_Temperature", "BP_PVS_Voltage", "BP_PVS_Ah", "BP_PVS_milliamp/s",
-                "BP_ISH_SOC", "BP_ISH_Amps"
+                TelemetryKey.BP_VMX_ID.value[0], TelemetryKey.BP_VMX_VOLTAGE.value[0], TelemetryKey.BP_VMN_ID.value[0],
+                TelemetryKey.BP_VMN_VOLTAGE.value[0], TelemetryKey.BP_TMX_ID.value[0], TelemetryKey.BP_TMX_TEMPERATURE.value[0],
+                TelemetryKey.BP_PVS_VOLTAGE.value[0], TelemetryKey.BP_PVS_AH.value[0], TelemetryKey.BP_PVS_MILLIAMP_S.value[0],
+                TelemetryKey.BP_ISH_SOC.value[0], TelemetryKey.BP_ISH_AMPS.value[0]
             ],
             "Shunt Remaining": [
-                "Shunt_Remaining_Ah", "Used_Ah_Remaining_Ah", "Shunt_Remaining_wh",
-                "Used_Ah_Remaining_wh", "Shunt_Remaining_Time", "Used_Ah_Remaining_Time"
+                TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
+                TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
+                TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0]
             ],
             "DC Controls": [
-                "DC_DRV_Motor_Velocity_Setpoint", "DC_DRV_Motor_Current_Setpoint",
-                "DC_Switch_Position", "DC_SWC_Value"
+                TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0], TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT.value[0],
+                TelemetryKey.DC_SWITCH_POSITION.value[0], TelemetryKey.DC_SWC_VALUE.value[0]
             ],
             "Limiter Information": [
-                "MC1LIM_CAN_Receive_Error_Count", "MC1LIM_CAN_Transmit_Error_Count",
-                "MC1LIM_Active_Motor_Info", "MC1LIM_Errors", "MC1LIM_Limits",
-                "MC2LIM_CAN_Receive_Error_Count", "MC2LIM_CAN_Transmit_Error_Count",
-                "MC2LIM_Active_Motor_Info", "MC2LIM_Errors", "MC2LIM_Limits"
+                TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0], TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+                TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO.value[0], TelemetryKey.MC1LIM_ERRORS.value[0], TelemetryKey.MC1LIM_LIMITS.value[0],
+                TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0], TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+                TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0], TelemetryKey.MC2LIM_ERRORS.value[0], TelemetryKey.MC2LIM_LIMITS.value[0]
             ],
             "General": [
-                "Total_Capacity_Ah", "Total_Capacity_Wh", "Total_Voltage",
-                "device_timestamp", "timestamp"
+                TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0], TelemetryKey.TOTAL_VOLTAGE.value[0],
+                TelemetryKey.DEVICE_TIMESTAMP.value[0], TelemetryKey.TIMESTAMP.value[0]
             ]
         }
 
-        self.data_table_tab = DataTableTab(self.units, self.logger, data_table_groups)
+        self.data_table_tab = DataTableTab(
+            self.units, self.logger, data_table_groups
+        )
         self.tabs.addTab(self.data_table_tab, "Data Table")
 
         # Data Display Tab
-        self.data_display_tab = DataDisplayTab(self.units, self.logger)
+        self.data_display_tab = DataDisplayTab(
+            self.units, self.logger
+        )
         self.tabs.addTab(self.data_display_tab, "Data Display")
 
         # Settings Tab - Pass only graph-related groups
-        self.settings_tab = SettingsTab(self.logger, graph_groups, self.color_mapping)
+        self.settings_tab = SettingsTab(
+            self.logger, graph_groups, self.color_mapping
+        )
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)  # Relay the signal
         self.tabs.addTab(self.settings_tab, "Settings")
 
         # CSV Management Tab
-        self.csv_management_tab = CSVManagementTab(csv_handler=self.csv_handler, logger=self.logger)
+        self.csv_management_tab = CSVManagementTab(
+            csv_handler=self.csv_handler, logger=self.logger
+        )
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
 
     def apply_dark_mode(self):

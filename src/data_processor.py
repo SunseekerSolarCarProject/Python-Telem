@@ -4,6 +4,7 @@ import struct
 import logging
 import numpy as np
 from extra_calculations import ExtraCalculations
+from key_name_definitions import TelemetryKey, KEY_UNITS
 
 # Error and limit flag descriptions
 error_flags_desc = [
@@ -115,7 +116,25 @@ class DataProcessor:
             if hex_data in ['HHHHHHHH', '0xHHHHHHHH']:
                 self.logger.debug(f"Invalid hex data for bit conversion: {hex_data}")
                 return '0' * 32  # Default to a string of 32 zeros if data is invalid
-            bits = f"{int(hex_data, 16):032b}"
+        
+            # Remove '0x' prefix if present
+            if hex_data.startswith(('0x', '0X')):
+                hex_data = hex_data[2:]
+        
+            # Ensure the hex_data is exactly 8 characters (32 bits)
+            if len(hex_data) != 8:
+                self.logger.debug(f"Hex data length is not 8 characters: {hex_data}")
+                return '0' * 32
+        
+            # Convert hex string to bytes
+            bytes_data = bytes.fromhex(hex_data)
+        
+            # Reverse bytes for little endian
+            if self.endianness == 'little':
+                bytes_data = bytes_data[::-1]
+        
+            # Convert bytes to integer and then to bits
+            bits = ''.join(f"{byte:08b}" for byte in bytes_data)
             self.logger.debug(f"Converted hex to bits: {hex_data} -> {bits}")
             return bits
         except ValueError as e:
@@ -219,8 +238,8 @@ class DataProcessor:
             # Handle TL_TIM (device_timestamp) case
             if key == "TL_TIM":
                 if len(parts) >= 2:
-                    processed_data["device_timestamp"] = parts[1].strip()
-                    self.logger.debug(f"Processed device_timestamp: {processed_data['device_timestamp']}")
+                    processed_data[TelemetryKey.DEVICE_TIMESTAMP.value[0]] = parts[1].strip()
+                    self.logger.debug(f"Processed device_timestamp: {processed_data[TelemetryKey.DEVICE_TIMESTAMP.value[0]]}")
                 else:
                     self.logger.warning(f"TL_TIM data line is incomplete: {data_line}")
                 return processed_data
@@ -257,38 +276,38 @@ class DataProcessor:
                 self.logger.debug(f"Converted hex to floats: {hex1} -> {float1}, {hex2} -> {float2}")
                 # Process each sensor based on its type and format
                 if key == 'MC1BUS':
-                    processed_data[f"{key}_Voltage"] = float1
-                    processed_data[f"{key}_Current"] = float2
+                    processed_data[TelemetryKey.MC1BUS_VOLTAGE.value[0]] = float1
+                    processed_data[TelemetryKey.MC1BUS_CURRENT.value[0]] = float2
                 elif key == 'MC2BUS':
-                    processed_data[f"{key}_Voltage"] = float1
-                    processed_data[f"{key}_Current"] = float2
+                    processed_data[TelemetryKey.MC2BUS_VOLTAGE.value[0]] = float1
+                    processed_data[TelemetryKey.MC2BUS_CURRENT.value[0]] = float2
                 elif key == 'MC1VEL':
-                    processed_data[f"{key}_RPM"] = float1
-                    processed_data[f"{key}_Velocity"] = float2
-                    processed_data[f"{key}_Speed"] = self.extra_calculations.convert_mps_to_mph(float2)
+                    processed_data[TelemetryKey.MC1VEL_RPM.value[0]] = float1
+                    processed_data[TelemetryKey.MC1VEL_VELOCITY.value[0]] = float2
+                    processed_data[TelemetryKey.MC1VEL_SPEED.value[0]] = self.extra_calculations.convert_mps_to_mph(float2)
                 elif key == 'MC2VEL':
-                    processed_data[f"{key}_Velocity"] = float1
-                    processed_data[f"{key}_RPM"] = float2
-                    processed_data[f"{key}_Speed"] = self.extra_calculations.convert_mps_to_mph(float2)
+                    processed_data[TelemetryKey.MC2VEL_RPM.value[0]] = float1
+                    processed_data[TelemetryKey.MC2VEL_VELOCITY.value[0]] = float2
+                    processed_data[TelemetryKey.MC2VEL_SPEED.value[0]] = self.extra_calculations.convert_mps_to_mph(float2)
                 elif key == 'BP_VMX':
-                    processed_data[f"{key}_ID"] = float1
-                    processed_data[f"{key}_Voltage"] = float2
+                    processed_data[TelemetryKey.BP_VMX_ID.value[0]] = float1
+                    processed_data[TelemetryKey.BP_VMX_VOLTAGE.value[0]] = float2
                 elif key == 'BP_VMN':
-                    processed_data[f"{key}_ID"] = float1
-                    processed_data[f"{key}_Voltage"] = float2
+                    processed_data[TelemetryKey.BP_VMN_ID.value[0]] = float1
+                    processed_data[TelemetryKey.BP_VMN_VOLTAGE.value[0]] = float2
                 elif key == 'BP_TMX':
-                    processed_data[f"{key}_ID"] = float1
-                    processed_data[f"{key}_Temperature"] = float2
+                    processed_data[TelemetryKey.BP_TMX_ID.value[0]] = float1
+                    processed_data[TelemetryKey.BP_TMX_TEMPERATURE.value[0]] = float2
                 elif key == 'BP_ISH':
-                    processed_data[f"{key}_SOC"] = float1
-                    processed_data[f"{key}_Amps"] = float2
+                    processed_data[TelemetryKey.BP_ISH_SOC.value[0]] = float1
+                    processed_data[TelemetryKey.BP_ISH_AMPS.value[0]] = float2
                 elif key == 'BP_PVS':
-                    processed_data[f"{key}_Voltage"] = float1
-                    processed_data[f"{key}_milliamp/s"] = float2
-                    processed_data[f"{key}_Ah"] = self.extra_calculations.convert_mA_s_to_Ah(float2)
+                    processed_data[TelemetryKey.BP_PVS_VOLTAGE.value[0]] = float1
+                    processed_data[TelemetryKey.BP_PVS_MILLIAMP_S.value[0]] = float2
+                    processed_data[TelemetryKey.BP_PVS_AH.value[0]] = self.extra_calculations.convert_mA_s_to_Ah(float2)
                 elif key == 'DC_DRV':
-                    processed_data[f"{key}_Motor_Velocity_setpoint"] = float1
-                    processed_data[f"{key}_Motor_Current_setpoint"] = float2
+                    processed_data[TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0]] = float1
+                    processed_data[TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT.value[0]] = float2
                 else:
                     # Generic fallback for unhandled keys
                     processed_data[key] = {"Value1": float1, "Value2": float2}
