@@ -1,0 +1,4 @@
+Battery capacity amps hours, 3.4
+Battery nominal voltage, 3.6
+Amount of battery cells, 420
+Number of battery strings, 35
