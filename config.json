@@ -90,11 +90,12 @@
         "MC2LIM_Active_Motor_Info": "gray",
         "MC2LIM_Errors": "gray",
         "MC2LIM_Limits": "gray",
-        "BP_PVS_milliamp/s": "gray",
+        "BP_PVS_milliamp/s": "#ffffff",
         "Remaining_Capacity_Ah": "green",
         "capacity_ah": "gray",
         "voltage": "gray",
         "quantity": "gray",
-        "series_strings": "gray"
+        "series_strings": "gray",
+        "DC_SWC_Position": "gray"
     }
 }

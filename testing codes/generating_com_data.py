@@ -76,6 +76,20 @@ def float_to_hex(value):
     hex_str = '0x' + packed.hex().upper()
     return hex_str
 
+def int_to_hex(value):
+    """
+    Convert an integer to an 8-character hexadecimal string.
+    - value: The integer value to convert.
+    """
+    # Mask to ensure only 32 bits
+    value = value & 0xFFFFFFFF
+    # Convert to bytes with specified endianness
+    byte_order = 'big' if ENDIANNESS == 'big' else 'little'
+    byte_value = value.to_bytes(4, byteorder=byte_order)
+    # Convert bytes to hex string
+    hex_str = '0x' + byte_value.hex().upper()
+    return hex_str
+
 def generate_active_motor_info():
     """Generate random motor controller info."""
     return random.randint(0, MAX_VALUE)
@@ -103,24 +117,29 @@ def generate_motor_controller_data():
     """
     Simulate motor controller data.
     Uses cycling for error and limit flags.
+    Returns two hex strings representing:
+    - Hex1: Combined CAN receive/transmit counts and active motor info (integer)
+    - Hex2: Combined error and limit flags (integer)
     """
     can_receive_error_count = random.randint(0, 5)  # Example range for CAN errors
     can_transmit_error_count = random.randint(0, 5)
     active_motor_info = random.randint(0, 100)  # Random motor information ID
 
     # Generate error flags as a 16-bit integer
-    # Cycle through error flags (16 bits: 31–16 in the combined structure)
     error_bits = cycle_flags(error_flags_bits, 'error')
 
-    # Cycle through limit flags (16 bits: 15–0 in the combined structure)
+    # Generate limit flags as a 16-bit integer
     limit_bits = cycle_flags(limit_flags_bits, 'limit')
 
     # Combine error and limit flags into a single 32-bit value
     combined_flags = (error_bits << 16) | limit_bits
 
-    # Convert data to hex values as float
-    hex1 = float_to_hex((can_receive_error_count << 24) | (can_transmit_error_count << 16) | active_motor_info)
-    hex2 = float_to_hex(combined_flags)
+    # Combine CAN counts and motor info into a single 32-bit value
+    combined_counts_info = (can_receive_error_count << 24) | (can_transmit_error_count << 16) | active_motor_info
+
+    # Convert data to hex values
+    hex1 = int_to_hex(combined_counts_info)  # Integer encoding
+    hex2 = int_to_hex(combined_flags)        # Integer encoding
 
     return hex1, hex2
 

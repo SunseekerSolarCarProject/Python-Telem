@@ -28,7 +28,7 @@ class CentralLogger:
             # File handler with rotation
             file_handler = RotatingFileHandler(
                 self.log_file,
-                maxBytes=5*1024*1024,  # 5 MB
+                maxBytes=10*1024*1024,  # 10 MB
                 backupCount=5
             )
             file_handler.setLevel(self.level)

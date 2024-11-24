@@ -1,7 +1,8 @@
 # gui_data_display_tab.py
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QTextCursor  # Correct import for QTextCursor
 import html
 from key_name_definitions import TelemetryKey  # Import TelemetryKey enum
 
@@ -17,10 +18,14 @@ class DataDisplayTab(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        self.data_label = QLabel("Data will be displayed here.")
-        self.data_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.data_label.setWordWrap(True)
-        layout.addWidget(self.data_label)
+        
+        # Initialize QTextEdit for multi-line, scrollable display
+        self.data_display = QTextEdit()
+        self.data_display.setReadOnly(True)  # Make it read-only
+        self.data_display.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.data_display)
+        
+        self.setLayout(layout)
 
     def update_display(self, telemetry_data):
         """
@@ -30,42 +35,40 @@ class DataDisplayTab(QWidget):
         """
         if not telemetry_data:
             self.logger.warning("No telemetry data available to update the Data Display.")
-            self.data_label.setText("No data available.")
+            self.data_display.setPlainText("No data available.")
             return
 
-        display_text = ""
+        # Convert telemetry_data dict to a formatted string
+        display_text = self.format_telemetry_data(telemetry_data)
+        
+        # Append the new data to the QTextEdit
+        self.data_display.append(display_text)
+        
+        # Move cursor to the end to ensure the latest entry is visible
+        self.data_display.moveCursor(QTextCursor.MoveOperation.End)
+        
+        self.logger.info("Data Display updated.")
+
+    def format_telemetry_data(self, telemetry_data):
+        """
+        Formats the telemetry data into a readable HTML string.
+
+        :param telemetry_data: Dictionary containing telemetry data.
+        :return: Formatted HTML string.
+        """
+        lines = []
         for key, value in telemetry_data.items():
             unit = self.units.get(key, "")
-            if key == TelemetryKey.MC1LIM_ERRORS.value[0] or key == TelemetryKey.MC2LIM_ERRORS.value[0]:
-                # Example: Handle error keys differently if needed
-                display_text += f"<b>{html.escape(key)}:</b> {html.escape(str(value))} {html.escape(unit)}\n"
-                continue
-            if key == "Errors":
-                display_text += "<b>Errors:</b>\n"
-                if isinstance(value, list) and value:
-                    for error in value:
-                        display_text += f"• {error}\n"
-                else:
-                    display_text += "• None\n"
-            elif key == "Limits":
-                display_text += "<b>Limits:</b>\n"
-                if isinstance(value, list) and value:
-                    for limit in value:
-                        # Assuming each limit is a string in the format "Parameter: Description"
-                        if ":" in limit:
-                            param, desc = limit.split(":", 1)
-                            display_text += f"• <b>{html.escape(param.strip())}:</b> {html.escape(desc.strip())}\n"
-                        else:
-                            display_text += f"• {html.escape(limit)}\n"
-                else:
-                    display_text += "• None\n"
+            # Special handling for certain keys if necessary
+            if key in [TelemetryKey.MC1LIM_ERRORS.value[0], TelemetryKey.MC2LIM_ERRORS.value[0]]:
+                line = f"<b>{html.escape(key)}:</b> {html.escape(str(value))} {html.escape(unit)}"
+            elif key in [TelemetryKey.TIMESTAMP.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0]]:
+                # Timestamps can be highlighted or formatted differently
+                line = f"<i>{html.escape(key)}:</i> {html.escape(str(value))} {html.escape(unit)}"
             else:
-                if isinstance(value, list):
-                    # Handle other list-type values if necessary
-                    value_str = ', '.join(map(str, value)) if value else 'None'
-                    display_text += f"<b>{html.escape(key)}:</b> {html.escape(value_str)} {html.escape(unit)}\n"
-                else:
-                    display_text += f"<b>{html.escape(key)}:</b> {html.escape(str(value))} {html.escape(unit)}\n"
-
-        self.data_label.setText(display_text)
-        self.logger.info("Data Display updated.")
+                line = f"{html.escape(key)}: {html.escape(str(value))} {html.escape(unit)}"
+            lines.append(line)
+        
+        # Join all lines into a single HTML-formatted string
+        formatted_text = "<br>".join(lines)
+        return formatted_text

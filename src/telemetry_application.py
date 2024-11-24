@@ -4,8 +4,8 @@ import sys
 import os
 import logging
 from datetime import datetime
-from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtWidgets import QFileDialog, QMessageBox
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
@@ -39,6 +39,7 @@ class TelemetryApplication(QObject):
         self.serial_reader_thread = None
         self.signals_connected = False
         self.used_Ah = 0
+        self.config_data_copy = None  # Initialize to store config data
 
         self.init_logger()
         self.init_units_and_keys()
@@ -94,9 +95,6 @@ class TelemetryApplication(QObject):
             TelemetryKey.BP_PVS_MILLIAMP_S.value[0],
             TelemetryKey.BP_ISH_SOC.value[0],
             TelemetryKey.BP_ISH_AMPS.value[0],
-            TelemetryKey.BP_PVS_VOLTAGE.value[0],
-            TelemetryKey.BP_PVS_MILLIAMP_S.value[0],
-            TelemetryKey.BP_PVS_AH.value[0],
             TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
             TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
             TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO.value[0],
@@ -142,6 +140,7 @@ class TelemetryApplication(QObject):
     def init_data_processors(self):
         self.data_processor = DataProcessor(endianness=self.endianness)
         self.extra_calculations = ExtraCalculations()
+        # this data_display is linked to how all the information is getting to the gui to function in full.
         self.Data_Display = DataDisplay(self.units)
 
     def connect_signals(self):
@@ -149,7 +148,8 @@ class TelemetryApplication(QObject):
             self.gui.save_csv_signal.connect(self.finalize_csv)
             self.gui.change_log_level_signal.connect(self.update_logging_level)
             self.gui.settings_applied_signal.connect(self.handle_settings_applied)
-            self.update_data_signal.connect(self.gui.update_all_tabs)
+            self.update_data_signal.connect(self.buffer.add_data)
+            self.update_data_signal.connect(self.gui.update_all_tabs)  # Connect to TelemetryGUI's slot
             self.signals_connected = True
             self.logger.debug("Connected GUI signals.")
 
@@ -182,14 +182,17 @@ class TelemetryApplication(QObject):
             self.logger.info(f"Calculated battery info: {calculated_battery_info}")
             self.battery_info.update(calculated_battery_info)
 
-        # Set initial settings in settings tab
+        # Store config_data_copy for later use
         config_data_copy = config_data.copy()
         # Ensure baud_rate and endianness are present
         if "baud_rate" not in config_data_copy:
             config_data_copy["baud_rate"] = self.baudrate
         if "endianness" not in config_data_copy:
             config_data_copy["endianness"] = self.endianness
-        self.gui.set_initial_settings(config_data_copy)
+        self.config_data_copy = config_data_copy  # Store for later use
+
+        # Remove the call to self.gui.set_initial_settings(config_data_copy)
+        # self.gui.set_initial_settings(config_data_copy)
 
         # Apply logging level immediately
         self.update_logging_level(self.logging_level)
@@ -212,11 +215,15 @@ class TelemetryApplication(QObject):
                 return False
 
             self.gui = TelemetryGUI(self.data_keys, self.csv_handler, self.logger, self.units)
+            
             self.connect_signals()
 
-            # Connect the update_data_signal to BufferData's add_data method
-            self.update_data_signal.connect(self.buffer.add_data)
-            self.update_data_signal.connect(self.gui.update_all_tabs)
+            # Connect the update_data_signal to BufferData's add_data method and TelemetryGUI's update_all_tabs
+            # Already connected via connect_signals()
+
+            # Apply initial settings after GUI is initialized
+            if hasattr(self, 'config_data_copy'):
+                self.gui.set_initial_settings(self.config_data_copy)
 
             self.gui.show()
             self.start_serial_reader(self.selected_port, self.baudrate)
@@ -301,7 +308,7 @@ class TelemetryApplication(QObject):
 
     def process_data(self, data):
         """
-        Processes incoming telemetry data and buffers it for CSV writing and GUI updating.
+        Processes incoming telemetry data and emits it to update the GUI.
         """
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -309,7 +316,12 @@ class TelemetryApplication(QObject):
             self.logger.debug(f"Processed data: {processed_data}")
 
             if processed_data:
-                processed_data['timestamp'] = timestamp
+                if 'timestamp' not in processed_data:
+                    processed_data['timestamp'] = timestamp
+                else:
+                    # Optionally, update 'timestamp' if needed
+                    processed_data['timestamp'] = timestamp
+                self.logger.debug(f"Processed data after adding 'timestamp': {processed_data}")
                 self.buffer.add_data(processed_data)
 
                 if self.buffer.is_ready_to_flush():

@@ -18,7 +18,7 @@ class TelemetryKey(Enum):
     # DC Controls
     DC_DRV_MOTOR_VELOCITY_SETPOINT = ("DC_DRV_Motor_Velocity_Setpoint", "#")
     DC_DRV_MOTOR_CURRENT_SETPOINT = ("DC_DRV_Motor_Current_Setpoint", "#")
-    DC_SWITCH_POSITION = ("DC_Switch_Position", " ")
+    DC_SWITCH_POSITION = ("DC_SWC_Position", " ")
     DC_SWC_VALUE = ("DC_SWC_Value", "#")
     
     # Battery Packs

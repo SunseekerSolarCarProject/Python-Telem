@@ -103,6 +103,9 @@ class DataTableTab(QWidget):
 
         self.logger.debug(f"Updating Data Table with telemetry data: {json.dumps(telemetry_data, indent=2)}")
 
+        # Debug: Log the keys present in telemetry_data
+        self.logger.debug(f"Telemetry data keys: {list(telemetry_data.keys())}")
+
         # Calculate total number of rows: group headers + data rows
         total_rows = len(self.groups)  # One header per group
         for keys in self.groups.values():

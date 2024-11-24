@@ -1,7 +1,7 @@
 # telemetry_gui.py
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from gui_files.gui_config_dialog import ConfigDialog
 from gui_files.gui_motor_controller_tab import MotorControllerGraphTab
 from gui_files.gui_battery_pack_tab import BatteryPackGraphTab
@@ -92,6 +92,7 @@ class TelemetryGUI(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("Telemetry Data Visualization")
+        self.resize(1920, 1080)  # Optional: Set an appropriate window size
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -228,7 +229,7 @@ class TelemetryGUI(QWidget):
 
     def update_all_tabs(self, telemetry_data: dict):
         """
-        Updates all tabs with telemetry data.
+        Slot to receive telemetry data and update all tabs accordingly.
         """
         try:
             # Separate data for graphs and tables (exclude Errors and Limits if already flattened)
