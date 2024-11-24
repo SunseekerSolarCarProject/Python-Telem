@@ -1,0 +1,246 @@
+/* dark_stylesheet.qss */
+
+/* ================================
+   General Widget Styles
+   ================================ */
+
+/* Base QWidget */
+QWidget {
+    background-color: #2b2b2b; /* Dark gray background */
+    color: #f0f0f0;            /* Light gray text */
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+}
+
+/* ================================
+   QTabWidget Styles
+   ================================ */
+
+QTabWidget::pane {
+    border: 1px solid #444;     /* Border around the tab pane */
+    background-color: #2b2b2b;  /* Match the base widget background */
+}
+
+QTabBar::tab {
+    background: #3c3c3c;             /* Darker tab background */
+    border: 1px solid #444;          /* Border around each tab */
+    padding: 5px 15px;               /* Padding within tabs */
+    margin: 2px;                      /* Space between tabs */
+    border-top-left-radius: 4px;      /* Rounded corners */
+    border-top-right-radius: 4px;
+}
+
+QTabBar::tab:selected, QTabBar::tab:hover {
+    background: #555555;             /* Highlight selected or hovered tab */
+    border-color: #666666;           /* Slightly lighter border on interaction */
+}
+
+/* ================================
+   QLabel Styles
+   ================================ */
+
+QLabel {
+    color: #f0f0f0; /* Light gray text */
+    font-weight: bold;
+}
+
+/* ================================
+   QPushButton Styles
+   ================================ */
+
+QPushButton {
+    background-color: #3c3c3c;      /* Dark button background */
+    border: 1px solid #555555;      /* Border around button */
+    padding: 5px 10px;              /* Padding within button */
+    border-radius: 4px;             /* Rounded corners */
+    color: #f0f0f0;                  /* Light gray text */
+}
+
+QPushButton:hover {
+    background-color: #555555;      /* Lighter background on hover */
+}
+
+QPushButton:pressed {
+    background-color: #777777;      /* Even lighter on press */
+}
+
+/* ================================
+   QLineEdit Styles
+   ================================ */
+
+QLineEdit {
+    background-color: #3c3c3c;      /* Dark input background */
+    border: 1px solid #555555;      /* Border around input */
+    padding: 5px;                    /* Padding within input */
+    color: #f0f0f0;                  /* Light gray text */
+    border-radius: 4px;             /* Rounded corners */
+}
+
+QLineEdit:focus {
+    border: 1px solid #888888;      /* Highlight border on focus */
+}
+
+/* ================================
+   QTableView Styles
+   ================================ */
+
+QTableView {
+    background-color: #2b2b2b;      /* Dark table background */
+    gridline-color: #444444;        /* Grid lines color */
+    color: #f0f0f0;                  /* Light gray text */
+    selection-background-color: #555555; /* Selection color */
+}
+
+QHeaderView::section {
+    background-color: #3c3c3c;      /* Header background */
+    color: #f0f0f0;                  /* Header text color */
+    padding: 4px;                    /* Padding within header */
+    border: 1px solid #444444;       /* Border around headers */
+}
+
+QHeaderView::section::hover {
+    background-color: #555555;      /* Lighter header on hover */
+}
+
+/* ================================
+   QScrollBar Styles
+   ================================ */
+
+QScrollBar:vertical {
+    background: #2b2b2b;            /* Scrollbar background */
+    width: 12px;                     /* Scrollbar width */
+    margin: 0px 0px 0px 0px;        /* Scrollbar margins */
+}
+
+QScrollBar::handle:vertical {
+    background: #555555;            /* Scrollbar handle color */
+    min-height: 20px;                /* Minimum handle size */
+    border-radius: 6px;              /* Rounded handle */
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #777777;            /* Lighter handle on hover */
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    background: none;                /* Remove add/sub lines */
+}
+
+QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+    background: none;                /* Remove arrows */
+}
+
+/* ================================
+   QComboBox Styles
+   ================================ */
+
+QComboBox {
+    background-color: #3c3c3c;      /* Dark background */
+    border: 1px solid #555555;      /* Border around combo box */
+    padding: 5px;                    /* Padding within combo box */
+    color: #f0f0f0;                  /* Light gray text */
+    border-radius: 4px;             /* Rounded corners */
+}
+
+QComboBox QAbstractItemView {
+    background-color: #2b2b2b;      /* Dropdown background */
+    selection-background-color: #555555; /* Selection color */
+    color: #f0f0f0;                  /* Dropdown text color */
+}
+
+QComboBox::drop-down {
+    border-left: 1px solid #555555; /* Border for drop-down button */
+}
+
+QComboBox::down-arrow {
+    image: url(:/icons/down_arrow.png); /* Path to down arrow icon */
+}
+
+/* ================================
+   QStatusBar Styles
+   ================================ */
+
+QStatusBar {
+    background-color: #2b2b2b;      /* Status bar background */
+    color: #f0f0f0;                  /* Status bar text color */
+}
+
+/* ================================
+   QSlider Styles
+   ================================ */
+
+QSlider::groove:horizontal {
+    border: 1px solid #444444;      /* Groove border */
+    background: #3c3c3c;            /* Groove background */
+    height: 8px;                     /* Groove height */
+    border-radius: 4px;             /* Groove rounded corners */
+}
+
+QSlider::handle:horizontal {
+    background: #555555;            /* Handle color */
+    border: 1px solid #777777;      /* Handle border */
+    width: 16px;                     /* Handle width */
+    margin: -4px 0;                  /* Handle position */
+    border-radius: 8px;             /* Handle rounded corners */
+}
+
+QSlider::handle:horizontal:hover {
+    background: #777777;            /* Lighter handle on hover */
+}
+
+QSlider::handle:horizontal:pressed {
+    background: #999999;            /* Even lighter on press */
+}
+
+/* ================================
+   QTextEdit and QPlainTextEdit Styles
+   ================================ */
+
+QTextEdit, QPlainTextEdit {
+    background-color: #3c3c3c;      /* Dark background */
+    border: 1px solid #555555;      /* Border around text edit */
+    color: #f0f0f0;                  /* Light gray text */
+    padding: 5px;                    /* Padding within text edit */
+    border-radius: 4px;             /* Rounded corners */
+}
+
+QTextEdit:focus, QPlainTextEdit:focus {
+    border: 1px solid #888888;      /* Highlight border on focus */
+}
+
+/* ================================
+   QProgressBar Styles
+   ================================ */
+
+QProgressBar {
+    border: 1px solid #555555;      /* Border around progress bar */
+    text-align: center;             /* Centered text */
+    background-color: #3c3c3c;      /* Progress bar background */
+    color: #f0f0f0;                  /* Progress bar text color */
+    border-radius: 4px;             /* Rounded corners */
+}
+
+QProgressBar::chunk {
+    background-color: #555555;      /* Progress chunk color */
+    width: 20px;                     /* Progress chunk width */
+    border-radius: 4px;             /* Chunk rounded corners */
+}
+
+QProgressBar::chunk:hover {
+    background-color: #777777;      /* Lighter chunk on hover */
+}
+
+/* ================================
+   Additional Widget Styles
+   ================================ */
+
+/* Add more widget styles as needed */
+
+/* Example: QToolTip */
+QToolTip {
+    background-color: #3c3c3c;      /* Tooltip background */
+    color: #f0f0f0;                  /* Tooltip text color */
+    border: 1px solid #555555;      /* Tooltip border */
+    padding: 5px;                    /* Tooltip padding */
+    border-radius: 4px;             /* Tooltip rounded corners */
+}

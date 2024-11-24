@@ -34,6 +34,7 @@ class TelemetryGUI(QWidget):
 
         self.init_ui()
         self.apply_dark_mode()
+        self.logger.info("Gui Display Initialized")
 
     def initialize_default_colors(self, data_keys):
         default_colors = {}

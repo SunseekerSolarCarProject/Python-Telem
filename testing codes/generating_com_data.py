@@ -216,9 +216,9 @@ def generate_data_block(runtime):
     bp_ish_hex1 = float_to_hex(bp_ish_value)
     bp_ish_hex2 = float_to_hex(bp_ish_current)
 
-    # BP_PVS: 0-160, 0-10,000,000 with 8 decimal places
+    # BP_PVS: 0-160, 0-146,880,000 with 8 decimal places
     bp_pvs_first = random.uniform(0, 160)
-    bp_pvs_second = random.uniform(0, 10_000_000)
+    bp_pvs_second = random.uniform(0, 146_880_000)
     bp_pvs_hex1 = float_to_hex(bp_pvs_first)
     bp_pvs_hex2 = float_to_hex(bp_pvs_second)
 

@@ -3,26 +3,20 @@
 import sys
 import os
 import logging
-import serial
-import serial.tools.list_ports
 import numpy
-import pyqtgraph
-import argparse
+import serial
 from telemetry_application import TelemetryApplication
 from PyQt6.QtWidgets import QApplication
 from central_logger import CentralLogger  # Import the CentralLogger class
 
 def main():
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Telemetry Application')
-    parser.add_argument('--baudrate', type=int, default=9600, help='Serial baud rate')
-    parser.add_argument('--loglevel', type=str, default='INFO', help='Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)')
-    args = parser.parse_args()
+    # Set default logging level
+    default_log_level = 'INFO'  # You can choose to set this in config.json or elsewhere
 
     # Map string log level to logging module levels
-    log_level = getattr(logging, args.loglevel.upper(), logging.DEBUG)
+    log_level = getattr(logging, default_log_level.upper(), logging.INFO)
 
-    # Add the parent directory to the system path
+    # Add the parent directory to the system path (if necessary)
     sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
     # Initialize the centralized logger
@@ -31,10 +25,8 @@ def main():
     # Initialize QApplication
     app = QApplication(sys.argv)
 
-    # Initialize TelemetryApplication
+    # Initialize TelemetryApplication without command-line args
     telemetry_app = TelemetryApplication(
-        baudrate=args.baudrate,
-        log_level=log_level,
         app=app,  # Pass the QApplication instance
         central_logger=central_logger  # Pass the CentralLogger instance
     )

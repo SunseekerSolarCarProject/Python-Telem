@@ -4,6 +4,7 @@ import csv
 import os
 import threading
 import logging
+import shutil  # Import shutil for file operations
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Import TelemetryKey enum and KEY_UNITS
 
 class CSVHandler:
@@ -171,13 +172,39 @@ class CSVHandler:
 
     def finalize_csv(self, original_csv, new_csv_path):
         """
-        Finalizes the CSV by renaming it to a new path.
+        Finalizes the CSV by copying it to a new path.
 
         :param original_csv: The original CSV file path.
         :param new_csv_path: The new CSV file path.
         """
         try:
-            os.rename(original_csv, new_csv_path)
-            self.logger.info(f"CSV file renamed to: {new_csv_path}")
+            if os.path.exists(new_csv_path):
+                # Since CSVHandler doesn't have access to GUI, raise an exception
+                raise FileExistsError(f"Destination file {new_csv_path} already exists.")
+            
+            shutil.copy2(original_csv, new_csv_path)  # Copies metadata as well
+            self.logger.info(f"CSV file copied to: {new_csv_path}")
+        except FileExistsError as fe:
+            self.logger.error(fe)
+            raise  # Re-raise to let the GUI handle the prompt
         except Exception as e:
             self.logger.error(f"Error finalizing CSV file from {original_csv} to {new_csv_path}: {e}")
+            raise  # Re-raise to let the GUI handle the error
+
+    def validate_csv(self, csv_file):
+        """
+        Validates the CSV file to ensure it is not corrupted.
+
+        :param csv_file: Path to the CSV file.
+        :return: Boolean indicating if the CSV is valid.
+        """
+        try:
+            with open(csv_file, 'r', newline='') as file:
+                reader = csv.reader(file)
+                for _ in reader:
+                    pass  # Simply iterating to check for read errors
+            self.logger.debug(f"CSV file {csv_file} is valid.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Validation failed for CSV file {csv_file}: {e}")
+            return False
