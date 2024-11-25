@@ -5,6 +5,8 @@ import os
 import logging
 import numpy
 import serial
+import serial.tools.list_ports
+import pyqtgraph
 from telemetry_application import TelemetryApplication
 from PyQt6.QtWidgets import QApplication
 from central_logger import CentralLogger  # Import the CentralLogger class
