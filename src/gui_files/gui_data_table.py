@@ -21,6 +21,22 @@ class DataTableTab(QWidget):
             self.groups = self.define_groups()
         else:
             self.groups = groups
+        self.logger.info("Starting data table tab.")
+
+        # Define sets for error keys and error count keys
+        self.error_keys = {
+            TelemetryKey.MC1LIM_ERRORS.value[0],
+            TelemetryKey.MC2LIM_ERRORS.value[0],
+            TelemetryKey.MC1LIM_LIMITS.value[0],
+            TelemetryKey.MC2LIM_LIMITS.value[0],
+        }
+
+        self.error_count_keys = {
+            TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+            TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+            TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+            TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+        }
 
         self.init_ui()
 
@@ -29,41 +45,20 @@ class DataTableTab(QWidget):
         Define logical groups for telemetry data.
         """
         return {
-            "Motor Controllers": [
-                TelemetryKey.MC1BUS_VOLTAGE.value[0], TelemetryKey.MC1BUS_CURRENT.value[0],
-                TelemetryKey.MC1VEL_RPM.value[0], TelemetryKey.MC1VEL_VELOCITY.value[0], TelemetryKey.MC1VEL_SPEED.value[0],
-                TelemetryKey.MC2BUS_VOLTAGE.value[0], TelemetryKey.MC2BUS_CURRENT.value[0],
-                TelemetryKey.MC2VEL_RPM.value[0], TelemetryKey.MC2VEL_VELOCITY.value[0], TelemetryKey.MC2VEL_SPEED.value[0]
-            ],
-            "Battery Packs": [
-                TelemetryKey.BP_VMX_ID.value[0], TelemetryKey.BP_VMX_VOLTAGE.value[0],
-                TelemetryKey.BP_VMN_ID.value[0], TelemetryKey.BP_VMN_VOLTAGE.value[0],
-                TelemetryKey.BP_TMX_ID.value[0], TelemetryKey.BP_TMX_TEMPERATURE.value[0],
-                TelemetryKey.BP_PVS_VOLTAGE.value[0], TelemetryKey.BP_PVS_AH.value[0],
-                TelemetryKey.BP_PVS_MILLIAMP_S.value[0], TelemetryKey.BP_ISH_SOC.value[0],
-                TelemetryKey.BP_ISH_AMPS.value[0]
-            ],
-            "Shunt Remaining": [
-                TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
-                TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
-                TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0]
-            ],
-            "DC Controls": [
-                TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0], TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT.value[0],
-                TelemetryKey.DC_SWITCH_POSITION.value[0], TelemetryKey.DC_SWC_VALUE.value[0]
-            ],
+            # ... [Your existing group definitions] ...
             "Limiter Information": [
-                TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0], TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
-                TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO.value[0], TelemetryKey.MC1LIM_ERRORS.value[0],
-                TelemetryKey.MC1LIM_LIMITS.value[0], TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
-                TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0], TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0],
-                TelemetryKey.MC2LIM_ERRORS.value[0], TelemetryKey.MC2LIM_LIMITS.value[0]
+                TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+                TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+                TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO.value[0],
+                TelemetryKey.MC1LIM_ERRORS.value[0],
+                TelemetryKey.MC1LIM_LIMITS.value[0],
+                TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
+                TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
+                TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0],
+                TelemetryKey.MC2LIM_ERRORS.value[0],
+                TelemetryKey.MC2LIM_LIMITS.value[0]
             ],
-            "General": [
-                TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0],
-                TelemetryKey.TOTAL_VOLTAGE.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
-                TelemetryKey.TIMESTAMP.value[0]
-            ]
+            # ... [Other groups] ...
         }
 
     def init_ui(self):
@@ -81,15 +76,14 @@ class DataTableTab(QWidget):
         self.table_widget.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         # Remove alternating row colors
         self.table_widget.setAlternatingRowColors(False)
-        # The global stylesheet already handles background and text colors
-        # Additional specific styles can be set here if necessary
 
         # Optional: Set a consistent font for better readability
-        font = QFont("Arial", 11)
+        font = QFont("Arial", 16)
         self.table_widget.setFont(font)
 
         layout.addWidget(self.table_widget)
         self.setLayout(layout)
+        self.logger.info("Data table setup complete.")
 
     def update_data(self, telemetry_data):
         """
@@ -102,9 +96,6 @@ class DataTableTab(QWidget):
             return
 
         self.logger.debug(f"Updating Data Table with telemetry data: {json.dumps(telemetry_data, indent=2)}")
-
-        # Debug: Log the keys present in telemetry_data
-        self.logger.debug(f"Telemetry data keys: {list(telemetry_data.keys())}")
 
         # Calculate total number of rows: group headers + data rows + optional blank rows
         total_rows = 0
@@ -140,11 +131,14 @@ class DataTableTab(QWidget):
                 # Populate Parameter column
                 param_item = QTableWidgetItem(key)
                 param_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                # Set white text for parameters
-                param_item.setForeground(QBrush(QColor("#FFFFFF")))
+                param_item.setForeground(QBrush(QColor("#FFFFFF")))  # White text
                 self.table_widget.setItem(current_row, 0, param_item)
 
-                # Determine if the current key is DC_DRV_MOTOR_VELOCITY_SETPOINT
+                # Default display settings
+                display_value = str(value)
+                color = QColor("#FFFFFF")  # Default white text
+
+                # Special handling for specific keys
                 if key == TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0]:
                     try:
                         numeric_value = float(value)
@@ -160,23 +154,43 @@ class DataTableTab(QWidget):
                         display_value = f"{numeric_value} ({direction})"
                     except (ValueError, TypeError):
                         display_value = f"{value} (Unknown)"
-                        color = QColor("#FFFF00")  # Yellow for unknown
+                        color = QColor("#FFFF00")  # Yellow
                 else:
-                    display_value = str(value)
-                    color = QColor("#FFFFFF")  # Default white
+                    # Additional special handling for error keys
+                    if key in self.error_keys:
+                        if value != 0 and value != "N/A":
+                            # Error detected, set background to red
+                            background_color = QColor("#FF0000")  # Red
+                        else:
+                            background_color = None
+                    elif key in self.error_count_keys:
+                        try:
+                            count = int(value)
+                            if count > 0:
+                                # Error count detected, set background to orange
+                                background_color = QColor("#FFA500")  # Orange
+                            else:
+                                background_color = None
+                        except (ValueError, TypeError):
+                            background_color = None
+                    else:
+                        background_color = None
 
                 # Populate Value column
                 value_item = QTableWidgetItem(display_value)
                 value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                # Set text color based on direction
                 value_item.setForeground(QBrush(color))
+
+                # Set background color if applicable
+                if background_color:
+                    value_item.setBackground(QBrush(background_color))
+
                 self.table_widget.setItem(current_row, 1, value_item)
 
                 # Populate Unit column
                 unit_item = QTableWidgetItem(unit)
                 unit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                # Set white text for units
-                unit_item.setForeground(QBrush(QColor("#FFFFFF")))
+                unit_item.setForeground(QBrush(QColor("#FFFFFF")))  # White text
                 self.table_widget.setItem(current_row, 2, unit_item)
 
                 current_row += 1

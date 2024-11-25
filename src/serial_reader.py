@@ -26,6 +26,7 @@ class SerialReaderThread(QThread):
         self.running = True
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logs
+        self.logger.info("Serial reader initialized.")
 
     def run(self):
         """
