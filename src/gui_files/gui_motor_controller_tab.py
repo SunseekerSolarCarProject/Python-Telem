@@ -93,18 +93,14 @@ class MotorControllerGraphTab(QWidget):
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Type.MouseButtonPress:
-            # Get the global position of the click
-            global_pos = self.mapToGlobal(event.position().toPoint())
-            # Get the widget at this position
-            widget_at_pos = QGuiApplication.instance().widgetAt(global_pos)
-            # Check if the click is on any of the plot widgets
+            pos = event.position().toPoint()
+            widget_at_pos = source.childAt(pos)
             on_plot = False
             for plot_widget in self.graph_widgets.values():
-                if plot_widget.isAncestorOf(widget_at_pos) or plot_widget == widget_at_pos:
+                if plot_widget == widget_at_pos or plot_widget.isAncestorOf(widget_at_pos):
                     on_plot = True
                     break
             if not on_plot:
-                # Click is outside any plot widget; disable zoom
                 if self.current_zoom_plot:
                     self.current_zoom_plot.disable_zoom()
                     self.current_zoom_plot = None

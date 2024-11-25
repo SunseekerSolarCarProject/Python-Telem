@@ -93,14 +93,14 @@ class GraphTab(QWidget):
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Type.MouseButtonPress:
-            # Get the global position of the click
-            global_pos = self.mapToGlobal(event.position().toPoint())
+            # Get the position of the click relative to the container
+            pos = event.position().toPoint()
             # Get the widget at this position
-            widget_at_pos = QGuiApplication.instance().widgetAt(global_pos)
+            widget_at_pos = source.childAt(pos)
             # Check if the click is on any of the plot widgets
             on_plot = False
             for plot_widget in self.graph_widgets.values():
-                if plot_widget.isAncestorOf(widget_at_pos) or plot_widget == widget_at_pos:
+                if plot_widget == widget_at_pos or plot_widget.isAncestorOf(widget_at_pos):
                     on_plot = True
                     break
             if not on_plot:

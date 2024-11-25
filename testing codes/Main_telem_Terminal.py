@@ -188,7 +188,7 @@ def hex_to_float(hex_data):
         byte_data = bytes.fromhex(hex_data)
 
         # Unpack to float using IEEE 754 format
-        float_value = struct.unpack('>f', byte_data)[0]  # Use '<f' for little-endian order
+        float_value = struct.unpack('<f', byte_data)[0]  # Use '<f' for little-endian order
 
         return float_value
     except (ValueError, struct.error):
