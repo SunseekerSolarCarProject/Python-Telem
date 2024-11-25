@@ -4,7 +4,7 @@ import sys
 import os
 import logging
 from datetime import datetime
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from serial_reader import SerialReaderThread
@@ -12,7 +12,7 @@ from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
 from extra_calculations import ExtraCalculations
-from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Ensure correct import paths
+from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Adjusted import
 from csv_handler import CSVHandler
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
@@ -20,7 +20,7 @@ from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
 
-    def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None, central_logger=None):
+    def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
         """
         Initializes the TelemetryApplication.
         """
@@ -29,8 +29,6 @@ class TelemetryApplication(QObject):
         self.buffer_timeout = buffer_timeout
         self.buffer_size = buffer_size
         self.app = app
-        self.central_logger = central_logger
-        self.logger = None
         self.logging_level = log_level
         self.battery_info = None
         self.selected_port = None
@@ -48,21 +46,22 @@ class TelemetryApplication(QObject):
         self.init_data_processors()
 
     def init_logger(self):
-        self.logger = self.central_logger.get_logger(__name__) if self.central_logger else logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__)
         self.logger.setLevel(self.logging_level)
-        # Add console handler if not present
-        if not self.logger.handlers:
+        # Configure handlers if not already configured
+        if not logging.getLogger().handlers:
+            # Console handler
             ch = logging.StreamHandler()
             ch.setLevel(self.logging_level)
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             ch.setFormatter(formatter)
-            self.logger.addHandler(ch)
+            logging.getLogger().addHandler(ch)
 
     def init_units_and_keys(self):
         """
         Initializes the units and data keys using key_name_definition.py.
         """
-        # Utilize the KEY_UNITS dictionary imported from key_name_definition.py
+        # Utilize the KEY_UNITS dictionary imported from key_name_definitions.py
         self.units = KEY_UNITS.copy()
 
         # Define data_keys as a list of key names from TelemetryKey Enum
@@ -140,7 +139,7 @@ class TelemetryApplication(QObject):
     def init_data_processors(self):
         self.data_processor = DataProcessor(endianness=self.endianness)
         self.extra_calculations = ExtraCalculations()
-        # this data_display is linked to how all the information is getting to the gui to function in full.
+        # This data_display is linked to how all the information is getting to the GUI to function in full.
         self.Data_Display = DataDisplay(self.units)
 
     def connect_signals(self):
@@ -191,9 +190,6 @@ class TelemetryApplication(QObject):
             config_data_copy["endianness"] = self.endianness
         self.config_data_copy = config_data_copy  # Store for later use
 
-        # Remove the call to self.gui.set_initial_settings(config_data_copy)
-        # self.gui.set_initial_settings(config_data_copy)
-
         # Apply logging level immediately
         self.update_logging_level(self.logging_level)
 
@@ -214,12 +210,9 @@ class TelemetryApplication(QObject):
                 QMessageBox.critical(None, "Error", "Configuration is incomplete. Exiting.")
                 return False
 
-            self.gui = TelemetryGUI(self.data_keys, self.csv_handler, self.logger, self.units)
-            
-            self.connect_signals()
+            self.gui = TelemetryGUI(self.data_keys, self.csv_handler, self.units)
 
-            # Connect the update_data_signal to BufferData's add_data method and TelemetryGUI's update_all_tabs
-            # Already connected via connect_signals()
+            self.connect_signals()
 
             # Apply initial settings after GUI is initialized
             if hasattr(self, 'config_data_copy'):
@@ -270,7 +263,11 @@ class TelemetryApplication(QObject):
             if not hasattr(logging, level.upper()):
                 raise AttributeError(f"Invalid logging level: {level}")
 
-            self.central_logger.set_level(level.upper())  # Update central logger
+            # Update root logger level
+            logging.getLogger().setLevel(level.upper())
+            for handler in logging.getLogger().handlers:
+                handler.setLevel(level.upper())
+
             self.logger.info(f"Logging level updated to {level.upper()}")
         except AttributeError as e:
             # Handle invalid level strings gracefully
@@ -334,8 +331,11 @@ class TelemetryApplication(QObject):
                     if combined_data:
                         # Verify the type of combined_data before emitting
                         if isinstance(combined_data, dict):
+                            # Merge battery_info into combined_data
+                            if self.battery_info:
+                                combined_data.update(self.battery_info)
                             self.update_data_signal.emit(combined_data)
-                            self.logger.debug(f"Emitted combined_data: {combined_data}")
+                            self.logger.debug(f"Emitted combined_data with battery_info: {combined_data}")
                         else:
                             self.logger.error(f"Combined data is not a dict: {combined_data} (type: {type(combined_data)})")
         except Exception as e:

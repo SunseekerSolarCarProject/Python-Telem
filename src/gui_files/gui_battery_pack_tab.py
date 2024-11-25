@@ -5,17 +5,18 @@ from PyQt6.QtCore import QEvent
 from PyQt6.QtGui import QGuiApplication
 import pyqtgraph as pg
 from gui_files.custom_plot_widget import CustomPlotWidget  # Relative import
+import logging
 
 class BatteryPackGraphTab(QWidget):
     """
     A tab for displaying battery pack telemetry as separate PyQtGraph plots with fixed heights and scrolling.
     """
-    def __init__(self, pack_name, keys, units, logger, color_mapping):
+    def __init__(self, pack_name, keys, units, color_mapping):
         super().__init__()
         self.pack_name = pack_name
         self.keys = keys
         self.units = units  # Store units
-        self.logger = logger
+        self.logger = logging.getLogger(__name__)
         self.color_mapping = color_mapping.copy()  # Store a copy of color_mapping
         self.data_buffers = {key: [] for key in keys}  # Store data for each key
         self.max_points = 361  # Max points to display on the graph
@@ -169,9 +170,9 @@ class BatteryPackGraphTab(QWidget):
         try:
             for key in self.keys:
                 if key in telemetry_data:
-                    self.logger.info(f"Updating graph for key: {key} with value: {telemetry_data[key]}")
+                    self.logger.debug(f"Updating graph for key: {key} with value: {telemetry_data[key]}")
                     self.update_graph(key, telemetry_data[key])
                 else:
-                    self.logger.warning(f"Key '{key}' is missing in telemetry data.")
+                    self.logger.debug(f"Key '{key}' is missing in telemetry data.")
         except Exception as e:
             self.logger.error(f"Error updating graphs. Exception: {e}")

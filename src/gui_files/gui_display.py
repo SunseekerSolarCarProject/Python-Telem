@@ -14,27 +14,27 @@ import json
 import os
 import logging
 
-from key_name_definitions import TelemetryKey, KEY_UNITS  # Ensure correct import
+from key_name_definitions import TelemetryKey  # Ensure correct import
 
 class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
     settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
 
-    def __init__(self, data_keys, csv_handler, logger, units, config_file='config.json'):
+    def __init__(self, data_keys, csv_handler, units, config_file='config.json'):
         super().__init__()
         self.data_keys = data_keys
-        self.logger = logger
         self.csv_handler = csv_handler
         self.units = units  # Store units
         self.config_file = config_file
+        self.logger = logging.getLogger(__name__)
 
         # Load existing color mapping or initialize defaults
         self.color_mapping = self.load_color_mapping(data_keys) or self.initialize_default_colors(data_keys)
 
         self.init_ui()
         self.apply_dark_mode()
-        self.logger.info("Gui Display Initialized")
+        self.logger.info("Telemetry GUI Initialized")
 
     def initialize_default_colors(self, data_keys):
         default_colors = {}
@@ -127,27 +127,27 @@ class TelemetryGUI(QWidget):
 
         # Motor Controller Tabs
         self.mc1_tab = MotorControllerGraphTab(
-            "Motor Controller 1", graph_groups["Motor Controller 1"], self.units, self.logger, self.color_mapping
+            "Motor Controller 1", graph_groups["Motor Controller 1"], self.units, self.color_mapping
         )
         self.mc2_tab = MotorControllerGraphTab(
-            "Motor Controller 2", graph_groups["Motor Controller 2"], self.units, self.logger, self.color_mapping
+            "Motor Controller 2", graph_groups["Motor Controller 2"], self.units, self.color_mapping
         )
         self.tabs.addTab(self.mc1_tab, "Motor Controller 1")
         self.tabs.addTab(self.mc2_tab, "Motor Controller 2")
 
         # Battery Pack Tabs
         self.pack1_tab = BatteryPackGraphTab(
-            "Battery Pack 1", graph_groups["Battery Pack 1"], self.units, self.logger, self.color_mapping
+            "Battery Pack 1", graph_groups["Battery Pack 1"], self.units, self.color_mapping
         )
         self.pack2_tab = BatteryPackGraphTab(
-            "Battery Pack 2", graph_groups["Battery Pack 2"], self.units, self.logger, self.color_mapping
+            "Battery Pack 2", graph_groups["Battery Pack 2"], self.units, self.color_mapping
         )
         self.tabs.addTab(self.pack1_tab, "Battery Pack 1")
         self.tabs.addTab(self.pack2_tab, "Battery Pack 2")
 
         # Remaining Capacity Tab
         self.remaining_tab = GraphTab(
-            "Remaining Capacity", graph_groups["Remaining Capacity"], self.units, self.logger, self.color_mapping
+            "Remaining Capacity", graph_groups["Remaining Capacity"], self.units, self.color_mapping
         )
         self.tabs.addTab(self.remaining_tab, "Battery Remaining Capacity")
 
@@ -187,19 +187,19 @@ class TelemetryGUI(QWidget):
         }
 
         self.data_table_tab = DataTableTab(
-            self.units, self.logger, data_table_groups
+            self.units, data_table_groups
         )
         self.tabs.addTab(self.data_table_tab, "Data Table")
 
         # Data Display Tab
         self.data_display_tab = DataDisplayTab(
-            self.units, self.logger
+            self.units
         )
         self.tabs.addTab(self.data_display_tab, "Data Display")
 
         # Settings Tab - Pass only graph-related groups
         self.settings_tab = SettingsTab(
-            self.logger, graph_groups, self.color_mapping
+            graph_groups, self.color_mapping
         )
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
@@ -208,7 +208,7 @@ class TelemetryGUI(QWidget):
 
         # CSV Management Tab
         self.csv_management_tab = CSVManagementTab(
-            csv_handler=self.csv_handler, logger=self.logger
+            csv_handler=self.csv_handler
         )
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
 

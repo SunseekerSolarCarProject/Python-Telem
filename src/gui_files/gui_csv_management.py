@@ -1,13 +1,14 @@
 # src/gui_files/gui_csv_management.py
 
 from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget, QFileDialog, QMessageBox
-import os  # Import os for file existence checks
+import os
+import logging
 
 class CSVManagementTab(QWidget):
-    def __init__(self, csv_handler, logger):
+    def __init__(self, csv_handler):
         super().__init__()
         self.csv_handler = csv_handler
-        self.logger = logger
+        self.logger = logging.getLogger(__name__)
 
         self.init_ui()
 
@@ -36,20 +37,20 @@ class CSVManagementTab(QWidget):
         try:
             options = QFileDialog.Option.DontUseNativeDialog
             custom_filename, _ = QFileDialog.getSaveFileName(
-                self, 
-                "Save Current Primary CSV", 
-                "", 
-                "CSV Files (*.csv);;All Files (*)", 
+                self,
+                "Save Current Primary CSV",
+                "",
+                "CSV Files (*.csv);;All Files (*)",
                 options=options
             )
             if custom_filename:
                 if not custom_filename.endswith('.csv'):
                     custom_filename += '.csv'
-                
+
                 # Check if the file already exists
                 if os.path.exists(custom_filename):
                     reply = QMessageBox.question(
-                        self, 
+                        self,
                         "Overwrite Confirmation",
                         f"The file '{custom_filename}' already exists. Do you want to overwrite it?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -73,20 +74,20 @@ class CSVManagementTab(QWidget):
         try:
             options = QFileDialog.Option.DontUseNativeDialog
             custom_filename, _ = QFileDialog.getSaveFileName(
-                self, 
-                "Save Current Secondary CSV", 
-                "", 
-                "CSV Files (*.csv);;All Files (*)", 
+                self,
+                "Save Current Secondary CSV",
+                "",
+                "CSV Files (*.csv);;All Files (*)",
                 options=options
             )
             if custom_filename:
                 if not custom_filename.endswith('.csv'):
                     custom_filename += '.csv'
-                
+
                 # Check if the file already exists
                 if os.path.exists(custom_filename):
                     reply = QMessageBox.question(
-                        self, 
+                        self,
                         "Overwrite Confirmation",
                         f"The file '{custom_filename}' already exists. Do you want to overwrite it?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,

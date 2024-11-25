@@ -14,9 +14,9 @@ class SettingsTab(QWidget):
     color_changed_signal = pyqtSignal(str, str)  # Signal for color changes (key, color)
     settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
 
-    def __init__(self, logger, groups, color_mapping):
+    def __init__(self, groups, color_mapping):
         super().__init__()
-        self.logger = logger
+        self.logger = logging.getLogger(__name__)
         self.groups = groups  # Dictionary of group names to keys
         self.color_mapping = color_mapping.copy()  # Make a copy to use
         self.init_ui()

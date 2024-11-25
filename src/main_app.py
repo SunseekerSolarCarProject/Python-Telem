@@ -28,7 +28,6 @@ def main():
     # Initialize TelemetryApplication without command-line args
     telemetry_app = TelemetryApplication(
         app=app,  # Pass the QApplication instance
-        central_logger=central_logger  # Pass the CentralLogger instance
     )
     startup_success = telemetry_app.start()
 

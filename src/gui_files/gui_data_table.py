@@ -12,10 +12,10 @@ class DataTableTab(QWidget):
     A tab for displaying telemetry data in a three-column format: Parameter, Value, Unit.
     Organized into logical groups for better readability.
     """
-    def __init__(self, units, logger, groups=None):
+    def __init__(self, units, groups=None):
         super().__init__()
         self.units = units
-        self.logger = logger
+        self.logger = logging.getLogger(__name__)
         # Define groups here or pass as a parameter
         if groups is None:
             self.groups = self.define_groups()
@@ -106,19 +106,23 @@ class DataTableTab(QWidget):
         # Debug: Log the keys present in telemetry_data
         self.logger.debug(f"Telemetry data keys: {list(telemetry_data.keys())}")
 
-        # Calculate total number of rows: group headers + data rows
-        total_rows = len(self.groups)  # One header per group
+        # Calculate total number of rows: group headers + data rows + optional blank rows
+        total_rows = 0
         for keys in self.groups.values():
-            total_rows += len(keys)
+            total_rows += 1  # For the group header
+            total_rows += len(keys)  # For the data rows
+            total_rows += 1  # For the optional blank row after each group
+
         self.table_widget.setRowCount(total_rows)
 
         current_row = 0
         for group_name, keys in self.groups.items():
+            self.logger.debug(f"Processing group: {group_name}")
             # Insert Group Header
             group_header_item = QTableWidgetItem(group_name)
             group_header_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             group_header_item.setForeground(QBrush(QColor("#1e90ff")))  # Blue text for headers
-            group_header_item.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+            group_header_item.setFont(QFont("Arial", 14, QFont.Weight.Bold))
             group_header_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # Non-selectable
             self.table_widget.setItem(current_row, 0, group_header_item)
             # Span the header across all three columns
@@ -140,11 +144,32 @@ class DataTableTab(QWidget):
                 param_item.setForeground(QBrush(QColor("#FFFFFF")))
                 self.table_widget.setItem(current_row, 0, param_item)
 
+                # Determine if the current key is DC_DRV_MOTOR_VELOCITY_SETPOINT
+                if key == TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0]:
+                    try:
+                        numeric_value = float(value)
+                        if numeric_value > 0:
+                            direction = "Forward"
+                            color = QColor("#00FF00")  # Green
+                        elif numeric_value < 0:
+                            direction = "Reverse"
+                            color = QColor("#FF0000")  # Red
+                        else:
+                            direction = "Stationary"
+                            color = QColor("#FFFFFF")  # White
+                        display_value = f"{numeric_value} ({direction})"
+                    except (ValueError, TypeError):
+                        display_value = f"{value} (Unknown)"
+                        color = QColor("#FFFF00")  # Yellow for unknown
+                else:
+                    display_value = str(value)
+                    color = QColor("#FFFFFF")  # Default white
+
                 # Populate Value column
-                value_item = QTableWidgetItem(str(value))
+                value_item = QTableWidgetItem(display_value)
                 value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                # Set white text for values
-                value_item.setForeground(QBrush(QColor("#FFFFFF")))
+                # Set text color based on direction
+                value_item.setForeground(QBrush(color))
                 self.table_widget.setItem(current_row, 1, value_item)
 
                 # Populate Unit column
