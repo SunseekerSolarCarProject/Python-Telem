@@ -92,7 +92,7 @@ class TelemetryGUI(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("Telemetry Data Visualization")
-        self.resize(1920, 1080)  # Optional: Set an appropriate window size
+        self.resize(1280, 720)  # Optional: Set an appropriate window size
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
