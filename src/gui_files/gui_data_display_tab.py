@@ -2,10 +2,8 @@
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTextCursor, QFont  # Correct import for QTextCursor
-import html
+from PyQt6.QtGui import QTextCursor, QFont
 import logging
-from key_name_definitions import TelemetryKey  # Import TelemetryKey enum
 from data_display import DataDisplay  # Import DataDisplay class
 
 class DataDisplayTab(QWidget):
@@ -27,8 +25,8 @@ class DataDisplayTab(QWidget):
         self.data_display.setReadOnly(True)  # Make it read-only
         self.data_display.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
-        # Set larger font size
-        font = QFont("Courier New", 12)  # You can adjust the font and size as needed
+        # Set larger monospaced font
+        font = QFont("Courier New", 12)
         self.data_display.setFont(font)
 
         layout.addWidget(self.data_display)
@@ -48,10 +46,15 @@ class DataDisplayTab(QWidget):
         # Use DataDisplay instance to format data
         display_text = self.data_display_instance.display(telemetry_data)
 
+        # Get scrollbar information before appending new data
+        scrollbar = self.data_display.verticalScrollBar()
+        at_bottom = scrollbar.value() == scrollbar.maximum()
+
         # Append the new data to the QTextEdit
         self.data_display.append(display_text)
 
-        # Move cursor to the end to ensure the latest entry is visible
-        self.data_display.moveCursor(QTextCursor.MoveOperation.End)
+        # If the scrollbar was at the bottom before appending, scroll to the bottom
+        if at_bottom:
+            self.data_display.moveCursor(QTextCursor.MoveOperation.End)
 
         self.logger.info("Data Display updated.")

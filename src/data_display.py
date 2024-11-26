@@ -2,6 +2,7 @@
 
 import re
 import logging
+from key_name_definitions import TelemetryKey
 
 class DataDisplay:
     def __init__(self, units):
@@ -12,15 +13,18 @@ class DataDisplay:
     def format_with_unit(self, key, value):
         """
         Formats a telemetry value with its corresponding unit.
-        :param key: The variable name.
+        :param key: The TelemetryKey enum member.
         :param value: The variable's value.
         :return: A formatted string with the value and its unit.
         """
-        unit = self.units.get(key, '')  # Retrieve the unit or default to empty
+        unit = self.units.get(key.value[0], '')  # Retrieve the unit or default to empty
         try:
-            formatted_value = f"{value:.2f}" if isinstance(value, float) else str(value)
+            if isinstance(value, (int, float)):
+                formatted_value = f"{value:.2f}"
+            else:
+                formatted_value = str(value)
         except Exception as e:
-            self.logger.error(f"Error formatting value for {key}: {value}, Exception: {e}")
+            self.logger.error(f"Error formatting value for {key.value[0]}: {value}, Exception: {e}")
             formatted_value = str(value)
 
         return f"{formatted_value} {unit}".strip()
@@ -44,8 +48,11 @@ class DataDisplay:
             self.logger.debug(f"No hex found in value: {value}")
             return value, None
 
-        position = data.get('DC_SWC_Position', 'N/A')
-        value = data.get('DC_SWC_Value', 'N/A')
+        position_key = TelemetryKey.DC_SWITCH_POSITION
+        value_key = TelemetryKey.DC_SWC_VALUE
+
+        position = data.get(position_key.value[0], 'N/A')
+        value = data.get(value_key.value[0], 'N/A')
         self.logger.debug(f"Formatting SWC information: position={position}, value={value}")
 
         # Extract hex from position and value if applicable
@@ -54,34 +61,13 @@ class DataDisplay:
 
         # Construct formatted strings
         position_str = (
-            f"DC_SWC_Position: {position_text} ({position_hex})" if position_hex else f"DC_SWC_Position: {position}"
+            f"{position_key.value[0]}: {position_text} ({position_hex})" if position_hex else f"{position_key.value[0]}: {position}"
         )
         value_str = (
-            f"DC_SWC_Value: {value_text} ({value_hex})" if value_hex else f"DC_SWC_Value: {value}"
+            f"{value_key.value[0]}: {value_text} ({value_hex})" if value_hex else f"{value_key.value[0]}: {value}"
         )
         formatted_output = f"{position_str}\n{value_str}"
         self.logger.debug(f"Formatted SWC information:\n{formatted_output}")
-        return formatted_output
-
-    def format_motor_controller_data(self, key, data):
-        """
-        Formats motor controller-specific data for display.
-        """
-        if not isinstance(data, dict):
-            self.logger.error(f"Expected a dictionary for {key}, but got {type(data)}")
-            return f"{key}: Data not available"
-
-        self.logger.debug(f"Formatting motor controller data for {key}: {data}")
-        lines = [f"{key} Motor Controller Data:"]
-        lines.append(f"  CAN Receive Error Count: {data.get('CAN Receive Error Count', 'N/A')}")
-        lines.append(f"  CAN Transmit Error Count: {data.get('CAN Transmit Error Count', 'N/A')}")
-        lines.append(f"  Active Motor Info: {data.get('Active Motor Info', 'N/A')}")
-        errors = ', '.join(data.get('Errors', [])) if data.get('Errors') else 'None'
-        limits = ', '.join(data.get('Limits', [])) if data.get('Limits') else 'None'
-        lines.append(f"  Errors: {errors}")
-        lines.append(f"  Limits: {limits}")
-        formatted_output = "\n".join(lines)
-        self.logger.debug(f"Formatted motor controller data for {key}:\n{formatted_output}")
         return formatted_output
 
     def display(self, data):
@@ -90,57 +76,77 @@ class DataDisplay:
         """
         self.logger.debug("Starting display of telemetry data.")
         order = [
-            "Total_Capacity_Wh", "Total_Capacity_Ah", "Total_Voltage",
-            "MC1BUS_Voltage", "MC1BUS_Current", "MC1VEL_RPM", "MC1VEL_Velocity", "MC1VEL_Speed",
-            "MC2BUS_Voltage", "MC2BUS_Current", "MC2VEL_RPM", "MC2VEL_Velocity", "MC2VEL_Speed",
-            "DC_DRV_Motor_Velocity_setpoint", "DC_DRV_Motor_Current_setpoint",
-            "BP_VMX_ID", "BP_VMX_Voltage", "BP_VMN_ID", "BP_VMN_Voltage",
-            "BP_TMX_ID", "BP_TMX_Temperature",
-            "BP_PVS_Voltage", "BP_PVS_milliamp/s", "BP_PVS_Ah",
-            "BP_ISH_Amps", "BP_ISH_SOC",
-            "DC_SWC_Position",  # Process DC_SWC here
-            # "DC_SWC_Value",    # Remove or comment out to avoid duplication
-            "MC1LIM", "MC2LIM",
-            "Shunt_Remaining_Ah", "Shunt_Remaining_wh", "Used_Ah_Remaining_Ah", "Used_Ah_Remaining_wh", 
-            "Shunt_Remaining_Time", "Used_Ah_Remaining_Time",
-            "device_timestamp", "timestamp"
+            TelemetryKey.TOTAL_CAPACITY_WH, TelemetryKey.TOTAL_CAPACITY_AH, TelemetryKey.TOTAL_VOLTAGE,
+            TelemetryKey.MC1BUS_VOLTAGE, TelemetryKey.MC1BUS_CURRENT, TelemetryKey.MC1VEL_RPM,
+            TelemetryKey.MC1VEL_VELOCITY, TelemetryKey.MC1VEL_SPEED,
+            TelemetryKey.MC2BUS_VOLTAGE, TelemetryKey.MC2BUS_CURRENT, TelemetryKey.MC2VEL_RPM,
+            TelemetryKey.MC2VEL_VELOCITY, TelemetryKey.MC2VEL_SPEED,
+            TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT, TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT,
+            TelemetryKey.BP_VMX_ID, TelemetryKey.BP_VMX_VOLTAGE, TelemetryKey.BP_VMN_ID, TelemetryKey.BP_VMN_VOLTAGE,
+            TelemetryKey.BP_TMX_ID, TelemetryKey.BP_TMX_TEMPERATURE,
+            TelemetryKey.BP_PVS_VOLTAGE, TelemetryKey.BP_PVS_MILLIAMP_S, TelemetryKey.BP_PVS_AH,
+            TelemetryKey.BP_ISH_AMPS, TelemetryKey.BP_ISH_SOC,
+            TelemetryKey.DC_SWITCH_POSITION,  
+            # Header for MC1LIM
+            "MC1LIM Motor Controller Data:",
+            TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT,
+            TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT,
+            TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO,
+            TelemetryKey.MC1LIM_ERRORS,
+            TelemetryKey.MC1LIM_LIMITS,
+
+            # Header for MC2LIM
+            "MC2LIM Motor Controller Data:",
+            TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT,
+            TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT,
+            TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO,
+            TelemetryKey.MC2LIM_ERRORS,
+            TelemetryKey.MC2LIM_LIMITS,
+
+            TelemetryKey.SHUNT_REMAINING_AH, TelemetryKey.USED_AH_REMAINING_AH,
+            TelemetryKey.SHUNT_REMAINING_WH, TelemetryKey.USED_AH_REMAINING_WH, 
+            TelemetryKey.SHUNT_REMAINING_TIME, TelemetryKey.USED_AH_REMAINING_TIME,
+            TelemetryKey.DEVICE_TIMESTAMP, TelemetryKey.TIMESTAMP
         ]
 
         lines = []
-        for key in order:
-            if key in data:
-                value = data[key]
-                self.logger.debug(f"Processing key: {repr(key)}, value: {value}")
-                if key == "DC_SWC_Position":
-                    lines.append("")
-                    dc_swc_output = self.format_SWC_information({
-                    'DC_SWC_Position': data.get('DC_SWC_Position', 'N/A'),
-                    'DC_SWC_Value': data.get('DC_SWC_Value', 'N/A')
-                    })
-                    lines.append(dc_swc_output)
-                    self.logger.debug(f"DC_SWC data added to display.")
-                elif key == "DC_SWC_Value":
-                    continue  # Skip to avoid duplication
-                elif key == "MC1LIM" or key == "MC2LIM":
-                    # Add a blank line before motor controller data for readability
-                    lines.append("")
-                    mc_output = self.format_motor_controller_data(key, value)
-                    lines.append(mc_output)
-                    self.logger.debug(f"Motor controller data for {key} added to display.")
+        for item in order:
+            if isinstance(item, str):
+                # It's a header, add it to lines
+                lines.append("")  # Add blank line before header
+                lines.append(item)
+            else:
+                key = item
+                key_name = key.value[0]
+                if key_name in data:
+                    value = data[key_name]
+                    self.logger.debug(f"Processing key: {repr(key_name)}, value: {value}")
+
+                    if key == TelemetryKey.DC_SWITCH_POSITION:
+                        # Handle DC_SWC information
+                        lines.append("")
+                        dc_swc_output = self.format_SWC_information(data)
+                        lines.append(dc_swc_output)
+                        self.logger.debug(f"DC_SWC data added to display.")
+                    elif key == TelemetryKey.DC_SWC_VALUE:
+                        continue  # Skip to avoid duplication
+                    else:
+                        # Format and append other data with units if applicable
+                        try:
+                            if isinstance(value, list):
+                                # Join list items for display
+                                value_str = ', '.join(str(v) for v in value)
+                            else:
+                                value_str = value
+                            display_value = self.format_with_unit(key, value_str)
+                            lines.append(f"{key_name}: {display_value}")
+                            self.logger.debug(f"Data added to display: {repr(key_name)}: {display_value}")
+                        except Exception as e:
+                            self.logger.error(f"Error formatting value for {key_name}: {value}, Exception: {e}")
+                            lines.append(f"{key_name}: {value}")
                 else:
-                    # Format and append other data with units if applicable
-                    try:
-                        unit = self.units.get(key, '')  # Retrieve unit or default to empty
-                        formatted_value = f"{value:.2f}" if isinstance(value, float) else f"{value}"
-                        display_value = f"{formatted_value} {unit}".strip()
-                        lines.append(f"{key}: {display_value}")
-                    except Exception as e:
-                        self.logger.error(f"Error formatting value for {key}: {value}, Exception: {e}")
-                        lines.append(f"{key}: {value}")
-                    self.logger.debug(f"Data added to display: {repr(key)}: {formatted_value}")
-        else:
-            lines.append(f"{key}: N/A")
-            self.logger.debug(f"Key {repr(key)} not found in data. Added 'N/A' to display.")
+                    lines.append(f"{key_name}: N/A")
+                    self.logger.debug(f"Key {repr(key_name)} not found in data. Added 'N/A' to display.")
 
         # Add separator line
         lines.append("----------------------------------------")

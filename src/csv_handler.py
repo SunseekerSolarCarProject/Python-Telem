@@ -208,3 +208,4 @@ class CSVHandler:
         except Exception as e:
             self.logger.error(f"Validation failed for CSV file {csv_file}: {e}")
             return False
+        

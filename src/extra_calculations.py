@@ -116,3 +116,4 @@ class ExtraCalculations:
     
         # Format the result as hh:mm:ss
         return f"{hours:02}:{minutes:02}:{seconds:02}"
+    
