@@ -35,12 +35,12 @@ class ExtraCalculations:
             self.logger.error(f"Error calculating battery capacity: {e}")
             return {'error': str(e)}
 
-    def calculate_remaining_capacity(self, used_Ah, capacity_Ah, current, interval=1):
+    def calculate_remaining_capacity(self, used_Ah, capacity_Ah):
         try:
-            if capacity_Ah is None or current is None:
+            if capacity_Ah is None or used_Ah is None:
                 self.logger.warning("Incomplete data for remaining capacity calculation.")
                 return 0.0
-            remaining_capacity = capacity_Ah - ((current * interval) / 3600) - used_Ah
+            remaining_capacity = capacity_Ah - used_Ah
             self.logger.debug(f"Calculated remaining capacity: {remaining_capacity} Ah")
             return remaining_capacity
         except Exception as e:
@@ -118,3 +118,12 @@ class ExtraCalculations:
         self.logger.debug(f"Converted {hours_float} hours to exact time: {exact_time}")
         return exact_time
     
+    def update_used_Ah(self, used_Ah, current, interval=1):
+        try:
+            # Update used_Ah by integrating the current over the interval
+            used_Ah += (current * interval) / 3600  # Convert seconds to hours
+            self.logger.debug(f"Used_Ah updated value {used_Ah}")
+            return used_Ah
+        except Exception as e:
+            self.logger.error(f"Error updating used Ah: {e}")
+            return used_Ah

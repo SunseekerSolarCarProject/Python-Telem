@@ -123,9 +123,11 @@ class BufferData:
 
         # Add battery-related metrics
         shunt_current = self.safe_float(self.combined_data.get('BP_ISH_Amps', 0))
+        used_ah = self.safe_float(self.extra_calculations.update_used_Ah(0 , shunt_current))
+        self.logger.debug(f"Used_Ah is updated so often {used_ah}")
         self.combined_data.update(battery_info)
         self.combined_data['Shunt_Remaining_Ah'] = self.extra_calculations.calculate_remaining_capacity(
-            used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah', 0.0)), shunt_current)
+            used_ah, self.safe_float(self.combined_data.get('Total_Capacity_Ah', 0.0)))
         self.combined_data['Shunt_Remaining_wh'] = self.extra_calculations.calculate_watt_hours(
             self.combined_data['Shunt_Remaining_Ah'], self.safe_float(self.combined_data.get('BP_PVS_Voltage', 0.0)))
         self.combined_data['Shunt_Remaining_Time'] = self.extra_calculations.calculate_remaining_time_hours(
