@@ -40,27 +40,6 @@ class DataTableTab(QWidget):
 
         self.init_ui()
 
-    def define_groups(self):
-        """
-        Define logical groups for telemetry data.
-        """
-        return {
-            # ... [Your existing group definitions] ...
-            "Limiter Information": [
-                TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
-                TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
-                TelemetryKey.MC1LIM_ACTIVE_MOTOR_INFO.value[0],
-                TelemetryKey.MC1LIM_ERRORS.value[0],
-                TelemetryKey.MC1LIM_LIMITS.value[0],
-                TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
-                TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
-                TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0],
-                TelemetryKey.MC2LIM_ERRORS.value[0],
-                TelemetryKey.MC2LIM_LIMITS.value[0]
-            ],
-            # ... [Other groups] ...
-        }
-
     def init_ui(self):
         """
         Initializes the UI for the Data Table tab.

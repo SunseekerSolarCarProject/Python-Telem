@@ -106,6 +106,7 @@ class DataDisplay:
             TelemetryKey.SHUNT_REMAINING_AH, TelemetryKey.USED_AH_REMAINING_AH,
             TelemetryKey.SHUNT_REMAINING_WH, TelemetryKey.USED_AH_REMAINING_WH, 
             TelemetryKey.SHUNT_REMAINING_TIME, TelemetryKey.USED_AH_REMAINING_TIME,
+            TelemetryKey.USED_AH_EXACT_TIME,
             TelemetryKey.DEVICE_TIMESTAMP, TelemetryKey.TIMESTAMP
         ]
 

@@ -104,16 +104,17 @@ class ExtraCalculations:
         """
         Converts a float value of hours to a string in hh:mm:ss format.
         Args:
-        hours_float (float): Time in hours as a float.
-    
+            hours_float (float): Time in hours as a float.
         Returns:
-        str: Time in hh:mm:ss format.
+            str: Time in hh:mm:ss format.
         """
         # Extract hours, minutes, and seconds
         hours = int(hours_float)  # Get the integer part as hours
         minutes = int((hours_float - hours) * 60)  # Extract minutes
         seconds = int(((hours_float - hours) * 60 - minutes) * 60)  # Extract seconds
-    
+
         # Format the result as hh:mm:ss
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
+        exact_time = f"{hours:02}:{minutes:02}:{seconds:02}"
+        self.logger.debug(f"Converted {hours_float} hours to exact time: {exact_time}")
+        return exact_time
     

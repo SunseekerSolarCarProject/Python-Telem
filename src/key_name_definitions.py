@@ -41,13 +41,14 @@ class TelemetryKey(Enum):
     USED_AH_REMAINING_WH = ("Used_Ah_Remaining_wh", "Wh")
     SHUNT_REMAINING_TIME = ("Shunt_Remaining_Time", "hours")
     USED_AH_REMAINING_TIME = ("Used_Ah_Remaining_Time", "hours")
+    USED_AH_EXACT_TIME = ("Used_Ah_Exact_Time", "hh:mm:ss")
     
     # General
     TOTAL_CAPACITY_AH = ("Total_Capacity_Ah", "Ah")
     TOTAL_CAPACITY_WH = ("Total_Capacity_Wh", "Wh")
     TOTAL_VOLTAGE = ("Total_Voltage", "V")
     DEVICE_TIMESTAMP = ("device_timestamp", "hh:mm:ss")
-    TIMESTAMP = ("timestamp", "hh:mm:ss")
+    TIMESTAMP = ("timestamp", "year-Month-day hh:mm:ss")
     
     # Motor Controller Limits
     MC1LIM_CAN_RECEIVE_ERROR_COUNT = ("MC1LIM_CAN_Receive_Error_Count", "")

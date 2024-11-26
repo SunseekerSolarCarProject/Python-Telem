@@ -139,7 +139,16 @@ class BufferData:
         self.combined_data['Used_Ah_Remaining_wh'] = self.extra_calculations.calculate_watt_hours(
             self.combined_data['Used_Ah_Remaining_Ah'], self.safe_float(self.combined_data.get('BP_PVS_Voltage', 0.0)))
         self.combined_data['Used_Ah_Remaining_Time'] = self.extra_calculations.calculate_remaining_time_from_ah_hours(
-            self.combined_data['Used_Ah_Remaining_Ah'], bp_pvs_ah)
+            self.combined_data['Used_Ah_Remaining_Ah'], shunt_current)
+
+        # **Calculate the exact time and add it to combined_data**
+        used_ah_remaining_time = self.combined_data.get('Used_Ah_Remaining_Time', None)
+        if used_ah_remaining_time is not None and used_ah_remaining_time != float('inf'):
+            exact_time = self.extra_calculations.calculate_exact_time(used_ah_remaining_time)
+            self.combined_data['Used_Ah_Exact_Time'] = exact_time
+            self.logger.debug(f"Calculated Used_Ah_Exact_Time: {exact_time}")
+        else:
+            self.combined_data['Used_Ah_Exact_Time'] = 'N/A'
 
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 

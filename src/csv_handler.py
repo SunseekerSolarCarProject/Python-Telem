@@ -70,7 +70,7 @@ class CSVHandler:
             TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
             TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
             TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0],
-            TelemetryKey.REMAINING_CAPACITY_AH.value[0]
+            TelemetryKey.USED_AH_EXACT_TIME.value[0]
         ]
         self.logger.debug(f"Primary headers generated: {ordered_keys}")
         return ordered_keys
