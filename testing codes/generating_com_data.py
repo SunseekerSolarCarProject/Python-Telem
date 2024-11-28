@@ -272,7 +272,7 @@ def main():
     print("\nGenerating values starting!")
     # Set up selected COM port
     port = selected_port
-    baud_rate = 115200  # Increased baud rate
+    baud_rate = 9600  # Increased baud rate
     ser = None
 
     try:
@@ -289,6 +289,9 @@ def main():
             # Send data block
             ser.write(data_block.encode('utf-8'))
             print(f"Sent data block at {runtime}")
+
+            byte_size = len(data_block.encode('utf-8'))
+            print(f"Data Block Byte Size: {byte_size} bytes")
 
             # Measure elapsed time
             elapsed_time = time.time() - loop_start_time
