@@ -224,6 +224,21 @@ def generate_data_block(runtime):
 
     # MC1LIM & MC2LIM handled by generate_motor_controller_data()
 
+    '''MC1TP1,{mc1bus_hex1},{mc1bus_hex2}
+MC1TP2,{mc1vel_hex1},{mc1vel_hex2}
+MC1PHA,{mc2bus_hex1},{mc2bus_hex2}
+MC1CUM,{mc2vel_hex1},{mc2vel_hex2}
+MC1VVC,{mc1bus_hex1},{mc1bus_hex2}
+MC1IVC,{mc1vel_hex1},{mc1vel_hex2}
+MC1BEM,{mc2bus_hex1},{mc2bus_hex2}
+MC2TP1,{mc2vel_hex1},{mc2vel_hex2}
+MC2TP2,{mc1bus_hex1},{mc1bus_hex2}
+MC2PHA,{mc1vel_hex1},{mc1vel_hex2}
+MC2VVC,{mc2bus_hex1},{mc2bus_hex2}
+MC2CUM,{mc2vel_hex1},{mc2vel_hex2}
+MC2IVC,{mc1bus_hex1},{mc1bus_hex2}
+MC2BEM,{mc1vel_hex1},{mc1vel_hex2}'''   
+
     return f"""ABCDEF
 MC1BUS,{mc1bus_hex1},{mc1bus_hex2}
 MC1VEL,{mc1vel_hex1},{mc1vel_hex2}
@@ -272,7 +287,7 @@ def main():
     print("\nGenerating values starting!")
     # Set up selected COM port
     port = selected_port
-    baud_rate = 9600  # Increased baud rate
+    baud_rate = 19200  # Increased baud rate
     ser = None
 
     try:
