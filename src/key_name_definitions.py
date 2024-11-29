@@ -3,19 +3,49 @@
 from enum import Enum
 
 class TelemetryKey(Enum):
+    # Motor information 1
     MC1BUS_VOLTAGE = ("MC1BUS_Voltage", "V")
     MC1BUS_CURRENT = ("MC1BUS_Current", "A")
     MC1VEL_RPM = ("MC1VEL_RPM", "RPM")
     MC1VEL_VELOCITY = ("MC1VEL_Velocity", "M/s")
     MC1VEL_SPEED = ("MC1VEL_Speed", "Mph")
-    
+    MC1TP1_HEATSINK_TEMP = (" ", "°F")
+    MC1TP1_MOTOR_TEMP = ("°F")
+    MC1TP2_INLET_TEMP = ("°F")
+    MC1TP2_CPU_TEMP = ("°F")
+    MC1PHA_PHASE_A_CURRENT = ("A")
+    MC1PHA_PHASE_B_CURRENT = ("A")
+    MC1CUM_BUS_AMPHOURS = ("Ah")
+    MC1CUM_ODOMETER = ("m")
+    MC1VVC_VD_VECTOR = ("V")
+    MC1VVC_VQ_VECTOR = ("V")
+    MC1IVC_ID_VECTOR = ("A")
+    MC1IVC_IQ_VECTOR = ("A")
+    MC1BEM_BEMFD_VECTOR = ("V")
+    MC1BEM_BEMFQ_VECTOR = ("V")
+
+    # Motor Information 2 
     MC2BUS_VOLTAGE = ("MC2BUS_Voltage", "V")
     MC2BUS_CURRENT = ("MC2BUS_Current", "A")
     MC2VEL_RPM = ("MC2VEL_RPM", "RPM")
     MC2VEL_VELOCITY = ("MC2VEL_Velocity", "M/s")
     MC2VEL_SPEED = ("MC2VEL_Speed", "Mph")
+    MC2TP1_HEATSINK_TEMP = (" ", "°F")
+    MC2TP1_MOTOR_TEMP = ("°F")
+    MC2TP2_INLET_TEMP = ("°F")
+    MC2TP2_CPU_TEMP = ("°F")
+    MC2PHA_PHASE_A_CURRENT = ("A")
+    MC2PHA_PHASE_B_CURRENT = ("A")
+    MC2CUM_BUS_AMPHOURS = ("Ah")
+    MC2CUM_ODOMETER = ("m")
+    MC2VVC_VD_VECTOR = ("V")
+    MC2VVC_VQ_VECTOR = ("V")
+    MC2IVC_ID_VECTOR = ("A")
+    MC2IVC_IQ_VECTOR = ("A")
+    MC2BEM_BEMFD_VECTOR = ("V")
+    MC2BEM_BEMFQ_VECTOR = ("V")
     
-    # DC Controls
+    # Driver Controls
     DC_DRV_MOTOR_VELOCITY_SETPOINT = ("DC_DRV_Motor_Velocity_Setpoint", " ")
     DC_DRV_MOTOR_CURRENT_SETPOINT = ("DC_DRV_Motor_Current_Setpoint", "%")
     DC_SWITCH_POSITION = ("DC_SWC_Position", " ")
@@ -33,6 +63,8 @@ class TelemetryKey(Enum):
     BP_PVS_MILLIAMP_S = ("BP_PVS_milliamp/s", "mA/s")
     BP_ISH_SOC = ("BP_ISH_SOC", "%")
     BP_ISH_AMPS = ("BP_ISH_Amps", "A")
+
+    # MPPTs information
     
     # Shunt Remaining
     SHUNT_REMAINING_AH = ("Shunt_Remaining_Ah", "Ah")
