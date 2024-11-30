@@ -14,6 +14,7 @@ from buffer_data import BufferData
 from extra_calculations import ExtraCalculations
 from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Adjusted import
 from csv_handler import CSVHandler
+from learning_datasets.machine_learning import MachineLearningModel
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 
