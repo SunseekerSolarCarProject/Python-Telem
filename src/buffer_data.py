@@ -1,6 +1,7 @@
 # src/buffer_data.py
 
 import time
+import os
 from datetime import datetime
 import logging
 from extra_calculations import ExtraCalculations
@@ -157,11 +158,30 @@ class BufferData:
 
         # Append data to primary CSV
         self.csv_handler.append_to_csv(filename, self.combined_data)
+        # Save straining data
+        self.save_training_data()
         self.data_buffer.clear()
         self.last_flush_time = time.time()
         self.logger.debug("Data buffer cleared and last_flush_time reset.")
         self.logger.debug(f"Final combined_data after processing: {self.combined_data}")
         return self.combined_data
+
+    def save_training_data(self, training_data_file='training_data.csv'):
+        """
+        Saves the combined data into a CSV file for training purposes.
+        """
+        if not self.combined_data:
+            self.logger.debug("No combined data to save for training.")
+            return
+
+        training_data_path = os.path.join(self.csv_handler.root_directory, training_data_file)
+        # Append only relevant data for training
+        training_fields = [
+            'BP_ISH_Amps', 'BP_PVS_Voltage', 'BP_PVS_Ah', 'Used_Ah_Remaining_Time'
+        ]
+        training_entry = {key: self.combined_data.get(key, "N/A") for key in training_fields}
+        self.csv_handler.append_to_csv(training_data_path, training_entry)
+        self.logger.info(f"Training data saved to {training_data_path}")
 
     def safe_float(self, value, default=0.0):
         """

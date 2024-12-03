@@ -17,6 +17,15 @@ steering_wheel_desc = {
     '0x00010000': 'horn',
     '0x00020300': 'hazards',
     '0x00020000': 'hazards',
+    '0x00050000': 'left horn',
+    '0x00050000': 'left horn',
+    '0x00090200': 'right horn',
+    '0x00090000': 'right horn',
+    '0x08010000': 'regen horn',
+    '0x08050100': 'left regen horn',
+    '0x08050000': 'left regen horn',
+    '0x08090000': 'right regen horn',
+    '0x08090200': 'right regen horn',
     '0x00000000': 'none',
     '0xHHHHHHHH': 'nonexistent'
 }

@@ -6,6 +6,7 @@ from sklearn.linear_model import LinearRegression
 import joblib
 import os
 import logging
+import threading
 
 class MachineLearningModel:
     def __init__(self, model_file='battery_life_model.pkl'):
@@ -25,6 +26,28 @@ class MachineLearningModel:
             self.model = None
             self.logger.info("No existing model found. A new model will be trained.")
 
+    def train_model_in_thread(self, training_data_file, callback=None):
+        """
+        Trains the machine learning model in a separate thread.
+        :param training_data_file: Path to the training data CSV file.
+        :param callback: Optional callback function to call after training is complete.
+        """
+        training_thread = threading.Thread(target=self._train_model_thread, args=(training_data_file, callback))
+        training_thread.start()
+
+    def _train_model_thread(self, training_data_file, callback):
+        """
+        The actual training method that runs in a separate thread.
+        """
+        try:
+            self.train_model(training_data_file)
+            if callback:
+                callback()
+        except Exception as e:
+            self.logger.error(f"Error during model training: {e}")
+            if callback:
+                callback(error=e)
+    
     def train_model(self, training_data_file):
         """
         Trains the machine learning model using the provided training data.
@@ -75,3 +98,4 @@ class MachineLearningModel:
         except Exception as e:
             self.logger.error(f"Error making prediction: {e}")
             return None
+

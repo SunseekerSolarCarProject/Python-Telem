@@ -13,6 +13,7 @@ class SettingsTab(QWidget):
     log_level_signal = pyqtSignal(str)  # Signal for logging level changes
     color_changed_signal = pyqtSignal(str, str)  # Signal for color changes (key, color)
     settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
+    machine_learning_retrain_signal = pyqtSignal() #retraining ML
 
     def __init__(self, groups, color_mapping):
         super().__init__()
@@ -80,6 +81,14 @@ class SettingsTab(QWidget):
         self.endianness_dropdown.setCurrentText('Big Endian')  # Default endianness
         self.endianness_dropdown.setMinimumWidth(200)
         layout.addWidget(self.endianness_dropdown)
+
+        # Add Retrain Model Button
+        machine_learning_label = QLabel("Machine Learning:")
+        machine_learning_label.setMinimumWidth(200)
+        layout.addWidget(machine_learning_label)
+        retrain_button = QPushButton("Retrain Machine Learning Model")
+        retrain_button.clicked.connect(self.on_retrain_button_clicked)
+        layout.addWidget(retrain_button)
 
         # Color Selection
         color_selection_label = QLabel("Select Graph Colors:")
@@ -188,6 +197,29 @@ class SettingsTab(QWidget):
         # Emit signal for COM port, baud rate, log level, and endianness changes
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
         self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}, Endianness={endianness}")
+
+    def on_retrain_button_clicked(self):
+        """
+        Slot for handling the retrain button click event.
+        """
+        confirm = QMessageBox.question(
+            self,
+            "Retrain Model",
+            "Are you sure you want to retrain the machine learning model?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.machine_learning_retrain_signal.emit()
+            QMessageBox.information(self, "Retrain Model", "Model retraining initiated.")
+        else:
+            self.logger.info("Model retraining canceled by the user.")
+
+    def set_retrain_button_enabled(self, enabled):
+        """
+        Enables or disables the retrain button.
+        """
+        self.machine_learning_retrain_signal.setEnabled(enabled)
+
 
     def on_log_level_changed(self, level: str):
         """

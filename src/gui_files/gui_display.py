@@ -20,6 +20,7 @@ class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
     settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
+    machine_learning_retrain_signal = pyqtSignal(str) #retrain button for ML model.
 
     def __init__(self, data_keys, csv_handler, units, config_file='config.json'):
         super().__init__()
@@ -171,6 +172,10 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0],
                 TelemetryKey.USED_AH_EXACT_TIME.value[0]
             ],
+            "Predictions": [
+                TelemetryKey.PREDICTED_REMAINING_TIME.value[0],
+                TelemetryKey.PREDICTED_EXACT_TIME.value[0],
+            ],
             "DC Controls": [
                 TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0], TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT.value[0],
                 TelemetryKey.DC_SWITCH_POSITION.value[0], TelemetryKey.DC_SWC_VALUE.value[0]
@@ -185,6 +190,7 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0], TelemetryKey.TOTAL_VOLTAGE.value[0],
                 TelemetryKey.DEVICE_TIMESTAMP.value[0], TelemetryKey.TIMESTAMP.value[0]
             ]
+
         }
 
         self.data_table_tab = DataTableTab(
@@ -205,6 +211,7 @@ class TelemetryGUI(QWidget):
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)  # Relay the signal
+        self.settings_tab.machine_learning_retrain_signal.connect(self.machine_learning_retrain_signal.emit)
         self.tabs.addTab(self.settings_tab, "Settings")
 
         # CSV Management Tab

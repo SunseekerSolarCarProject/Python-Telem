@@ -101,6 +101,10 @@ class TelemetryKey(Enum):
     VOLTAGE = ("voltage", "V")
     QUANTITY = ("quantity", "units")  # Assuming 'units' as a placeholder
     SERIES_STRINGS = ("series_strings", "strings")
+
+    #Machine learning keys
+    PREDICTED_REMAINING_TIME = ("Predicted_Remaining_Time", "hours")
+    PREDICTED_EXACT_TIME = ("Predicted_Exact_Time", "hh:mm:ss")
     
 # Create a dictionary mapping key names to units
 KEY_UNITS = {

@@ -20,6 +20,7 @@ from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
+    training_complete_signal = pyqtSignal(object) # signal to pass any error object
 
     def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
         """
@@ -40,11 +41,15 @@ class TelemetryApplication(QObject):
         self.used_Ah = 0
         self.config_data_copy = None  # Initialize to store config data
 
+        # Connect the training complete signal to the handler
+        self.training_complete_signal.connect(self.on_training_complete)
+
         self.init_logger()
         self.init_units_and_keys()
         self.init_csv_handler()
         self.init_buffer()
         self.init_data_processors()
+        self.init_machine_learning()
 
     def init_logger(self):
         self.logger = logging.getLogger(__name__)
@@ -143,6 +148,10 @@ class TelemetryApplication(QObject):
         # This data_display is linked to how all the information is getting to the GUI to function in full.
         self.Data_Display = DataDisplay(self.units)
 
+    def init_machine_learning(self):
+        self.ml_model = MachineLearningModel()
+        self.train_machine_learning_model()
+
     def connect_signals(self):
         if not self.signals_connected:
             self.gui.save_csv_signal.connect(self.finalize_csv)
@@ -150,6 +159,8 @@ class TelemetryApplication(QObject):
             self.gui.settings_applied_signal.connect(self.handle_settings_applied)
             self.update_data_signal.connect(self.buffer.add_data)
             self.update_data_signal.connect(self.gui.update_all_tabs)  # Connect to TelemetryGUI's slot
+            # Connect retrain_model_signal
+            self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
             self.signals_connected = True
             self.logger.debug("Connected GUI signals.")
 
@@ -242,6 +253,46 @@ class TelemetryApplication(QObject):
         self.serial_reader_thread.start()
         self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
 
+    def handle_retrain_model(self):
+        """
+        Handles retraining the machine learning model when triggered from the GUI.
+        """
+        self.logger.info("Retraining machine learning model...")
+
+        # Disable the retrain button to prevent multiple clicks
+        self.gui.settings_tab.machine_learning_retrain_signal(False)
+
+        # Start training in a separate thread
+        self.train_machine_learning_model()
+
+    def train_machine_learning_model(self):
+        """
+        Trains the machine learning model using existing training data.
+        """
+        training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
+        if os.path.exists(training_data_file):
+            # Use the threaded training method and provide a callback
+            self.ml_model.train_model_in_thread(training_data_file, callback=self.training_complete_signal.emit)
+        else:
+            self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
+            QMessageBox.warning(None, "Retrain Model", "Training data file not found. Cannot retrain model.")
+            # Re-enable the retrain button
+            self.gui.settings_tab.machine_learning_retrain_signal(True)
+
+    def on_training_complete(self, error=None):
+        """
+        Callback function called after model training is complete.
+        """
+        if error:
+            self.logger.error(f"Model retraining failed: {error}")
+            QMessageBox.critical(None, "Retrain Model", f"Model retraining failed: {error}")
+        else:
+            self.logger.info("Model retraining completed.")
+            QMessageBox.information(None, "Retrain Model", "Machine learning model retrained successfully.")
+
+        # Re-enable the retrain button
+        self.gui.settings_tab.machine_learning_retrain_signal(True)
+
     def handle_settings_applied(self, port, baudrate, log_level, endianness):
         """
         Handles updates to COM port, baud rate, logging level, and endianness.
@@ -309,20 +360,24 @@ class TelemetryApplication(QObject):
         Processes incoming telemetry data and emits it to update the GUI.
         """
         try:
+            # Get the current timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+            # Parse the incoming data
             processed_data = self.data_processor.parse_data(data)
             self.logger.debug(f"Processed data: {processed_data}")
 
             if processed_data:
-                if 'timestamp' not in processed_data:
-                    processed_data['timestamp'] = timestamp
-                else:
-                    # Optionally, update 'timestamp' if needed
-                    processed_data['timestamp'] = timestamp
+                # Update or add the 'timestamp' key
+                processed_data['timestamp'] = timestamp
                 self.logger.debug(f"Processed data after adding 'timestamp': {processed_data}")
+            
+                # Add the processed data to the buffer
                 self.buffer.add_data(processed_data)
 
+                # Check if the buffer is ready to flush
                 if self.buffer.is_ready_to_flush():
+                    # Flush the buffer and get combined data
                     combined_data = self.buffer.flush_buffer(
                         filename=self.csv_file,
                         battery_info=self.battery_info,
@@ -330,11 +385,35 @@ class TelemetryApplication(QObject):
                     )
 
                     if combined_data:
-                        # Verify the type of combined_data before emitting
+                        # Verify that combined_data is a dictionary
                         if isinstance(combined_data, dict):
+                            # Prepare input data for prediction
+                            input_data = {
+                                'BP_ISH_Amps': self.buffer.safe_float(combined_data.get('BP_ISH_Amps', 0)),
+                                'BP_PVS_Voltage': self.buffer.safe_float(combined_data.get('BP_PVS_Voltage', 0)),
+                                'BP_PVS_Ah': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0))
+                            }
+
+                            # Only make prediction if the model is trained
+                            if self.ml_model.model:
+                                predicted_time = self.ml_model.predict(input_data)
+                                if predicted_time is not None:
+                                    combined_data['Predicted_Remaining_Time'] = predicted_time
+                                    # Convert predicted time to hh:mm:ss format
+                                    exact_time = self.extra_calculations.calculate_exact_time(predicted_time)
+                                    combined_data['Predicted_Exact_Time'] = exact_time
+                                else:
+                                    combined_data['Predicted_Remaining_Time'] = 'Prediction failed'
+                                    combined_data['Predicted_Exact_Time'] = 'N/A'
+                            else:
+                                combined_data['Predicted_Remaining_Time'] = 'Model not trained'
+                                combined_data['Predicted_Exact_Time'] = 'N/A'
+
                             # Merge battery_info into combined_data
                             if self.battery_info:
                                 combined_data.update(self.battery_info)
+                        
+                            # Emit the combined data to update the GUI
                             self.update_data_signal.emit(combined_data)
                             self.logger.debug(f"Emitted combined_data with battery_info: {combined_data}")
                         else:
@@ -350,6 +429,17 @@ class TelemetryApplication(QObject):
             self.buffer.add_raw_data(raw_data, self.secondary_csv_file)
         except Exception as e:
             self.logger.error(f"Error processing raw data: {e}")
+
+    def train_machine_learning_model(self):
+        """
+        Trains the machine learning model using existing training data.
+        """
+        training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
+        if os.path.exists(training_data_file):
+            self.ml_model.train_model(training_data_file)
+        else:
+            self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
+
 
     def finalize_csv(self):
         try:
