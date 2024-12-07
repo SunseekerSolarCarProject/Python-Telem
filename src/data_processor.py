@@ -356,6 +356,48 @@ class DataProcessor:
                 elif key == 'DC_DRV':
                     processed_data[TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0]] = float1
                     processed_data[TelemetryKey.DC_DRV_MOTOR_CURRENT_SETPOINT.value[0]] = float2
+                elif key == 'MC1TP1':
+                    processed_data[TelemetryKey.MC1TP1_HEATSINK_TEMP.value[0]] = float1
+                    processed_data[TelemetryKey.MC1TP1_MOTOR_TEMP.value[0]] = float2
+                elif key == 'MC1TP2':
+                    processed_data[TelemetryKey.MC1TP2_INLET_TEMP.value[0]] = float1
+                    processed_data[TelemetryKey.MC1TP2_CPU_TEMP.value[0]] = float2
+                elif key == 'MC1PHA':
+                    processed_data[TelemetryKey.MC1PHA_PHASE_A_CURRENT.value[0]] = float1
+                    processed_data[TelemetryKey.MC1PHA_PHASE_B_CURRENT.value[0]] = float2
+                elif key == 'MC1CUM':
+                    processed_data[TelemetryKey.MC1CUM_BUS_AMPHOURS.value[0]] = float1
+                    processed_data[TelemetryKey.MC1CUM_ODOMETER.value[0]] = float2
+                elif key == 'MC1VVC':
+                    processed_data[TelemetryKey.MC1VVC_VD_VECTOR.value[0]] = float1
+                    processed_data[TelemetryKey.MC1VVC_VQ_VECTOR.value[0]] = float2
+                elif key == 'MC1IVC':
+                    processed_data[TelemetryKey.MC1IVC_ID_VECTOR.value[0]] = float1
+                    processed_data[TelemetryKey.MC1IVC_IQ_VECTOR.value[0]] = float2
+                elif key == 'MC1BEM':
+                    processed_data[TelemetryKey.MC1BEM_BEMFD_VECTOR.value[0]] = float1
+                    processed_data[TelemetryKey.MC1BEM_BEMFQ_VECTOR.value[0]] = float2
+                elif key == 'MC2TP1':
+                    processed_data[TelemetryKey.MC2TP1_HEATSINK_TEMP.value[0]] = float1
+                    processed_data[TelemetryKey.MC2TP1_MOTOR_TEMP.value[0]] = float2
+                elif key == 'MC2TP2':
+                    processed_data[TelemetryKey.MC2TP2_INLET_TEMP.value[0]] = float1
+                    processed_data[TelemetryKey.MC2TP2_CPU_TEMP.value[0]] = float2
+                elif key == 'MC2PHA':
+                    processed_data[TelemetryKey.MC2PHA_PHASE_A_CURRENT.value[0]] = float1
+                    processed_data[TelemetryKey.MC2PHA_PHASE_B_CURRENT.value[0]] = float2
+                elif key == 'MC2CUM':
+                    processed_data[TelemetryKey.MC2CUM_BUS_AMPHOURS.value[0]] = float1
+                    processed_data[TelemetryKey.MC2CUM_ODOMETER.value[0]] = float2
+                elif key == 'MC2VVC':
+                    processed_data[TelemetryKey.MC2VVC_VD_VECTOR.value[0]] = float1
+                    processed_data[TelemetryKey.MC2VVC_VQ_VECTOR.value[0]] = float2
+                elif key == 'MC2IVC':
+                    processed_data[TelemetryKey.MC2IVC_ID_VECTOR.value[0]] = float1
+                    processed_data[TelemetryKey.MC2IVC_IQ_VECTOR.value[0]] = float2
+                elif key == 'MC2BEM':
+                    processed_data[TelemetryKey.MC2BEM_BEMFD_VECTOR.value[0]] = float1
+                    processed_data[TelemetryKey.MC2BEM_BEMFQ_VECTOR.value[0]] = float2
                 else:
                     # Generic fallback for unhandled keys
                     processed_data[key] = {"Value1": float1, "Value2": float2}
