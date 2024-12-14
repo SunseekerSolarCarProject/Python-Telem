@@ -16,7 +16,8 @@ error_flags_desc = [
     "Config read error",
     "15V Rail UVLO",
     "Desaturation Fault",
-    "Motor Over Speed"
+    "Motor Over Speed",
+    " "
 ]
 
 limit_flags_desc = [
@@ -26,7 +27,8 @@ limit_flags_desc = [
     "Bus Current",
     "Bus Voltage Upper Limit",
     "Bus Voltage Lower Limit",
-    "IPM/Motor Temperature"
+    "IPM/Motor Temperature",
+    " "
 ]
 
 PLACEHOLDER_MARKERS = {"ABCDEF", "UVWXYZ"}  # Define placeholders to ignore

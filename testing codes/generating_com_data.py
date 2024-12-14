@@ -32,6 +32,7 @@ steering_wheel_desc = {
 
 # Flag descriptions mapped to bit positions
 error_flags_bits = {
+    " ": 9,
     "Hardware over current": 0,
     "Software over current": 1,
     "DC Bus over voltage": 2,
@@ -50,7 +51,8 @@ limit_flags_bits = {
     "Bus Current": 3,
     "Bus Voltage Upper Limit": 4,
     "Bus Voltage Lower Limit": 5,
-    "IPM/Motor Temperature": 6
+    "IPM/Motor Temperature": 6,
+    " ": 7
 }
 
 # Constants for simulation
@@ -177,6 +179,41 @@ def generate_data_block(runtime):
     mc1vel_hex1 = float_to_hex(mc1vel_rpm)
     mc1vel_hex2 = float_to_hex(mc1vel_velocity)
 
+    mc1tp1_heatsink_temp = random.uniform(-40, 180)
+    mc1tp1_motor_temp = random.uniform(-40, 180)
+    mc1tp1_hex1 = float_to_hex(mc1tp1_heatsink_temp)
+    mc1tp1_hex2 = float_to_hex(mc1tp1_motor_temp)
+
+    mc1tp2_inlet_temp = random.uniform(-40,180)
+    mc1tp2_cpu_temp = random.uniform(-40,180)
+    mc1tp2_hex1 = float_to_hex(mc1tp2_inlet_temp)
+    mc1tp2_hex2 = float_to_hex(mc1tp2_cpu_temp)
+
+    mc1cum_bus_amphours = random.uniform(0,40.8)
+    mc1cum_odometer = random.uniform(0,10000)
+    mc1cum_hex1 = float_to_hex(mc1cum_bus_amphours)
+    mc1cum_hex2 = float_to_hex(mc1cum_odometer)
+
+    mc1vvc_vd_vector = random.uniform(0, 160)
+    mc1vvc_vq_vector = random.uniform(0, 160)
+    mc1vvc_hex1 = float_to_hex(mc1vvc_vd_vector)
+    mc1vvc_hex2 = float_to_hex(mc1vvc_vq_vector)
+
+    mc1pha_phase_a_current = random.uniform(0,100)
+    mc1pha_phase_b_current = random.uniform(0,100)
+    mc1pha_hex1 = float_to_hex(mc1pha_phase_a_current)
+    mc1pha_hex2 = float_to_hex(mc1pha_phase_b_current)
+
+    mc1ivc_id_vector = random.uniform(0,100)
+    mc1ivc_iq_vector = random.uniform(0,100)
+    mc1ivc_hex1 = float_to_hex(mc1ivc_id_vector)
+    mc1ivc_hex2 = float_to_hex(mc1ivc_iq_vector)
+
+    mc1bem_bemfd_vector = random.uniform(0,160)
+    mc1bem_bemfq_vector = random.uniform(0,160)
+    mc1bem_hex1 = float_to_hex(mc1bem_bemfd_vector)
+    mc1bem_hex2 = float_to_hex(mc1bem_bemfq_vector)
+
     # MC2BUS: Voltage (0-160 V), Current (-20 to 90 A)
     mc2bus_voltage = random.uniform(0, 160)  # 0 to 160 V
     mc2bus_current = random.uniform(-20, 90)  # -20 to 90 A
@@ -188,6 +225,41 @@ def generate_data_block(runtime):
     mc2vel_velocity = random.uniform(0, 100)  # 0 to 100 m/s
     mc2vel_hex1 = float_to_hex(mc2vel_rpm)
     mc2vel_hex2 = float_to_hex(mc2vel_velocity)
+
+    mc2tp1_heatsink_temp = random.uniform(-40, 180)
+    mc2tp1_motor_temp = random.uniform(-40, 180)
+    mc2tp1_hex1 = float_to_hex(mc2tp1_heatsink_temp)
+    mc2tp1_hex2 = float_to_hex(mc2tp1_motor_temp)
+
+    mc2tp2_inlet_temp = random.uniform(-40,180)
+    mc2tp2_cpu_temp = random.uniform(-40,180)
+    mc2tp2_hex1 = float_to_hex(mc2tp2_inlet_temp)
+    mc2tp2_hex2 = float_to_hex(mc2tp2_cpu_temp)
+
+    mc2vvc_vd_vector = random.uniform(0, 160)
+    mc2vvc_vq_vector = random.uniform(0, 160)
+    mc2vvc_hex1 = float_to_hex(mc2vvc_vd_vector)
+    mc2vvc_hex2 = float_to_hex(mc2vvc_vq_vector)
+
+    mc2pha_phase_a_current = random.uniform(0,100)
+    mc2pha_phase_b_current = random.uniform(0,100)
+    mc2pha_hex1 = float_to_hex(mc2pha_phase_a_current)
+    mc2pha_hex2 = float_to_hex(mc2pha_phase_b_current)
+
+    mc2ivc_id_vector = random.uniform(0,100)
+    mc2ivc_iq_vector = random.uniform(0,100)
+    mc2ivc_hex1 = float_to_hex(mc2ivc_id_vector)
+    mc2ivc_hex2 = float_to_hex(mc2ivc_iq_vector)
+
+    mc2bem_bemfd_vector = random.uniform(0,160)
+    mc2bem_bemfq_vector = random.uniform(0,160)
+    mc2bem_hex1 = float_to_hex(mc2bem_bemfd_vector)
+    mc2bem_hex2 = float_to_hex(mc2bem_bemfq_vector)
+
+    mc2cum_bus_amphours = random.uniform(0,40.8)
+    mc2cum_odometer = random.uniform(0,10000)
+    mc2cum_hex1 = float_to_hex(mc2cum_bus_amphours)
+    mc2cum_hex2 = float_to_hex(mc2cum_odometer)
 
     # DC_DRV: Setpoint (-20000 to 20000), 0-100
     dc_drv_setpoint = random.uniform(-20000, 20000)  # -20000 to 20000
@@ -251,8 +323,22 @@ MC2BEM,{mc1vel_hex1},{mc1vel_hex2}'''
     return f"""ABCDEF
 MC1BUS,{mc1bus_hex1},{mc1bus_hex2}
 MC1VEL,{mc1vel_hex1},{mc1vel_hex2}
+MC1TP1,{mc1tp1_hex1},{mc1tp1_hex2}
+MC1TP2,{mc1tp2_hex1},{mc1tp2_hex2}
+MC1PHA,{mc1pha_hex1},{mc1pha_hex2}
+MC1CUM,{mc1cum_hex1},{mc1cum_hex2}
+MC1VVC,{mc1vvc_hex1},{mc1vvc_hex2}
+MC1IVC,{mc1ivc_hex1},{mc1ivc_hex2}
+MC1BEM,{mc1bem_hex1},{mc1bem_hex2}
 MC2BUS,{mc2bus_hex1},{mc2bus_hex2}
 MC2VEL,{mc2vel_hex1},{mc2vel_hex2}
+MC2TP1,{mc2tp1_hex1},{mc2tp1_hex2}
+MC2TP2,{mc2tp2_hex1},{mc2tp2_hex2}
+MC2PHA,{mc2pha_hex1},{mc2pha_hex2}
+MC2CUM,{mc2cum_hex1},{mc2cum_hex2}
+MC2VVC,{mc2vvc_hex1},{mc2vvc_hex2}
+MC2IVC,{mc2ivc_hex1},{mc2ivc_hex2}
+MC2BEM,{mc1bem_hex1},{mc2bem_hex2}
 DC_DRV,{dc_drv_hex1},{dc_drv_hex2}
 DC_SWC,{dc_swc_position},{dc_swc_value1_hex}
 BP_VMX,{bp_vmx_hex1},{bp_vmx_hex2}
@@ -296,7 +382,7 @@ def main():
     print("\nGenerating values starting!")
     # Set up selected COM port
     port = selected_port
-    baud_rate = 19200  # Increased baud rate
+    baud_rate = 115200  # Increased baud rate
     ser = None
 
     try:
@@ -319,7 +405,7 @@ def main():
 
             # Measure elapsed time
             elapsed_time = time.time() - loop_start_time
-            sleep_time = 1.0 - elapsed_time
+            sleep_time = 5.0 - elapsed_time
             if sleep_time > 0:
                 time.sleep(sleep_time)
             else:

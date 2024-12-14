@@ -161,6 +161,7 @@ class TelemetryApplication(QObject):
             self.update_data_signal.connect(self.gui.update_all_tabs)  # Connect to TelemetryGUI's slot
             # Connect retrain_model_signal
             self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
+            self.gui.machine_learning_retrain_signal_with_files.connect(self.handle_retrain_with_files)
             self.signals_connected = True
             self.logger.debug("Connected GUI signals.")
 
@@ -259,8 +260,8 @@ class TelemetryApplication(QObject):
         """
         self.logger.info("Retraining machine learning model...")
 
-        # Disable the retrain button to prevent multiple clicks
-        self.gui.settings_tab.machine_learning_retrain_signal(False)
+        # Disable the button
+        self.gui.settings_tab.set_retrain_button_enabled(False)
 
         # Start training in a separate thread
         self.train_machine_learning_model()
@@ -440,6 +441,21 @@ class TelemetryApplication(QObject):
         else:
             self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
 
+    def handle_retrain_with_files(self, new_files):
+        self.logger.info("Retraining machine learning model with additional files...")
+        # Disable the retrain button
+        self.gui.settings_tab.set_retrain_button_enabled(False)
+
+        old_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
+        combined_file = self.ml_model.combine_and_retrain(old_data_file, new_files)
+        if combined_file:
+            # Once combined, train the model on the combined file
+            self.ml_model.train_model_in_thread(combined_file, callback=self.training_complete_signal.emit)
+        else:
+            self.logger.error("Failed to combine and retrain with additional files.")
+            QMessageBox.critical(None, "Retrain Model", "Failed to combine and retrain with the selected files.")
+            # Re-enable the retrain button
+            self.gui.settings_tab.set_retrain_button_enabled(True)
 
     def finalize_csv(self):
         try:

@@ -137,20 +137,26 @@ class DataTableTab(QWidget):
                 else:
                     # Additional special handling for error keys
                     if key in self.error_keys:
-                        if value != 0 and value != "N/A":
-                            # Error detected, set background to red
-                            background_color = QColor("#FF0000")  # Red
+                        # Convert value to string and strip whitespace
+                        error_value_str = str(value).strip()
+                        # Check if it's something other than 'N/A', 'None', or '0'
+                        # If it is, we have an error, highlight red
+                        if error_value_str.lower() not in ["n/a", "none", "0", ""]:
+                            background_color = QColor("#FF0000")  # Red for errors
                         else:
                             background_color = None
                     elif key in self.error_count_keys:
+                    # For error count keys, convert to int and check if greater than zero
                         try:
                             count = int(value)
                             if count > 0:
-                                # Error count detected, set background to orange
+                            # Error count detected, highlight orange
                                 background_color = QColor("#FFA500")  # Orange
                             else:
+                                # Count is zero, no highlight
                                 background_color = None
                         except (ValueError, TypeError):
+                        # If it's not a valid number (e.g., "N/A"), treat as no error
                             background_color = None
                     else:
                         background_color = None

@@ -20,7 +20,9 @@ class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
     settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
-    machine_learning_retrain_signal = pyqtSignal(str) #retrain button for ML model.
+    machine_learning_retrain_signal = pyqtSignal() #retrain button for ML model.
+    machine_learning_retrain_signal_with_files = pyqtSignal(list)
+    
 
     def __init__(self, data_keys, csv_handler, units, config_file='config.json'):
         super().__init__()
@@ -220,6 +222,7 @@ class TelemetryGUI(QWidget):
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)  # Relay the signal
         self.settings_tab.machine_learning_retrain_signal.connect(self.machine_learning_retrain_signal.emit)
+        self.settings_tab.additional_files_selected.connect(self.machine_learning_retrain_signal_with_files.emit)
         self.tabs.addTab(self.settings_tab, "Settings")
 
         # CSV Management Tab

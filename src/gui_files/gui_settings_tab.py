@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,
-    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy
+    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
@@ -13,29 +13,30 @@ class SettingsTab(QWidget):
     log_level_signal = pyqtSignal(str)  # Signal for logging level changes
     color_changed_signal = pyqtSignal(str, str)  # Signal for color changes (key, color)
     settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
-    machine_learning_retrain_signal = pyqtSignal() #retraining ML
+    machine_learning_retrain_signal = pyqtSignal()  # Signal to retrain ML model (no args)
+    additional_files_selected = pyqtSignal(list) #adding files to the ML model.
 
     def __init__(self, groups, color_mapping):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.groups = groups  # Dictionary of group names to keys
-        self.color_mapping = color_mapping.copy()  # Make a copy to use
+        self.color_mapping = color_mapping.copy()  # Make a copy of the color mapping
         self.init_ui()
 
     def init_ui(self):
-        # Main layout
+        # Main layout for the entire widget
         main_layout = QVBoxLayout(self)
 
-        # Create a scroll area
+        # Create a scroll area to handle smaller screens and many items
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         main_layout.addWidget(scroll_area)
 
-        # Container widget for scroll area
+        # Container widget inside the scroll area
         container = QWidget()
         scroll_area.setWidget(container)
 
-        # Layout for container
+        # Layout inside the container
         layout = QVBoxLayout(container)
 
         # Logging Level Controls
@@ -82,22 +83,27 @@ class SettingsTab(QWidget):
         self.endianness_dropdown.setMinimumWidth(200)
         layout.addWidget(self.endianness_dropdown)
 
-        # Add Retrain Model Button
+        # Machine Learning Retrain Button
         machine_learning_label = QLabel("Machine Learning:")
         machine_learning_label.setMinimumWidth(200)
         layout.addWidget(machine_learning_label)
-        retrain_button = QPushButton("Retrain Machine Learning Model")
-        retrain_button.clicked.connect(self.on_retrain_button_clicked)
-        layout.addWidget(retrain_button)
 
-        # Color Selection
+        self.retrain_button = QPushButton("Retrain Machine Learning Model")
+        self.retrain_button.clicked.connect(self.on_retrain_button_clicked)
+        layout.addWidget(self.retrain_button)
+
+        add_data_button = QPushButton("Add Training Data Files")
+        add_data_button.clicked.connect(self.on_add_data_button_clicked)
+        layout.addWidget(add_data_button)
+
+        # Color Selection Section
         color_selection_label = QLabel("Select Graph Colors:")
         color_selection_label.setStyleSheet("font-weight: bold;")
         layout.addWidget(color_selection_label)
 
         self.color_buttons = {}
         for group_name, keys in self.groups.items():
-            # Insert Group Header
+            # Group header
             group_header = QLabel(group_name)
             group_header.setStyleSheet("font-weight: bold; color: #1e90ff;")
             group_header.setMinimumWidth(200)
@@ -118,21 +124,21 @@ class SettingsTab(QWidget):
 
                 color_button = QPushButton("Choose Color")
                 color_button.setMinimumWidth(100)
-                # Use a lambda with default arguments to capture current key and color_display
+                # Use a lambda with default arguments to capture the current key and color_display
                 color_button.clicked.connect(lambda checked, k=key, disp=color_display: self.choose_color(k, disp))
                 row_layout.addWidget(color_button)
 
                 layout.addLayout(row_layout)
                 self.color_buttons[key] = color_button
 
-        # Apply Button
+        # Apply Settings Button
         apply_button = QPushButton("Apply Settings")
         apply_button.setFixedWidth(150)
         apply_button.clicked.connect(self.apply_settings)
         apply_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout.addWidget(apply_button, alignment=Qt.AlignmentFlag.AlignRight)
 
-        # Add stretch to push content to the top
+        # Add stretch to push content up
         layout.addStretch()
 
     def populate_com_ports(self):
@@ -167,7 +173,7 @@ class SettingsTab(QWidget):
         selected_log_level = self.log_level_dropdown.currentText()  # Get the logging level
         selected_endianness = self.endianness_dropdown.currentText()  # Get endianness
 
-        # Validate COM port selection
+        # Validate COM port
         if com_port == "No COM ports available":
             QMessageBox.warning(self, "Invalid COM Port", "No COM ports are available. Please connect a device or select a valid port.")
             self.logger.warning("Attempted to apply settings with no available COM ports.")
@@ -187,12 +193,11 @@ class SettingsTab(QWidget):
             self.logger.warning(f"Invalid endianness selected: {selected_endianness}")
             return
 
-        # Map endianness string to format specifier
         endianness = 'big' if selected_endianness == 'Big Endian' else 'little'
 
-        # Emit signals for logging level and color changes
+        # Emit logging level and color changes
         self.log_level_signal.emit(selected_log_level)
-        # Color changes are already emitted individually via color_changed_signal
+        # Color changes are emitted individually on change
 
         # Emit signal for COM port, baud rate, log level, and endianness changes
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
@@ -209,16 +214,25 @@ class SettingsTab(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if confirm == QMessageBox.StandardButton.Yes:
+            # Emit the retrain signal with no arguments, as defined
             self.machine_learning_retrain_signal.emit()
             QMessageBox.information(self, "Retrain Model", "Model retraining initiated.")
         else:
             self.logger.info("Model retraining canceled by the user.")
 
     def set_retrain_button_enabled(self, enabled):
-        """
-        Enables or disables the retrain button.
-        """
-        self.machine_learning_retrain_signal.setEnabled(enabled)
+        if hasattr(self, 'retrain_button') and self.retrain_button is not None:
+            self.retrain_button.setEnabled(enabled)
+
+    def on_add_data_button_clicked(self):
+        dialog = QFileDialog(self, "Select Additional Training Data Files")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        dialog.setNameFilters(["CSV files (*.csv)", "All files (*)"])
+    
+        if dialog.exec():
+            selected_files = dialog.selectedFiles()
+            # Emit a new signal for adding these files to training
+            self.additional_files_selected.emit(selected_files)
 
 
     def on_log_level_changed(self, level: str):
@@ -238,7 +252,6 @@ class SettingsTab(QWidget):
             # Set Logging Level
             log_level = config_data.get("logging_level", "INFO")
             log_level_str = log_level.upper()
-
             index = self.log_level_dropdown.findText(log_level_str)
             if index != -1:
                 self.log_level_dropdown.setCurrentIndex(index)
@@ -253,7 +266,6 @@ class SettingsTab(QWidget):
                 self.com_port_dropdown.setCurrentIndex(index)
                 self.logger.debug(f"Set COM port to {selected_port}")
             else:
-                # Optionally, add it if not present
                 if selected_port and selected_port != "No COM ports available":
                     self.com_port_dropdown.addItem(selected_port)
                     self.com_port_dropdown.setCurrentIndex(self.com_port_dropdown.count()-1)
@@ -269,7 +281,6 @@ class SettingsTab(QWidget):
                 self.baud_rate_dropdown.setCurrentIndex(index)
                 self.logger.debug(f"Set baud rate to {baud_rate_str}")
             else:
-                # Optionally, add it if not present
                 if baud_rate_str and baud_rate_str != "9600":
                     self.baud_rate_dropdown.addItem(baud_rate_str)
                     self.baud_rate_dropdown.setCurrentIndex(self.baud_rate_dropdown.count()-1)
