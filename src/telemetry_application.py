@@ -123,7 +123,35 @@ class TelemetryApplication(QObject):
             TelemetryKey.CAPACITY_AH.value[0],
             TelemetryKey.VOLTAGE.value[0],
             TelemetryKey.QUANTITY.value[0],
-            TelemetryKey.SERIES_STRINGS.value[0]
+            TelemetryKey.SERIES_STRINGS.value[0],
+            TelemetryKey.MC1TP1_HEATSINK_TEMP.value[0],
+            TelemetryKey.MC1TP1_MOTOR_TEMP.value[0],
+            TelemetryKey.MC1TP2_INLET_TEMP.value[0],
+            TelemetryKey.MC1TP2_CPU_TEMP.value[0],
+            TelemetryKey.MC1PHA_PHASE_A_CURRENT.value[0],
+            TelemetryKey.MC1PHA_PHASE_B_CURRENT.value[0],
+            TelemetryKey.MC1CUM_BUS_AMPHOURS.value[0],
+            TelemetryKey.MC1CUM_ODOMETER.value[0],
+            TelemetryKey.MC1VVC_VD_VECTOR.value[0],
+            TelemetryKey.MC1VVC_VQ_VECTOR.value[0],
+            TelemetryKey.MC1IVC_ID_VECTOR.value[0],
+            TelemetryKey.MC1IVC_IQ_VECTOR.value[0],
+            TelemetryKey.MC1BEM_BEMFD_VECTOR.value[0],
+            TelemetryKey.MC1BEM_BEMFQ_VECTOR.value[0],
+            TelemetryKey.MC2TP1_HEATSINK_TEMP.value[0],
+            TelemetryKey.MC2TP1_MOTOR_TEMP.value[0],
+            TelemetryKey.MC2TP2_INLET_TEMP.value[0],
+            TelemetryKey.MC2TP2_CPU_TEMP.value[0],
+            TelemetryKey.MC2PHA_PHASE_A_CURRENT.value[0],
+            TelemetryKey.MC2PHA_PHASE_B_CURRENT.value[0],
+            TelemetryKey.MC2CUM_BUS_AMPHOURS.value[0],
+            TelemetryKey.MC2CUM_ODOMETER.value[0],
+            TelemetryKey.MC2VVC_VD_VECTOR.value[0],
+            TelemetryKey.MC2VVC_VQ_VECTOR.value[0],
+            TelemetryKey.MC2IVC_ID_VECTOR.value[0],
+            TelemetryKey.MC2IVC_IQ_VECTOR.value[0],
+            TelemetryKey.MC2BEM_BEMFD_VECTOR.value[0],
+            TelemetryKey.MC2BEM_BEMFQ_VECTOR.value[0]
         ]
 
     def init_csv_handler(self):
@@ -263,8 +291,19 @@ class TelemetryApplication(QObject):
         # Disable the button
         self.gui.settings_tab.set_retrain_button_enabled(False)
 
+        # Clear previous data
+        self.clear_previous_data()
+
         # Start training in a separate thread
         self.train_machine_learning_model()
+
+    def clear_previous_data(self):
+        """
+        Clears previous data before starting new data collection.
+        """
+        # Implement the logic to clear previous data
+        self.data_collector.clear_data()
+        self.logger.info("Previous data cleared.")
 
     def train_machine_learning_model(self):
         """
@@ -278,7 +317,7 @@ class TelemetryApplication(QObject):
             self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
             QMessageBox.warning(None, "Retrain Model", "Training data file not found. Cannot retrain model.")
             # Re-enable the retrain button
-            self.gui.settings_tab.machine_learning_retrain_signal(True)
+            self.gui.settings_tab.set_retrain_button_enabled(True)
 
     def on_training_complete(self, error=None):
         """
@@ -292,7 +331,23 @@ class TelemetryApplication(QObject):
             QMessageBox.information(None, "Retrain Model", "Machine learning model retrained successfully.")
 
         # Re-enable the retrain button
-        self.gui.settings_tab.machine_learning_retrain_signal(True)
+        self.gui.settings_tab.set_retrain_button_enabled(True)
+
+    def handle_retrain_with_files(self, new_files):
+        self.logger.info("Retraining machine learning model with additional files...")
+        # Disable the retrain button
+        self.gui.settings_tab.set_retrain_button_enabled(False)
+
+        old_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
+        combined_file = self.ml_model.combine_and_retrain(old_data_file, new_files)
+        if combined_file:
+            # Once combined, train the model on the combined file
+            self.ml_model.train_model_in_thread(combined_file, callback=self.training_complete_signal.emit)
+        else:
+            self.logger.error("Failed to combine and retrain with additional files.")
+            QMessageBox.critical(None, "Retrain Model", "Failed to combine and retrain with the selected files.")
+            # Re-enable the retrain button
+            self.gui.settings_tab.set_retrain_button_enabled(True)
 
     def handle_settings_applied(self, port, baudrate, log_level, endianness):
         """

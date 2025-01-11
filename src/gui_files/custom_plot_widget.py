@@ -1,8 +1,8 @@
+# -------------------------
 # src/gui_files/custom_plot_widget.py
-
+# -------------------------
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import pyqtSignal, Qt, QEvent
-from PyQt6.QtGui import QCursor
+from PyQt6.QtCore import pyqtSignal, Qt
 import pyqtgraph as pg
 
 class CustomPlotWidget(pg.PlotWidget):
@@ -14,17 +14,16 @@ class CustomPlotWidget(pg.PlotWidget):
         self.setMouseEnabled(x=False, y=False)
         self.setMenuEnabled(False)
         self.hideButtons()
-        # Initialize zoom state
+        # Track whether we are in zoom mode
         self.zoom_enabled = False
 
     def wheelEvent(self, event):
-        # Forward the wheel event to the parent to enable scrolling
+        # Let the parent handle the scroll. This prevents zoom on wheel.
         if self.parent():
             QApplication.sendEvent(self.parent(), event)
         event.ignore()
 
     def mouseDoubleClickEvent(self, event):
-        # Emit a signal on double-click to toggle zoom
         self.double_clicked.emit()
         event.accept()
 

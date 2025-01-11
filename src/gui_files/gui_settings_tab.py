@@ -234,7 +234,6 @@ class SettingsTab(QWidget):
             # Emit a new signal for adding these files to training
             self.additional_files_selected.emit(selected_files)
 
-
     def on_log_level_changed(self, level: str):
         """
         Emit log_level_signal when logging level changes.

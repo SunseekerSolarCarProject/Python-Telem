@@ -62,6 +62,7 @@ class MachineLearningModel:
             self.model = LinearRegression()
             self.model.fit(X_train, y_train)
 
+            # Save the trained model
             joblib.dump(self.model, self.model_file)
             self.logger.info(f"Model trained and saved to {self.model_file}")
             score = self.model.score(X_test, y_test)
