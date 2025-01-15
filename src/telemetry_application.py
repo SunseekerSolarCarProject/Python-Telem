@@ -418,7 +418,7 @@ class TelemetryApplication(QObject):
         try:
             # Get the current timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
             # Parse the incoming data
             processed_data = self.data_processor.parse_data(data)
             self.logger.debug(f"Processed data: {processed_data}")
@@ -427,7 +427,7 @@ class TelemetryApplication(QObject):
                 # Update or add the 'timestamp' key
                 processed_data['timestamp'] = timestamp
                 self.logger.debug(f"Processed data after adding 'timestamp': {processed_data}")
-            
+
                 # Add the processed data to the buffer
                 self.buffer.add_data(processed_data)
 
@@ -441,34 +441,63 @@ class TelemetryApplication(QObject):
                     )
 
                     if combined_data:
-                        # Verify that combined_data is a dictionary
                         if isinstance(combined_data, dict):
-                            # Prepare input data for prediction
-                            input_data = {
+                            #
+                            # ---------------- PREPARE INPUTS FOR BOTH MODELS ----------------
+                            #
+                            # 1) Battery Life Model uses these three columns:
+                            #    'BP_ISH_Amps', 'BP_PVS_Voltage', 'BP_PVS_Ah'
+                            input_data_battery_life = {
                                 'BP_ISH_Amps': self.buffer.safe_float(combined_data.get('BP_ISH_Amps', 0)),
                                 'BP_PVS_Voltage': self.buffer.safe_float(combined_data.get('BP_PVS_Voltage', 0)),
                                 'BP_PVS_Ah': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0))
                             }
 
-                            # Only make prediction if the model is trained
-                            if self.ml_model.model:
-                                predicted_time = self.ml_model.predict(input_data)
+                            # 2) Break-Even Speed Model uses:
+                            #    'Battery_Ah_Used', 'Velocity', 'MotorControllerCurrent'
+                            #    (Rename these keys to match your actual telemetry data!)
+                            input_data_break_even = {
+                                'Battery_Ah_Used': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0)), 
+                                'Velocity': self.buffer.safe_float(combined_data.get('MC1VEL_SPEED', 0)), 
+                                'MotorControllerCurrent': self.buffer.safe_float(combined_data.get('MC1BUS_CURRENT', 0))
+                            }
+
+                            #
+                            # ---------------- BATTERY LIFE PREDICTION ----------------
+                            #
+                            if self.ml_model.battery_life_model:
+                                predicted_time = self.ml_model.predict_battery_life(input_data_battery_life)
                                 if predicted_time is not None:
                                     combined_data['Predicted_Remaining_Time'] = predicted_time
-                                    # Convert predicted time to hh:mm:ss format
+                                    # Convert predicted time to hh:mm:ss (if desired)
                                     exact_time = self.extra_calculations.calculate_exact_time(predicted_time)
                                     combined_data['Predicted_Exact_Time'] = exact_time
                                 else:
                                     combined_data['Predicted_Remaining_Time'] = 'Prediction failed'
                                     combined_data['Predicted_Exact_Time'] = 'N/A'
                             else:
-                                combined_data['Predicted_Remaining_Time'] = 'Model not trained'
+                                combined_data['Predicted_Remaining_Time'] = 'Battery Life Model not trained'
                                 combined_data['Predicted_Exact_Time'] = 'N/A'
 
+                            #
+                            # ---------------- BREAK-EVEN SPEED PREDICTION ----------------
+                            #
+                            if self.ml_model.break_even_model:
+                                predicted_break_even_speed = self.ml_model.predict_break_even_speed(input_data_break_even)
+                                if predicted_break_even_speed is not None:
+                                    combined_data['Predicted_BreakEven_Speed'] = predicted_break_even_speed
+                                else:
+                                    combined_data['Predicted_BreakEven_Speed'] = 'Prediction failed'
+                            else:
+                                combined_data['Predicted_BreakEven_Speed'] = 'Break-Even Model not trained'
+
+                            #
+                            # ---------------- MERGE BATTERY INFO AND EMIT ----------------
+                            #
                             # Merge battery_info into combined_data
                             if self.battery_info:
                                 combined_data.update(self.battery_info)
-                        
+
                             # Emit the combined data to update the GUI
                             self.update_data_signal.emit(combined_data)
                             self.logger.debug(f"Emitted combined_data with battery_info: {combined_data}")
@@ -492,7 +521,7 @@ class TelemetryApplication(QObject):
         """
         training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
         if os.path.exists(training_data_file):
-            self.ml_model.train_model(training_data_file)
+            self.ml_model.train_battery_life_model(training_data_file)
         else:
             self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
 
