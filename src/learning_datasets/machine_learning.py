@@ -9,20 +9,30 @@ import logging
 import threading
 
 class MachineLearningModel:
-    def __init__(self,
+    def __init__(self, model_dir=None,
                  battery_life_model_file='battery_life_model.pkl',
                  break_even_model_file='break_even_speed_model.pkl'):
-        # Battery life model
-        self.battery_life_model_file = battery_life_model_file
-        self.battery_life_model = None
+        self.logger = logging.getLogger(__name__)
 
-        # Break-even speed model
-        self.break_even_model_file = break_even_model_file
+        if model_dir is None:
+            # This picks your current script’s directory and appends "models"
+            # or you could just do `os.getcwd()` + "models"
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            model_dir = os.path.join(current_dir, 'models')
+
+        # Ensure model_dir exists
+        os.makedirs(model_dir, exist_ok=True)
+
+        # Construct full paths
+        self.battery_life_model_path = os.path.join(model_dir, battery_life_model_file)
+        self.break_even_model_path = os.path.join(model_dir, break_even_model_file)
+        self.logger.info(f"Battery life model path: {self.battery_life_model_path}")
+        self.logger.info(f"Break even model path: {self.break_even_model_path}")
+
+        self.battery_life_model = None
         self.break_even_model = None
 
-        self.logger = logging.getLogger(__name__)
-        
-        # Load models if they exist
+        # Now load using these absolute paths
         self._load_battery_life_model()
         self._load_break_even_model()
 
@@ -30,10 +40,10 @@ class MachineLearningModel:
     #                          Battery Life Model
     # -------------------------------------------------------------------------
     def _load_battery_life_model(self):
-        if os.path.exists(self.battery_life_model_file):
+        if os.path.exists(self.battery_life_model_path):
             try:
-                self.battery_life_model = joblib.load(self.battery_life_model_file)
-                self.logger.info(f"Battery life model loaded from {self.battery_life_model_file}")
+                self.battery_life_model = joblib.load(self.battery_life_model_path)
+                self.logger.info(f"Battery life model loaded from {self.battery_life_model_path}")
             except Exception as e:
                 self.logger.error(f"Error loading battery life model: {e}")
                 self.battery_life_model = None
@@ -84,8 +94,8 @@ class MachineLearningModel:
             self.battery_life_model.fit(X_train, y_train)
 
             # Save the trained model
-            joblib.dump(self.battery_life_model, self.battery_life_model_file)
-            self.logger.info(f"Battery life model trained and saved to {self.battery_life_model_file}")
+            joblib.dump(self.battery_life_model, self.battery_life_model_path)
+            self.logger.info(f"Battery life model trained and saved to {self.battery_life_model_path}")
 
             score = self.battery_life_model.score(X_test, y_test)
             self.logger.info(f"Battery life model R^2 score: {score}")
@@ -121,10 +131,10 @@ class MachineLearningModel:
     #                         Break-Even Speed Model
     # -------------------------------------------------------------------------
     def _load_break_even_model(self):
-        if os.path.exists(self.break_even_model_file):
+        if os.path.exists(self.break_even_model_path):
             try:
-                self.break_even_model = joblib.load(self.break_even_model_file)
-                self.logger.info(f"Break-even speed model loaded from {self.break_even_model_file}")
+                self.break_even_model = joblib.load(self.break_even_model_path)
+                self.logger.info(f"Break-even speed model loaded from {self.break_even_model_path}")
             except Exception as e:
                 self.logger.error(f"Error loading break-even speed model: {e}")
                 self.break_even_model = None
@@ -189,8 +199,8 @@ class MachineLearningModel:
             self.break_even_model.fit(X_train, y_train)
 
             # Save the trained model
-            joblib.dump(self.break_even_model, self.break_even_model_file)
-            self.logger.info(f"Break-even speed model trained and saved to {self.break_even_model_file}")
+            joblib.dump(self.break_even_model, self.break_even_model_path)
+            self.logger.info(f"Break-even speed model trained and saved to {self.break_even_model_path}")
 
             score = self.break_even_model.score(X_test, y_test)
             self.logger.info(f"Break-even speed model R^2 score: {score}")

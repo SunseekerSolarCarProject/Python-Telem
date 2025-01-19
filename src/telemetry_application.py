@@ -312,7 +312,8 @@ class TelemetryApplication(QObject):
         training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
         if os.path.exists(training_data_file):
             # Use the threaded training method and provide a callback
-            self.ml_model.train_model_in_thread(training_data_file, callback=self.training_complete_signal.emit)
+            self.ml_model.train_battery_life_model_in_thread(training_data_file, callback=self.training_complete_signal.emit)
+            self.ml_model.train_break_even_model_in_thread(training_data_file, callback=self.training_complete_signal.emit)
         else:
             self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
             QMessageBox.warning(None, "Retrain Model", "Training data file not found. Cannot retrain model.")
