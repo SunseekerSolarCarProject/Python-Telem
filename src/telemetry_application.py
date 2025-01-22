@@ -22,7 +22,8 @@ class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
     training_complete_signal = pyqtSignal(object) # signal to pass any error object
 
-    def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20, log_level=logging.INFO, app=None):
+    def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20,
+                log_level=logging.INFO, app=None, storage_folder=None):
         """
         Initializes the TelemetryApplication.
         """
@@ -40,6 +41,7 @@ class TelemetryApplication(QObject):
         self.signals_connected = False
         self.used_Ah = 0
         self.config_data_copy = None  # Initialize to store config data
+        self.storage_folder = storage_folder
 
         # Connect the training complete signal to the handler
         self.training_complete_signal.connect(self.on_training_complete)
@@ -155,7 +157,12 @@ class TelemetryApplication(QObject):
         ]
 
     def init_csv_handler(self):
-        self.csv_handler = CSVHandler()
+        """
+        Initialize CSVHandler, making sure all CSV files go into self.storage_folder.
+        """
+        # If storage_folder is None, default to the current directory
+        root_directory = self.storage_folder if self.storage_folder else os.getcwd()
+        self.csv_handler = CSVHandler(root_directory=root_directory)
         self.csv_file = self.csv_handler.get_csv_file_path()
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
         self.csv_headers = self.csv_handler.primary_headers
@@ -251,7 +258,18 @@ class TelemetryApplication(QObject):
                 QMessageBox.critical(None, "Error", "Configuration is incomplete. Exiting.")
                 return False
 
-            self.gui = TelemetryGUI(self.data_keys, self.csv_handler, self.units)
+            # -----------------------------------------------------------
+            #  Pass the folder path to TelemetryGUI so config.json lives there
+            # -----------------------------------------------------------
+            config_file_path = os.path.join(self.storage_folder, "config.json") \
+                               if self.storage_folder else "config.json"
+
+            self.gui = TelemetryGUI(
+                self.data_keys,
+                self.csv_handler,
+                self.units,
+                config_file=config_file_path  # => <storage_folder>/config.json
+            )
 
             self.connect_signals()
 

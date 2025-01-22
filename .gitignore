@@ -9,3 +9,4 @@ telemetry_application.log.4
 telemetry_application.log.5
 training_data.csv
 combined_training_data.csv
+src/application_data/config.json
