@@ -1,10 +1,11 @@
-# src/telemetry_application.py
-
+#src/telemetry_application.py
 import sys
 import os
 import logging
+import requests
+import threading
 from datetime import datetime
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from serial_reader import SerialReaderThread
@@ -17,13 +18,19 @@ from csv_handler import CSVHandler
 from learning_datasets.machine_learning import MachineLearningModel
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_URL = "http://localhost:5000/ingest"
+API_KEY = os.getenv("TELEMETRY_INGESTION_API_KEY")
 
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
-    training_complete_signal = pyqtSignal(object) # signal to pass any error object
+    training_complete_signal = pyqtSignal(object)  # Signal to pass any error object
 
     def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20,
-                log_level=logging.INFO, app=None, storage_folder=None):
+                 log_level=logging.INFO, app=None, storage_folder=None):
         """
         Initializes the TelemetryApplication.
         """
@@ -42,6 +49,7 @@ class TelemetryApplication(QObject):
         self.used_Ah = 0
         self.config_data_copy = None  # Initialize to store config data
         self.storage_folder = storage_folder
+        self.vehicle_year = ""  # New: store the vehicle year
 
         # Connect the training complete signal to the handler
         self.training_complete_signal.connect(self.on_training_complete)
@@ -53,12 +61,20 @@ class TelemetryApplication(QObject):
         self.init_data_processors()
         self.init_machine_learning()
 
+        # ----------------------------------------------------------
+        # Start a periodic timer to retrain the model every 60 seconds.
+        # Adjust the interval (in milliseconds) as needed.
+        # ----------------------------------------------------------
+        self.training_timer = QTimer()
+        self.training_timer.setInterval(60000)  # 60 seconds
+        self.training_timer.timeout.connect(self.train_machine_learning_model)
+        self.training_timer.start()
+
     def init_logger(self):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(self.logging_level)
         # Configure handlers if not already configured
         if not logging.getLogger().handlers:
-            # Console handler
             ch = logging.StreamHandler()
             ch.setLevel(self.logging_level)
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -69,11 +85,7 @@ class TelemetryApplication(QObject):
         """
         Initializes the units and data keys using key_name_definition.py.
         """
-        # Utilize the KEY_UNITS dictionary imported from key_name_definitions.py
         self.units = KEY_UNITS.copy()
-
-        # Define data_keys as a list of key names from TelemetryKey Enum
-        # Only include relevant keys as per your application needs
         self.data_keys = [
             TelemetryKey.TIMESTAMP.value[0],
             TelemetryKey.DEVICE_TIMESTAMP.value[0],
@@ -158,9 +170,8 @@ class TelemetryApplication(QObject):
 
     def init_csv_handler(self):
         """
-        Initialize CSVHandler, making sure all CSV files go into self.storage_folder.
+        Initialize CSVHandler, ensuring CSV files go into self.storage_folder.
         """
-        # If storage_folder is None, default to the current directory
         root_directory = self.storage_folder if self.storage_folder else os.getcwd()
         self.csv_handler = CSVHandler(root_directory=root_directory)
         self.csv_file = self.csv_handler.get_csv_file_path()
@@ -180,11 +191,11 @@ class TelemetryApplication(QObject):
     def init_data_processors(self):
         self.data_processor = DataProcessor(endianness=self.endianness)
         self.extra_calculations = ExtraCalculations()
-        # This data_display is linked to how all the information is getting to the GUI to function in full.
         self.Data_Display = DataDisplay(self.units)
 
     def init_machine_learning(self):
         self.ml_model = MachineLearningModel()
+        # Optionally, do an initial training if the training_data.csv exists.
         self.train_machine_learning_model()
 
     def connect_signals(self):
@@ -193,32 +204,59 @@ class TelemetryApplication(QObject):
             self.gui.change_log_level_signal.connect(self.update_logging_level)
             self.gui.settings_applied_signal.connect(self.handle_settings_applied)
             self.update_data_signal.connect(self.buffer.add_data)
-            self.update_data_signal.connect(self.gui.update_all_tabs)  # Connect to TelemetryGUI's slot
-            # Connect retrain_model_signal
+            self.update_data_signal.connect(self.gui.update_all_tabs)
             self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
             self.gui.machine_learning_retrain_signal_with_files.connect(self.handle_retrain_with_files)
             self.signals_connected = True
             self.logger.debug("Connected GUI signals.")
 
+    def send_telemetry_data_to_server_async(self, data, device_tag="device1"):
+        thread = threading.Thread(target=self.send_telemetry_data_to_server, args=(data, device_tag))
+        thread.daemon = True  # Daemonize thread so it won't block program exit
+        thread.start()
+
+    def send_telemetry_data_to_server(self, data, device_tag="device1"):
+        """
+        Sends telemetry data to the Flask server's /ingest endpoint.
+        """
+        payload = {
+            "measurement": "telemetry",
+            "tags": {
+                "device": device_tag,
+                "vehicle_year": self.vehicle_year  # New: Include vehicle year as a tag
+            },
+            "fields": data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        self.logger.debug(f"Sending payload: {payload}")
+        headers = {
+            "X-API-KEY": API_KEY,
+            "Content-Type": "application/json"
+        }
+    
+        try:
+            response = requests.post(API_URL, json=payload, headers=headers, timeout=5)
+            response.raise_for_status()
+            self.logger.info("Telemetry data sent successfully.")
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Failed to send telemetry data: {e}")
+
     def set_battery_info(self, config_data):
-        """
-        Sets the battery configuration data from the configuration dialog.
-        """
         self.battery_info = config_data.get("battery_info")
         self.selected_port = config_data.get("selected_port")
-        self.logging_level = config_data.get("logging_level")  # Now a string
-        self.baudrate = config_data.get("baud_rate", 9600)  # Update baudrate based on config data
-        self.endianness = config_data.get("endianness", "big")  # Update endianness based on config data
+        self.logging_level = config_data.get("logging_level")
+        self.baudrate = config_data.get("baud_rate", 9600)
+        self.endianness = config_data.get("endianness", "big")
+        self.vehicle_year = config_data.get("vehicle_year", "")  # Capture vehicle year
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")
         self.logger.info(f"Logging level: {self.logging_level}")
         self.logger.info(f"Baud rate: {self.baudrate}")
         self.logger.info(f"Endianness: {self.endianness}")
+        self.logger.info(f"Vehicle Year: {self.vehicle_year}")
 
-        # Update DataProcessor's endianness
         self.data_processor.set_endianness(self.endianness)
 
-        # Perform calculations
         if self.battery_info:
             calculated_battery_info = self.extra_calculations.calculate_battery_capacity(
                 capacity_ah=self.battery_info["capacity_ah"],
@@ -229,16 +267,13 @@ class TelemetryApplication(QObject):
             self.logger.info(f"Calculated battery info: {calculated_battery_info}")
             self.battery_info.update(calculated_battery_info)
 
-        # Store config_data_copy for later use
         config_data_copy = config_data.copy()
-        # Ensure baud_rate and endianness are present
         if "baud_rate" not in config_data_copy:
             config_data_copy["baud_rate"] = self.baudrate
         if "endianness" not in config_data_copy:
             config_data_copy["endianness"] = self.endianness
-        self.config_data_copy = config_data_copy  # Store for later use
+        self.config_data_copy = config_data_copy
 
-        # Apply logging level immediately
         self.update_logging_level(self.logging_level)
 
     def start(self):
@@ -258,22 +293,17 @@ class TelemetryApplication(QObject):
                 QMessageBox.critical(None, "Error", "Configuration is incomplete. Exiting.")
                 return False
 
-            # -----------------------------------------------------------
-            #  Pass the folder path to TelemetryGUI so config.json lives there
-            # -----------------------------------------------------------
-            config_file_path = os.path.join(self.storage_folder, "config.json") \
-                               if self.storage_folder else "config.json"
+            config_file_path = os.path.join(self.storage_folder, "config.json") if self.storage_folder else "config.json"
 
             self.gui = TelemetryGUI(
                 self.data_keys,
                 self.csv_handler,
                 self.units,
-                config_file=config_file_path  # => <storage_folder>/config.json
+                config_file=config_file_path
             )
 
             self.connect_signals()
 
-            # Apply initial settings after GUI is initialized
             if hasattr(self, 'config_data_copy'):
                 self.gui.set_initial_settings(self.config_data_copy)
 
@@ -293,129 +323,91 @@ class TelemetryApplication(QObject):
             process_data_callback=self.process_data,
             process_raw_data_callback=self.process_raw_data
         )
-        # Connect data_received signal to process_data method
-        self.serial_reader_thread.data_received.connect(self.process_data)  # Expects str
-        # Connect raw_data_received to process_raw_data
-        self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)  # Handle raw data separately
+        self.serial_reader_thread.data_received.connect(self.process_data)
+        self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)
         self.serial_reader_thread.start()
         self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
 
     def handle_retrain_model(self):
-        """
-        Handles retraining the machine learning model when triggered from the GUI.
-        """
         self.logger.info("Retraining machine learning model...")
-
-        # Disable the button
         self.gui.settings_tab.set_retrain_button_enabled(False)
-
-        # Clear previous data
         self.clear_previous_data()
-
-        # Start training in a separate thread
         self.train_machine_learning_model()
 
     def clear_previous_data(self):
         """
         Clears previous data before starting new data collection.
         """
-        # Implement the logic to clear previous data
         self.data_collector.clear_data()
         self.logger.info("Previous data cleared.")
+        self.train_machine_learning_model()
 
     def train_machine_learning_model(self):
         """
-        Trains the machine learning model using existing training data.
+        Trains machine learning models using training_data.csv.
         """
         training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
-        if os.path.exists(training_data_file):
-            # Use the threaded training method and provide a callback
-            self.ml_model.train_battery_life_model_in_thread(training_data_file, callback=self.training_complete_signal.emit)
-            self.ml_model.train_break_even_model_in_thread(training_data_file, callback=self.training_complete_signal.emit)
+        if os.path.exists(training_data_file) and os.path.getsize(training_data_file) > 0:
+            self.logger.info("Retraining machine learning models using training data...")
+            self.ml_model.train_battery_life_model(training_data_file)
+            self.ml_model.train_break_even_model(training_data_file)
         else:
-            self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
-            QMessageBox.warning(None, "Retrain Model", "Training data file not found. Cannot retrain model.")
-            # Re-enable the retrain button
-            self.gui.settings_tab.set_retrain_button_enabled(True)
+            self.logger.warning(f"Training data file {training_data_file} is empty or does not exist. Cannot train model.")
 
     def on_training_complete(self, error=None):
-        """
-        Callback function called after model training is complete.
-        """
         if error:
             self.logger.error(f"Model retraining failed: {error}")
             QMessageBox.critical(None, "Retrain Model", f"Model retraining failed: {error}")
         else:
             self.logger.info("Model retraining completed.")
             QMessageBox.information(None, "Retrain Model", "Machine learning model retrained successfully.")
-
-        # Re-enable the retrain button
         self.gui.settings_tab.set_retrain_button_enabled(True)
 
     def handle_retrain_with_files(self, new_files):
         self.logger.info("Retraining machine learning model with additional files...")
-        # Disable the retrain button
         self.gui.settings_tab.set_retrain_button_enabled(False)
 
         old_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
         combined_file = self.ml_model.combine_and_retrain(old_data_file, new_files)
         if combined_file:
-            # Once combined, train the model on the combined file
-            self.ml_model.train_model_in_thread(combined_file, callback=self.training_complete_signal.emit)
+            self.ml_model.train_battery_life_model(combined_file)
+            self.ml_model.train_break_even_model(combined_file)
         else:
             self.logger.error("Failed to combine and retrain with additional files.")
             QMessageBox.critical(None, "Retrain Model", "Failed to combine and retrain with the selected files.")
-            # Re-enable the retrain button
             self.gui.settings_tab.set_retrain_button_enabled(True)
 
     def handle_settings_applied(self, port, baudrate, log_level, endianness):
-        """
-        Handles updates to COM port, baud rate, logging level, and endianness.
-        """
         self.logger.info(f"Applying new settings: COM Port={port}, Baud Rate={baudrate}, Log Level={log_level}, Endianness={endianness}")
-        # Update logging level
         self.update_logging_level(log_level)
-        # Update endianness in DataProcessor
         self.data_processor.set_endianness(endianness)
-        # Restart serial reader with new COM port and baud rate
         self.restart_serial_reader(port, baudrate)
 
     def update_logging_level(self, level):
-        """
-        Updates the logging level at runtime.
-        """
         try:
             self.logger.debug(f"Attempting to set logging level to: {level}")
-            # Validate logging level
             if not hasattr(logging, level.upper()):
                 raise AttributeError(f"Invalid logging level: {level}")
 
-            # Update root logger level
             logging.getLogger().setLevel(level.upper())
             for handler in logging.getLogger().handlers:
                 handler.setLevel(level.upper())
 
             self.logger.info(f"Logging level updated to {level.upper()}")
         except AttributeError as e:
-            # Handle invalid level strings gracefully
             self.logger.error(f"Invalid logging level: {level}. Exception: {e}")
             QMessageBox.critical(None, "Logging Level Error", f"Invalid logging level: {level}. Please select a valid level.")
         except Exception as e:
-            # Catch all other exceptions to prevent crashes
             self.logger.error(f"Failed to update logging level: {e}")
             QMessageBox.critical(None, "Logging Configuration Error", f"An error occurred while setting the logging level: {e}")
 
     def restart_serial_reader(self, port, baudrate):
-        """
-        Restarts the SerialReaderThread with new COM port and baud rate.
-        """
         try:
             if self.serial_reader_thread and self.serial_reader_thread.isRunning():
                 self.serial_reader_thread.stop()
                 self.serial_reader_thread.wait()
                 self.logger.info("Stopped existing SerialReaderThread.")
 
-            # Start a new SerialReaderThread with updated settings
             self.serial_reader_thread = SerialReaderThread(
                 port,
                 baudrate,
@@ -431,134 +423,73 @@ class TelemetryApplication(QObject):
             QMessageBox.critical(None, "Error", f"Failed to connect to COM Port {port} with baud rate {baudrate}.\nError: {e}")
 
     def process_data(self, data):
-        """
-        Processes incoming telemetry data and emits it to update the GUI.
-        """
         try:
-            # Get the current timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            # Parse the incoming data
             processed_data = self.data_processor.parse_data(data)
             self.logger.debug(f"Processed data: {processed_data}")
 
             if processed_data:
-                # Update or add the 'timestamp' key
                 processed_data['timestamp'] = timestamp
                 self.logger.debug(f"Processed data after adding 'timestamp': {processed_data}")
-
-                # Add the processed data to the buffer
                 self.buffer.add_data(processed_data)
 
-                # Check if the buffer is ready to flush
                 if self.buffer.is_ready_to_flush():
-                    # Flush the buffer and get combined data
                     combined_data = self.buffer.flush_buffer(
                         filename=self.csv_file,
                         battery_info=self.battery_info,
                         used_ah=self.used_Ah
                     )
 
-                    if combined_data:
-                        if isinstance(combined_data, dict):
-                            #
-                            # ---------------- PREPARE INPUTS FOR BOTH MODELS ----------------
-                            #
-                            # 1) Battery Life Model uses these three columns:
-                            #    'BP_ISH_Amps', 'BP_PVS_Voltage', 'BP_PVS_Ah'
-                            input_data_battery_life = {
-                                'BP_ISH_Amps': self.buffer.safe_float(combined_data.get('BP_ISH_Amps', 0)),
-                                'BP_PVS_Voltage': self.buffer.safe_float(combined_data.get('BP_PVS_Voltage', 0)),
-                                'BP_PVS_Ah': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0))
-                            }
+                    if isinstance(combined_data, dict):
+                        input_data_battery_life = {
+                            'BP_ISH_Amps': self.buffer.safe_float(combined_data.get('BP_ISH_Amps', 0)),
+                            'BP_PVS_Voltage': self.buffer.safe_float(combined_data.get('BP_PVS_Voltage', 0)),
+                            'BP_PVS_Ah': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0))
+                        }
+                        input_data_break_even = {
+                            'Battery_Ah_Used': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0)),
+                            'Velocity': self.buffer.safe_float(combined_data.get('MC1VEL_SPEED', 0)),
+                            'MotorControllerCurrent': self.buffer.safe_float(combined_data.get('MC1BUS_CURRENT', 0))
+                        }
 
-                            # 2) Break-Even Speed Model uses:
-                            #    'Battery_Ah_Used', 'Velocity', 'MotorControllerCurrent'
-                            #    (Rename these keys to match your actual telemetry data!)
-                            input_data_break_even = {
-                                'Battery_Ah_Used': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0)), 
-                                'Velocity': self.buffer.safe_float(combined_data.get('MC1VEL_SPEED', 0)), 
-                                'MotorControllerCurrent': self.buffer.safe_float(combined_data.get('MC1BUS_CURRENT', 0))
-                            }
-
-                            #
-                            # ---------------- BATTERY LIFE PREDICTION ----------------
-                            #
-                            if self.ml_model.battery_life_model:
-                                predicted_time = self.ml_model.predict_battery_life(input_data_battery_life)
-                                if predicted_time is not None:
-                                    combined_data['Predicted_Remaining_Time'] = predicted_time
-                                    # Convert predicted time to hh:mm:ss (if desired)
-                                    exact_time = self.extra_calculations.calculate_exact_time(predicted_time)
-                                    combined_data['Predicted_Exact_Time'] = exact_time
-                                else:
-                                    combined_data['Predicted_Remaining_Time'] = 'Prediction failed'
-                                    combined_data['Predicted_Exact_Time'] = 'N/A'
+                        if self.ml_model.battery_life_model:
+                            predicted_time = self.ml_model.predict_battery_life(input_data_battery_life)
+                            if predicted_time is not None:
+                                combined_data['Predicted_Remaining_Time'] = predicted_time
+                                exact_time = self.extra_calculations.calculate_exact_time(predicted_time)
+                                combined_data['Predicted_Exact_Time'] = exact_time
                             else:
-                                combined_data['Predicted_Remaining_Time'] = 'Battery Life Model not trained'
+                                combined_data['Predicted_Remaining_Time'] = 'Prediction failed'
                                 combined_data['Predicted_Exact_Time'] = 'N/A'
-
-                            #
-                            # ---------------- BREAK-EVEN SPEED PREDICTION ----------------
-                            #
-                            if self.ml_model.break_even_model:
-                                predicted_break_even_speed = self.ml_model.predict_break_even_speed(input_data_break_even)
-                                if predicted_break_even_speed is not None:
-                                    combined_data['Predicted_BreakEven_Speed'] = predicted_break_even_speed
-                                else:
-                                    combined_data['Predicted_BreakEven_Speed'] = 'Prediction failed'
-                            else:
-                                combined_data['Predicted_BreakEven_Speed'] = 'Break-Even Model not trained'
-
-                            #
-                            # ---------------- MERGE BATTERY INFO AND EMIT ----------------
-                            #
-                            # Merge battery_info into combined_data
-                            if self.battery_info:
-                                combined_data.update(self.battery_info)
-
-                            # Emit the combined data to update the GUI
-                            self.update_data_signal.emit(combined_data)
-                            self.logger.debug(f"Emitted combined_data with battery_info: {combined_data}")
                         else:
-                            self.logger.error(f"Combined data is not a dict: {combined_data} (type: {type(combined_data)})")
+                            combined_data['Predicted_Remaining_Time'] = 'Battery Life Model not trained'
+                            combined_data['Predicted_Exact_Time'] = 'N/A'
+
+                        if self.ml_model.break_even_model:
+                            predicted_break_even_speed = self.ml_model.predict_break_even_speed(input_data_break_even)
+                            if predicted_break_even_speed is not None:
+                                combined_data['Predicted_BreakEven_Speed'] = predicted_break_even_speed
+                            else:
+                                combined_data['Predicted_BreakEven_Speed'] = 'Prediction failed'
+                        else:
+                            combined_data['Predicted_BreakEven_Speed'] = 'Break-Even Model not trained'
+
+                        if self.battery_info:
+                            combined_data.update(self.battery_info)
+
+                        self.update_data_signal.emit(combined_data)
+                        self.send_telemetry_data_to_server_async(combined_data, device_tag="device1")
+                        self.logger.debug(f"Emitted combined_data with battery_info: {combined_data}")
+                    else:
+                        self.logger.error(f"Combined data is not a dict: {combined_data} (type: {type(combined_data)})")
         except Exception as e:
             self.logger.error(f"Error processing data: {data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
-        """
-        Processes raw hex data and buffers it for secondary CSV writing.
-        """
         try:
             self.buffer.add_raw_data(raw_data, self.secondary_csv_file)
         except Exception as e:
             self.logger.error(f"Error processing raw data: {e}")
-
-    def train_machine_learning_model(self):
-        """
-        Trains the machine learning model using existing training data.
-        """
-        training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
-        if os.path.exists(training_data_file):
-            self.ml_model.train_battery_life_model(training_data_file)
-        else:
-            self.logger.warning(f"Training data file {training_data_file} does not exist. Cannot train model.")
-
-    def handle_retrain_with_files(self, new_files):
-        self.logger.info("Retraining machine learning model with additional files...")
-        # Disable the retrain button
-        self.gui.settings_tab.set_retrain_button_enabled(False)
-
-        old_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
-        combined_file = self.ml_model.combine_and_retrain(old_data_file, new_files)
-        if combined_file:
-            # Once combined, train the model on the combined file
-            self.ml_model.train_model_in_thread(combined_file, callback=self.training_complete_signal.emit)
-        else:
-            self.logger.error("Failed to combine and retrain with additional files.")
-            QMessageBox.critical(None, "Retrain Model", "Failed to combine and retrain with the selected files.")
-            # Re-enable the retrain button
-            self.gui.settings_tab.set_retrain_button_enabled(True)
 
     def finalize_csv(self):
         try:
@@ -583,8 +514,5 @@ class TelemetryApplication(QObject):
         self.logger.info("Cleanup completed.")
 
     def closeEvent(self, event):
-        """
-        Override the closeEvent to perform cleanup before exiting.
-        """
         self.cleanup()
         event.accept()

@@ -1,12 +1,14 @@
 # src/machine_learning.py
 
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-import joblib
 import os
 import logging
 import threading
+import joblib
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.exceptions import NotFittedError
+from sklearn.utils.validation import check_is_fitted
 
 class MachineLearningModel:
     def __init__(self, model_dir=None,
@@ -15,15 +17,14 @@ class MachineLearningModel:
         self.logger = logging.getLogger(__name__)
 
         if model_dir is None:
-            # This picks your current script’s directory and appends "models"
-            # or you could just do `os.getcwd()` + "models"
+            # Get current script directory and use a "models" subdirectory
             current_dir = os.path.dirname(os.path.abspath(__file__))
             model_dir = os.path.join(current_dir, 'models')
 
         # Ensure model_dir exists
         os.makedirs(model_dir, exist_ok=True)
 
-        # Construct full paths
+        # Construct full paths for the model files
         self.battery_life_model_path = os.path.join(model_dir, battery_life_model_file)
         self.break_even_model_path = os.path.join(model_dir, break_even_model_file)
         self.logger.info(f"Battery life model path: {self.battery_life_model_path}")
@@ -32,7 +33,7 @@ class MachineLearningModel:
         self.battery_life_model = None
         self.break_even_model = None
 
-        # Now load using these absolute paths
+        # Now load the models (if they exist and are valid)
         self._load_battery_life_model()
         self._load_break_even_model()
 
@@ -43,6 +44,12 @@ class MachineLearningModel:
         if os.path.exists(self.battery_life_model_path):
             try:
                 self.battery_life_model = joblib.load(self.battery_life_model_path)
+                # Check if the loaded model is fitted.
+                try:
+                    check_is_fitted(self.battery_life_model)
+                except NotFittedError:
+                    self.logger.warning("Loaded battery life model is not fitted. It will be retrained.")
+                    self.battery_life_model = None
                 self.logger.info(f"Battery life model loaded from {self.battery_life_model_path}")
             except Exception as e:
                 self.logger.error(f"Error loading battery life model: {e}")
@@ -113,6 +120,13 @@ class MachineLearningModel:
             self.logger.warning("Battery life model is not trained. Cannot make prediction.")
             return None
         try:
+            # Ensure the model is fitted before predicting
+            try:
+                check_is_fitted(self.battery_life_model)
+            except NotFittedError:
+                self.logger.warning("Battery life model is not fitted. Cannot make prediction.")
+                return None
+
             required_features = ['BP_ISH_Amps', 'BP_PVS_Voltage', 'BP_PVS_Ah']
             for f in required_features:
                 if f not in input_data:
@@ -134,6 +148,11 @@ class MachineLearningModel:
         if os.path.exists(self.break_even_model_path):
             try:
                 self.break_even_model = joblib.load(self.break_even_model_path)
+                try:
+                    check_is_fitted(self.break_even_model)
+                except NotFittedError:
+                    self.logger.warning("Loaded break-even model is not fitted. It will be retrained.")
+                    self.break_even_model = None
                 self.logger.info(f"Break-even speed model loaded from {self.break_even_model_path}")
             except Exception as e:
                 self.logger.error(f"Error loading break-even speed model: {e}")
@@ -165,12 +184,6 @@ class MachineLearningModel:
         ['Battery_Ah_Used', 'Velocity', 'MotorControllerCurrent']
         (In reality, you might label your data with a known break-even speed
          or compute net amps ~ 0. For now, we assume you have a 'BreakEvenSpeed' column.)
-
-        NOTE: You can add more features here, such as:
-              - solar irradiance
-              - battery temperature
-              - road slope
-              - etc.
         """
         if not os.path.exists(training_data_file):
             self.logger.error(f"Training data file {training_data_file} does not exist.")
@@ -185,13 +198,8 @@ class MachineLearningModel:
                     self.logger.error(f"Column {col} not found in training data.")
                     return
 
-            # Example: future features
-            # X = data[['Battery_Ah_Used', 'Velocity', 'MotorControllerCurrent',
-            #           'BP_PVS_Ah', 'SolarIrradiance', 'AmbientTemperature']].fillna(0)
-
-            # Features (simple example)
+            # Simple example features
             X = data[['Battery_Ah_Used', 'Velocity', 'MotorControllerCurrent']].fillna(0)
-            # Target
             y = data['BreakEvenSpeed'].fillna(0)
 
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
@@ -204,12 +212,6 @@ class MachineLearningModel:
 
             score = self.break_even_model.score(X_test, y_test)
             self.logger.info(f"Break-even speed model R^2 score: {score}")
-
-            # If you want to see coefficients (and avoid errors if not fitted):
-            # try:
-            #     self.logger.info(f"Coefficients: {self.break_even_model.coef_}")
-            # except AttributeError:
-            #     self.logger.warning("Model has no attribute 'coef_'. Possibly not fitted or not a standard LinearRegression.")
 
         except Exception as e:
             self.logger.error(f"Error training break-even speed model: {e}")
@@ -224,6 +226,13 @@ class MachineLearningModel:
             self.logger.warning("Break-even speed model is not trained. Cannot make prediction.")
             return None
         try:
+            # Ensure the model is fitted before predicting
+            try:
+                check_is_fitted(self.break_even_model)
+            except NotFittedError:
+                self.logger.warning("Break-even speed model is not fitted. Cannot make prediction.")
+                return None
+
             required_features = ['Battery_Ah_Used', 'Velocity', 'MotorControllerCurrent']
             for f in required_features:
                 if f not in input_data:
@@ -265,8 +274,7 @@ class MachineLearningModel:
             combined_data.to_csv(combined_filename, index=False)
             self.logger.info(f"Combined data saved to {combined_filename}")
 
-            # Retrain both models with the combined data (if relevant)
-            # Make sure your CSV has the columns needed for each model
+            # Retrain both models using the combined dataset
             self.train_battery_life_model(combined_filename)
             self.train_break_even_model(combined_filename)
 

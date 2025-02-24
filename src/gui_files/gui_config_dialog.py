@@ -1,5 +1,4 @@
-# src/gui_files/config_dialog.py
-
+#src/gui_files/gui_config_dialog.py
 import os
 import logging
 from PyQt6.QtWidgets import (
@@ -7,7 +6,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal
 import serial.tools.list_ports
-
 
 class ConfigDialog(QDialog):
     config_data_signal = pyqtSignal(dict)
@@ -52,17 +50,35 @@ class ConfigDialog(QDialog):
         # Baud Rate Dropdown
         self.baud_rate_dropdown = QComboBox()
         self.baud_rate_dropdown.addItems(['9600', '19200', '38400', '57600', '115200'])
-        self.baud_rate_dropdown.setCurrentText('9600')  # Default baud rate
+        self.baud_rate_dropdown.setCurrentText('9600')
         layout.addRow("Baud Rate:", self.baud_rate_dropdown)
 
         # Endianness Dropdown
         endianness_label = QLabel("Select Endianness:")
         layout.addRow(endianness_label)
-
         self.endianness_dropdown = QComboBox()
         self.endianness_dropdown.addItems(['Big Endian', 'Little Endian'])
-        self.endianness_dropdown.setCurrentText('Big Endian')  # Default endianness
+        self.endianness_dropdown.setCurrentText('Big Endian')
         layout.addRow(self.endianness_dropdown)
+
+        # ---- New: Vehicle Year Dropdown ----
+        # Vehicle Year label
+        vehicle_years_label = QLabel("Vehicle Years:")
+        layout.addRow(vehicle_years_label)
+
+        self.vehicle_year_dropdown = QComboBox()
+        # Load any stored years:
+        stored_years = self.load_vehicle_years()
+        if stored_years:
+            self.vehicle_year_dropdown.addItems(stored_years)
+        # Finally add "Add New"
+        self.vehicle_year_dropdown.addItem("Add New")
+
+        # IMPORTANT: connect activated, not currentIndexChanged
+        self.vehicle_year_dropdown.activated.connect(self.handle_vehicle_year_activated)
+    
+        layout.addRow(self.vehicle_year_dropdown)
+        # -------------------------------------
 
         # Dialog Buttons
         buttons = QDialogButtonBox(
@@ -90,9 +106,6 @@ class ConfigDialog(QDialog):
         self.port_dropdown.addItems(port_list)
 
     def load_configuration(self):
-        """
-        Load the selected configuration file or prompt for manual input.
-        """
         selected = self.config_dropdown.currentText()
         config_dir = "config_files"
 
@@ -107,23 +120,16 @@ class ConfigDialog(QDialog):
                 self.logger.error(f"Error loading configuration from file {file_path}: {e}")
 
     def emit_config_data(self):
-        """
-        Emit the configuration data signal with battery info, selected COM port, baud rate, log level, and endianness.
-        """
         selected_port = self.port_dropdown.currentText()
         log_level_str = self.log_level_dropdown.currentText().upper()
         baud_rate_str = self.baud_rate_dropdown.currentText()
         endianness_str = self.endianness_dropdown.currentText()
 
-        # Map endianness string to format specifier
         endianness = 'big' if endianness_str == 'Big Endian' else 'little'
+        vehicle_year = self.vehicle_year_dropdown.currentText()
+        if vehicle_year == "Add New":
+            vehicle_year = ""
 
-        if selected_port == "No COM ports available":
-            selected_port = None
-            QMessageBox.warning(self, "Warning", "No COM ports available. Please connect a device or select a valid port.")
-            self.logger.warning("No COM ports available.")
-
-        # Validate baud rate
         try:
             baud_rate = int(baud_rate_str)
         except ValueError:
@@ -134,18 +140,16 @@ class ConfigDialog(QDialog):
         config_data = {
             "battery_info": self.battery_info,
             "selected_port": selected_port,
-            "logging_level": log_level_str,  # Emit as string
+            "logging_level": log_level_str,
             "baud_rate": baud_rate,
-            "endianness": endianness  # Emit as 'big' or 'little'
+            "endianness": endianness,
+            "vehicle_year": vehicle_year  # New field for vehicle year
         }
 
         self.logger.debug(f"Emitting configuration data: {config_data}")
         self.config_data_signal.emit(config_data)
 
     def load_battery_info_from_file(self, file_path):
-        """
-        Load battery information from a configuration file.
-        """
         try:
             battery_data = {}
             with open(file_path, 'r') as file:
@@ -174,9 +178,6 @@ class ConfigDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to load configuration: {e}")
 
     def manual_battery_input(self):
-        """
-        Prompt the user to manually input battery information.
-        """
         try:
             capacity_ah, ok1 = QInputDialog.getDouble(self, "Battery Capacity", "Battery cell capacity (Amps Hours):", decimals=2)
             if not ok1:
@@ -206,10 +207,57 @@ class ConfigDialog(QDialog):
             QMessageBox.warning(self, "Input Canceled", str(e))
             self.logger.warning(str(e))
 
+    def handle_vehicle_year_activated(self, index):
+        """Triggered when the user clicks/activates a dropdown item."""
+        current_text = self.vehicle_year_dropdown.itemText(index)
+        if current_text == "Add New":
+            new_year, ok = QInputDialog.getText(self, "Add Vehicle Year", "Enter the vehicle year:")
+            if ok and new_year:
+                # Remove "Add New" so we can insert the new year before re-adding it
+                self.vehicle_year_dropdown.removeItem(self.vehicle_year_dropdown.count() - 1)
+                self.vehicle_year_dropdown.addItem(new_year)
+                self.vehicle_year_dropdown.addItem("Add New")
+                # Save the new year
+                self.save_vehicle_year(new_year)
+                # Set the combo box to the newly added year
+                self.vehicle_year_dropdown.setCurrentText(new_year)
+
+    def load_vehicle_years(self):
+        file_path = "vehicle_years.txt"
+        if os.path.exists(file_path):
+            with open(file_path, 'r') as file:
+                years = [line.strip() for line in file if line.strip()]
+            return years
+        return []
+
+    def save_vehicle_year(self, new_year):
+        file_path = "vehicle_years.txt"
+        with open(file_path, 'a') as file:
+            file.write(new_year + "\n")
+
     def accept(self):
         """
-        Validate inputs, emit configuration data, and close the dialog.
+        Called when user clicks OK.
         """
+        # 1) If the user typed a year that doesn't exist in the dropdown list, add & save it
+        typed_year = self.vehicle_year_dropdown.currentText()
+        if typed_year and typed_year not in [self.vehicle_year_dropdown.itemText(i)
+                                         for i in range(self.vehicle_year_dropdown.count())]:
+            # Add it to the combo box
+            self.vehicle_year_dropdown.addItem(typed_year)
+            # Persist it to vehicle_years.txt
+            self.save_vehicle_year(typed_year)
+
+        # 2) Continue with your normal checks
+        if not self.battery_info:
+            QMessageBox.warning(self, "Incomplete Configuration", "Please load or input the battery configuration before proceeding.")
+            self.logger.warning("Attempted to accept configuration without battery info.")
+            return
+
+        # 3) Emit the config data (including the typed year)
+        self.emit_config_data()
+        super().accept()
+
         if not self.battery_info:
             QMessageBox.warning(self, "Incomplete Configuration", "Please load or input the battery configuration before proceeding.")
             self.logger.warning("Attempted to accept configuration without battery info.")
