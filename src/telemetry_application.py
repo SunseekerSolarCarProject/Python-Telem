@@ -246,7 +246,7 @@ class TelemetryApplication(QObject):
         self.selected_port = config_data.get("selected_port")
         self.logging_level = config_data.get("logging_level")
         self.baudrate = config_data.get("baud_rate", 9600)
-        self.endianness = config_data.get("endianness", "big")
+        self.endianness = config_data.get("endianness", "little")
         self.vehicle_year = config_data.get("vehicle_year", "")  # Capture vehicle year
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")

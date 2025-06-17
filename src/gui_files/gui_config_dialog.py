@@ -20,7 +20,7 @@ class ConfigDialog(QDialog):
         self.selected_port = None
         self.logging_level = "INFO"  # Default logging level
         self.baud_rate = 9600  # Default baud rate
-        self.endianness = "big"  # Default endianness
+        self.endianness = "little"  # Default endianness
 
         self.init_ui()
 
@@ -58,7 +58,7 @@ class ConfigDialog(QDialog):
         layout.addRow(endianness_label)
         self.endianness_dropdown = QComboBox()
         self.endianness_dropdown.addItems(['Big Endian', 'Little Endian'])
-        self.endianness_dropdown.setCurrentText('Big Endian')
+        self.endianness_dropdown.setCurrentText('Little Endian')  # Default to Little Endian
         layout.addRow(self.endianness_dropdown)
 
         # ---- New: Vehicle Year Dropdown ----
