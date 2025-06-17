@@ -16,15 +16,19 @@ def main():
     default_log_level = 'INFO'
     log_level = getattr(logging, default_log_level.upper(), logging.INFO)
 
-    # Add the parent directory to the system path (if necessary)
-    sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+    # Determine base directory:
+    #  - if bundled as an .exe (PyInstaller, cx_Freeze, etc.), use sys.executable
+    #  - otherwise (running as a script), use __file__
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
 
     # ---------------------------------------------------------------------
     # 1) Create/ensure a centralized folder for logs and CSV
     # ---------------------------------------------------------------------
-    storage_folder = os.path.join(os.path.dirname(__file__), "application_data")
-    if not os.path.exists(storage_folder):
-        os.makedirs(storage_folder)
+    storage_folder = os.path.join(base_dir, "application_data")
+    os.makedirs(storage_folder, exist_ok=True)
 
     # Build the log file path in our storage folder
     log_file_path = os.path.join(storage_folder, 'telemetry_application.log')

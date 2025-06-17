@@ -152,7 +152,11 @@ class CSVHandler:
 
         :param directory: New directory path.
         """
+        # 1) Make sure the dir exists…
         self.ensure_directory_exists(directory)
+        # 2) Switch our root to the new directory
+        self.root_directory = os.path.abspath(directory)
+        # 3) Re-create both CSVs in the new location
         self.change_csv_file_name("telemetry_data.csv", is_primary=True)
         self.change_csv_file_name("raw_hex_data.csv", is_primary=False)
 

@@ -42,7 +42,7 @@ class TelemetryApplication(QObject):
         self.logging_level = log_level
         self.battery_info = None
         self.selected_port = None
-        self.endianness = 'big'  # Default endianness
+        self.endianness = 'little'  # Default endianness
         self.gui = None
         self.serial_reader_thread = None
         self.signals_connected = False
@@ -434,13 +434,13 @@ class TelemetryApplication(QObject):
                 self.buffer.add_data(processed_data)
 
                 if self.buffer.is_ready_to_flush():
-                    combined_data = self.buffer.flush_buffer(
-                        filename=self.csv_file,
-                        battery_info=self.battery_info,
-                        used_ah=self.used_Ah
-                    )
+                   combined_data = self.buffer.flush_buffer(
+                       filename=self.csv_handler.get_csv_file_path(),
+                       battery_info=self.battery_info,
+                       used_ah=self.used_Ah
+                        )
 
-                    if isinstance(combined_data, dict):
+                if isinstance(combined_data, dict):
                         input_data_battery_life = {
                             'BP_ISH_Amps': self.buffer.safe_float(combined_data.get('BP_ISH_Amps', 0)),
                             'BP_PVS_Voltage': self.buffer.safe_float(combined_data.get('BP_PVS_Voltage', 0)),
@@ -480,14 +480,14 @@ class TelemetryApplication(QObject):
                         self.update_data_signal.emit(combined_data)
                         self.send_telemetry_data_to_server_async(combined_data, device_tag="device1")
                         self.logger.debug(f"Emitted combined_data with battery_info: {combined_data}")
-                    else:
+                else:
                         self.logger.error(f"Combined data is not a dict: {combined_data} (type: {type(combined_data)})")
         except Exception as e:
             self.logger.error(f"Error processing data: {data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
         try:
-            self.buffer.add_raw_data(raw_data, self.secondary_csv_file)
+            self.buffer.add_raw_data(raw_data, self.csv_handler.get_secondary_csv_file_path())
         except Exception as e:
             self.logger.error(f"Error processing raw data: {e}")
 
