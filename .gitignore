@@ -11,3 +11,5 @@ training_data.csv
 combined_training_data.csv
 src/application_data/config.json
 .env
+output/main_app-1-22-2025.exe
+output/main_app.exe
