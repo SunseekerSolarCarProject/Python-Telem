@@ -18,6 +18,95 @@ class ExtraCalculations:
         self.logger.debug(f"Converted {mA_s} mA·s to {ah} Ah")
         return ah
 
+    def convert_mps_to_fps(self, mps):
+        """
+        Convert meters-per-second to feet-per-second.
+        1 m/s = 3.28084 ft/s
+        """
+        fps = mps * 3.28084
+        self.logger.debug(f"Converted {mps} m/s to {fps} ft/s")
+        return fps
+
+    def convert_fps_to_mps(self, fps):
+        """
+        Convert feet-per-second to meters-per-second.
+        1 ft/s = 0.3048 m/s
+        """
+        mps = fps * 0.3048
+        self.logger.debug(f"Converted {fps} ft/s to {mps} m/s")
+        return mps
+
+    def convert_C_to_F(self, c):
+        """
+        Convert Celsius to Fahrenheit.
+        °F = (°C × 9/5) + 32
+        """
+        f = (c * 9.0/5.0) + 32.0
+        self.logger.debug(f"Converted {c} °C to {f} °F")
+        return f
+
+    def convert_F_to_C(self, f):
+        """
+        Convert Fahrenheit to Celsius.
+        °C = (°F − 32) × 5/9
+        """
+        c = (f - 32.0) * (5.0/9.0)
+        self.logger.debug(f"Converted {f} °F to {c} °C")
+        return c
+
+    def convert_mph_to_kph(self, mph):
+        """
+        Convert miles-per-hour to kilometers-per-hour.
+        1 mph = 1.60934 km/h
+        """
+        kph = mph * 1.60934
+        self.logger.debug(f"Converted {mph} mph to {kph} km/h")
+        return kph
+
+    def convert_kph_to_mph(self, kph):
+        """
+        Convert kilometers-per-hour to miles-per-hour.
+        1 km/h = 0.621371 mph
+        """
+        mph = kph * 0.621371
+        self.logger.debug(f"Converted {kph} km/h to {mph} mph")
+        return mph
+
+    def convert_Ah_to_mA_s(self, ah):
+        """
+        Convert ampere-hours back to milliampere-seconds.
+        1 Ah = 3600 A·s = 3 600 000 mA·s
+        """
+        mA_s = ah * 3_600_000
+        self.logger.debug(f"Converted {ah} Ah to {mA_s} mA·s")
+        return mA_s
+
+    def convert_m_to_ft(self, m):
+        """Convert meters to feet.
+        1 m = 3.28084 ft
+        """
+        ft = m * 3.28084
+        self.logger.debug(f"Converted {m} m to {ft} ft")
+        return ft
+    
+    def convert_ft_to_m(self, ft):
+        """
+        Convert feet to meters.
+        1 ft = 0.3048 m
+        """
+        m = ft * 0.3048
+        self.logger.debug(f"Converted {ft} ft to {m} m")
+        return m
+
+    def convert_Wh_to_J(self, wh):
+        """
+        Convert watt-hours to joules.
+        1 Wh = 3600 J
+        """
+        joules = wh * 3600
+        self.logger.debug(f"Converted {wh} Wh to {joules} J")
+        return joules
+    
     def calculate_battery_capacity(self, capacity_ah, voltage, quantity, series_strings):
         try:
             parallel_strings = quantity // series_strings

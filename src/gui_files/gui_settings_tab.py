@@ -13,6 +13,7 @@ class SettingsTab(QWidget):
     log_level_signal = pyqtSignal(str)  # Signal for logging level changes
     color_changed_signal = pyqtSignal(str, str)  # Signal for color changes (key, color)
     settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
+    units_changed_signal = pyqtSignal(str)  # Signal for units system changes
     machine_learning_retrain_signal = pyqtSignal()  # Signal to retrain ML model (no args)
     additional_files_selected = pyqtSignal(list) #adding files to the ML model.
 
@@ -82,6 +83,18 @@ class SettingsTab(QWidget):
         self.endianness_dropdown.setCurrentText('Big Endian')  # Default endianness
         self.endianness_dropdown.setMinimumWidth(200)
         layout.addWidget(self.endianness_dropdown)
+
+        # Units System dropdown
+        units_label = QLabel("Units System:")
+        units_label.setMinimumWidth(200)
+        layout.addWidget(units_label)
+
+        self.units_dropdown = QComboBox()
+        self.units_dropdown.addItems(['Metric (SI)', 'Imperial'])
+        # default to Metric
+        self.units_dropdown.setCurrentText('Metric (SI)')
+        self.units_dropdown.setMinimumWidth(200)
+        layout.addWidget(self.units_dropdown)
 
         # Machine Learning Retrain Button
         machine_learning_label = QLabel("Machine Learning:")
@@ -194,6 +207,10 @@ class SettingsTab(QWidget):
             return
 
         endianness = 'big' if selected_endianness == 'Big Endian' else 'little'
+
+        # Read and Emit units choice
+        units_choice = 'metric' if self.units_dropdown.currentText() == 'Metric (SI)' else 'imperial'
+        self.units_changed_signal.emit(units_choice)
 
         # Emit logging level and color changes
         self.log_level_signal.emit(selected_log_level)

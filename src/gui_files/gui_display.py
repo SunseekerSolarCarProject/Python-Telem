@@ -20,6 +20,8 @@ from gui_files.gui_settings_tab import SettingsTab
 from gui_files.gui_csv_management import CSVManagementTab
 from gui_files.gui_config_dialog import ConfigDialog
 
+from unit_conversion import build_metric_units_dict, build_imperial_units_dict, convert_value
+
 class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
@@ -27,12 +29,17 @@ class TelemetryGUI(QWidget):
     machine_learning_retrain_signal = pyqtSignal()  # Retrain button for ML model
     machine_learning_retrain_signal_with_files = pyqtSignal(list)
 
-    def __init__(self, data_keys, csv_handler, units, config_file='config.json'):
+    def __init__(self, data_keys, units, csv_handler, config_file='config.json'):
         super().__init__()
         self.data_keys = data_keys
         self.csv_handler = csv_handler
-        self.units = units  
+        self.units = units
+        self.metric_map = build_metric_units_dict()
+        self.imperial_map = build_imperial_units_dict()
+        self.units_mode = 'metric'
+        self.units = self.metric_map  
         self.config_file = config_file
+        self.last_telemetry_data = {}
         self.logger = logging.getLogger(__name__)
 
         # Load or create color mapping
@@ -309,7 +316,7 @@ class TelemetryGUI(QWidget):
             ]
         }
 
-        self.data_table_tab = DataTableTab(self.units, data_table_groups)
+        self.data_table_tab = DataTableTab(self.units, self.units_mode, data_table_groups)
         self.tabs.addTab(self.data_table_tab, "Data Table")
 
         # Data Display Tab
@@ -320,13 +327,14 @@ class TelemetryGUI(QWidget):
         self.settings_tab = SettingsTab(graph_groups, self.color_mapping)
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
+        self.settings_tab.units_changed_signal.connect(self.on_units_changed)
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)
         self.settings_tab.machine_learning_retrain_signal.connect(self.machine_learning_retrain_signal.emit)
         self.settings_tab.additional_files_selected.connect(self.machine_learning_retrain_signal_with_files.emit)
         self.tabs.addTab(self.settings_tab, "Settings")
 
         # CSV Management Tab
-        self.csv_management_tab = CSVManagementTab(csv_handler=self.csv_handler)
+        self.csv_management_tab = CSVManagementTab(self.csv_handler)
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
 
     def apply_dark_mode(self):
@@ -391,6 +399,32 @@ class TelemetryGUI(QWidget):
             self.logger.info(f"Updated color for {key} in {tab_name}: {color}")
         else:
             self.logger.warning(f"Graph tab {graph_tab} does not have set_curve_color method.")
+
+    def on_units_changed(self, units_choice: str):
+        """
+        Called when user picks Metric Vs Imperial.
+        Rebuild our units-dict and refresh all tabs.
+        """
+
+        if units_choice.lower() == 'imperial':
+            self.units_mode = 'imperial'
+            self.units      = self.imperial_map
+        else:
+            self.units_mode = 'metric'
+            self.units      = self.metric_map
+
+        # inside on_units_changed
+        for tab in (self.data_table_tab,
+                    self.data_display_tab,
+                    self.mc1_tab,
+                    self.mc2_tab,
+                    self.pack1_tab,
+                    self.pack2_tab,
+                    self.remaining_tab):
+            if hasattr(tab, 'set_units_choice'):
+                tab.set_units_map(self.units, self.units_mode)
+
+        self.logger.info(f"Units changed to {units_choice}. Updated units: {self.units}")
 
     def set_initial_settings(self, config_data: dict):
         """

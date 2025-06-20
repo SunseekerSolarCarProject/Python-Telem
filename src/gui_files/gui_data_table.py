@@ -6,15 +6,17 @@ from PyQt6.QtGui import QColor, QBrush, QFont
 import json
 import logging
 from key_name_definitions import TelemetryKey  # Import TelemetryKey enum
+from unit_conversion import convert_value  # Import the conversion function
 
 class DataTableTab(QWidget):
     """
     A tab for displaying telemetry data in a three-column format: Parameter, Value, Unit.
     Organized into logical groups for better readability.
     """
-    def __init__(self, units, groups=None):
+    def __init__(self, units_map, units_mode, groups=None):
         super().__init__()
-        self.units = units
+        self.units_map  = units_map
+        self.units_mode = units_mode
         self.logger = logging.getLogger(__name__)
         # Define groups here or pass as a parameter
         if groups is None:
@@ -64,6 +66,10 @@ class DataTableTab(QWidget):
         self.setLayout(layout)
         self.logger.info("Data table setup complete.")
 
+    def set_units_map(self, units_map, units_mode):
+        self.units_map  = units_map
+        self.units_mode = units_mode
+
     def update_data(self, telemetry_data):
         """
         Updates the table with new telemetry data, organized into groups.
@@ -101,11 +107,13 @@ class DataTableTab(QWidget):
 
             # Insert Data Rows
             for key in keys:
-                value = telemetry_data.get(key, "N/A")
-                unit = self.units.get(key, "")
+                value = telemetry_data.get(key)
+                target_unit = self.units_map.get(key, "")
+                display_val = convert_value(key,value,target_unit)
+                #unit = self.units.get(key, "")
 
                 # Log each key's value
-                self.logger.debug(f"Setting table row {current_row} - Parameter: {key}, Value: {value}, Unit: {unit}")
+                self.logger.debug(f"Setting table row {current_row} - Parameter: {key}, Value: {value}, Unit: {target_unit}")
 
                 # Populate Parameter column
                 param_item = QTableWidgetItem(key)
@@ -114,7 +122,7 @@ class DataTableTab(QWidget):
                 self.table_widget.setItem(current_row, 0, param_item)
 
                 # Default display settings
-                display_value = str(value)
+                display_value = str(display_val)
                 color = QColor("#FFFFFF")  # Default white text
 
                 # Special handling for specific keys
@@ -173,7 +181,7 @@ class DataTableTab(QWidget):
                 self.table_widget.setItem(current_row, 1, value_item)
 
                 # Populate Unit column
-                unit_item = QTableWidgetItem(unit)
+                unit_item = QTableWidgetItem(target_unit)
                 unit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 unit_item.setForeground(QBrush(QColor("#FFFFFF")))  # White text
                 self.table_widget.setItem(current_row, 2, unit_item)
