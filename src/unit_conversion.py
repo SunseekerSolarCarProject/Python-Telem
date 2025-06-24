@@ -37,6 +37,10 @@ def build_imperial_units_dict():
       "MC1TP2_Inlet_Temp":    "°F",
       "MC1TP2_CPU_Temp":      "°F",
       "BP_TMX_Temperature":   "°F",
+      "MC2TP1_Heatsink_Temp": "°F",
+      "MC2TP1_Motor_Temp":    "°F",
+      "MC2TP2_Inlet_Temp":    "°F",
+      "MC2TP2_CPU_Temp":      "°F",
       # odometer m → ft
       "MC1CUM_Odometer":      "ft",
       "MC2CUM_Odometer":      "ft",

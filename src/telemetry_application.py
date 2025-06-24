@@ -297,8 +297,8 @@ class TelemetryApplication(QObject):
 
             self.gui = TelemetryGUI(
                 self.data_keys,
-                self.csv_handler,
                 self.units,
+                self.csv_handler,
                 config_file=config_file_path
             )
 

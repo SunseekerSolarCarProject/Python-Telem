@@ -7,6 +7,7 @@ import pyqtgraph as pg
 import logging
 
 from gui_files.custom_plot_widget import CustomPlotWidget
+from unit_conversion import convert_value
 
 class GraphTab(QWidget):
     """
@@ -52,6 +53,10 @@ class GraphTab(QWidget):
         # For double-click zoom behavior
         container.installEventFilter(self)
         self.current_zoom_plot = None
+
+    def set_units_map(self, units_map, units_mode):
+        self.units_map  = units_map
+        self.units_mode = units_mode
 
     def add_graph(self, layout, key, color):
         plot_widget = CustomPlotWidget()
@@ -132,12 +137,15 @@ class GraphTab(QWidget):
             plot_widget.graph_curve.setData(self.data_buffers[key])
 
     def update_graphs(self, telemetry_data):
-        try:
+        try:             
             for key in self.keys:
-                if key in telemetry_data:
-                    self.logger.debug(f"Updating graph for '{key}' with value: {telemetry_data[key]}")
-                    self.update_graph(key, telemetry_data[key])
-                else:
-                    self.logger.debug(f"Key '{key}' missing in telemetry data.")
+               if key in telemetry_data:
+                    raw = telemetry_data[key]
+                    # look up the current desired unit for this key
+                    tgt = getattr(self, 'units_map', {}) .get(key, "")
+                    # one‐time conversion
+                    disp = convert_value(key, raw, tgt)
+                    self.update_graph(key, disp)
+                    self.logger.debug(f"Updated graph for '{key}' in '{self.tab_name}' with value: {disp}")
         except Exception as e:
             self.logger.error(f"Error updating graphs in '{self.tab_name}'. Exception: {e}")

@@ -359,6 +359,8 @@ class TelemetryGUI(QWidget):
         """
         try:
             # Exclude 'Errors' and 'Limits' or anything you don't want to graph
+
+            self.last_telemetry_data = telemetry_data.copy()
             graph_data = {k: v for k, v in telemetry_data.items() if k not in ['Errors', 'Limits']}
 
             self.mc1_tab.update_graphs(graph_data)
@@ -421,8 +423,11 @@ class TelemetryGUI(QWidget):
                     self.pack1_tab,
                     self.pack2_tab,
                     self.remaining_tab):
-            if hasattr(tab, 'set_units_choice'):
+            if hasattr(tab, 'set_units_map'):
                 tab.set_units_map(self.units, self.units_mode)
+
+        if hasattr(self, 'last_telemetry_data'):
+            self.update_all_tabs(self.last_telemetry_data)
 
         self.logger.info(f"Units changed to {units_choice}. Updated units: {self.units}")
 

@@ -15,6 +15,7 @@ class DataTableTab(QWidget):
     """
     def __init__(self, units_map, units_mode, groups=None):
         super().__init__()
+        self.last_raw_data = {}
         self.units_map  = units_map
         self.units_mode = units_mode
         self.logger = logging.getLogger(__name__)
@@ -69,6 +70,9 @@ class DataTableTab(QWidget):
     def set_units_map(self, units_map, units_mode):
         self.units_map  = units_map
         self.units_mode = units_mode
+        if self.last_raw_data:
+            self.logger.info("Updating Data Table with new units map.")
+            self.update_data(self.last_raw_data)
 
     def update_data(self, telemetry_data):
         """
@@ -76,6 +80,8 @@ class DataTableTab(QWidget):
 
         :param telemetry_data: Dictionary containing the latest telemetry data.
         """
+        self.last_raw_data = telemetry_data.copy()  # Store the last raw data for reference
+
         if not telemetry_data:
             self.logger.warning("No telemetry data available to update the Data Table.")
             return
