@@ -1,198 +1,170 @@
 # src/gui_files/gui_data_table.py
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
+    QHeaderView, QInputDialog
+)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QBrush, QFont
-import json
-import logging
-from key_name_definitions import TelemetryKey  # Import TelemetryKey enum
-from unit_conversion import convert_value  # Import the conversion function
+import json, logging
+
+from key_name_definitions import TelemetryKey, KEY_UNITS
+from unit_conversion import (
+    build_metric_units_dict,
+    build_imperial_units_dict,
+    convert_value
+)
 
 class DataTableTab(QWidget):
     """
-    A tab for displaying telemetry data in a three-column format: Parameter, Value, Unit.
-    Organized into logical groups for better readability.
+    A tab for displaying telemetry data in a three-column format:
+    Parameter, Value, Unit — with per-key unit overrides.
     """
-    def __init__(self, units_map, units_mode, groups=None):
+    def __init__(self, units_map, units_mode, groups):
         super().__init__()
-        self.last_raw_data = {}
+        self.logger = logging.getLogger(__name__)
+
+        # retain the raw values and any per-key override
+        self._last_raw      = {}
+        self.unit_overrides = {}
+
         self.units_map  = units_map
         self.units_mode = units_mode
-        self.logger = logging.getLogger(__name__)
-        # Define groups here or pass as a parameter
-        if groups is None:
-            self.groups = self.define_groups()
-        else:
-            self.groups = groups
-        self.logger.info("Starting data table tab.")
+        self.groups     = groups
 
-        # Define sets for error keys and error count keys
-        self.error_keys = {
-            TelemetryKey.MC1LIM_ERRORS.value[0],
-            TelemetryKey.MC2LIM_ERRORS.value[0],
-            TelemetryKey.MC1LIM_LIMITS.value[0],
-            TelemetryKey.MC2LIM_LIMITS.value[0],
-        }
+        # prebuild the two possible maps so we can show choices
+        self._metric_map   = build_metric_units_dict()
+        self._imperial_map = build_imperial_units_dict()
 
-        self.error_count_keys = {
-            TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
-            TelemetryKey.MC1LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
-            TelemetryKey.MC2LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
-            TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
-        }
+        self._init_ui()
+        self.logger.info("Data table tab ready.")
 
-        self.init_ui()
-
-    def init_ui(self):
-        """
-        Initializes the UI for the Data Table tab.
-        """
+    def _init_ui(self):
         layout = QVBoxLayout(self)
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Parameter","Value","Unit"])
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self.table.setSelectionMode(
+            QTableWidget.SelectionMode.NoSelection
+        )
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
-        # Create a table widget
-        self.table_widget = QTableWidget(self)
-        self.table_widget.setColumnCount(3)
-        self.table_widget.setHorizontalHeaderLabels(["Parameter", "Value", "Unit"])
-        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table_widget.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        # Remove alternating row colors
-        self.table_widget.setAlternatingRowColors(False)
-
-        # Optional: Set a consistent font for better readability
         font = QFont("Arial", 16)
-        self.table_widget.setFont(font)
+        self.table.setFont(font)
 
-        layout.addWidget(self.table_widget)
+        layout.addWidget(self.table)
         self.setLayout(layout)
-        self.logger.info("Data table setup complete.")
 
     def set_units_map(self, units_map, units_mode):
+        # clear any per-key choice when global units flip:
+        self.unit_overrides.clear()
         self.units_map  = units_map
         self.units_mode = units_mode
-        if self.last_raw_data:
-            self.logger.info("Updating Data Table with new units map.")
-            self.update_data(self.last_raw_data)
+        if self._last_raw:
+            self.logger.info("Global units changed — re-drawing table.")
+            self.update_data(self._last_raw)
 
     def update_data(self, telemetry_data):
-        """
-        Updates the table with new telemetry data, organized into groups.
+        # stash the raw dict
+        self._last_raw = telemetry_data.copy()
 
-        :param telemetry_data: Dictionary containing the latest telemetry data.
-        """
-        self.last_raw_data = telemetry_data.copy()  # Store the last raw data for reference
+        # count rows
+        total_rows = sum(
+            1 + len(keys) + 1
+            for keys in self.groups.values()
+        )
+        self.table.setRowCount(total_rows)
 
-        if not telemetry_data:
-            self.logger.warning("No telemetry data available to update the Data Table.")
+        row = 0
+        for group_name, keys in self.groups.items():
+            # group header
+            hdr = QTableWidgetItem(group_name)
+            hdr.setTextAlignment(Qt.AlignmentFlag.AlignLeft |
+                                 Qt.AlignmentFlag.AlignVCenter)
+            hdr.setForeground(QBrush(QColor("#1e90ff")))
+            hdr.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+            hdr.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.table.setItem(row, 0, hdr)
+            self.table.setSpan(row, 0, 1, 3)
+            row += 1
+
+            for key in keys:
+                raw = telemetry_data.get(key)
+                # choose override first, else global map
+                target = self.unit_overrides.get(key,
+                            self.units_map.get(key,""))
+                disp_val = convert_value(key, raw, target)
+
+                # Parameter
+                p = QTableWidgetItem(key)
+                p.setTextAlignment(Qt.AlignmentFlag.AlignLeft |
+                                   Qt.AlignmentFlag.AlignVCenter)
+                p.setForeground(QBrush(QColor("#FFF")))
+                self.table.setItem(row,0,p)
+
+                # Value
+                vstr = str(disp_val)
+                v = QTableWidgetItem(vstr)
+                v.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                v.setForeground(QBrush(QColor("#FFF")))
+                self.table.setItem(row,1,v)
+
+                # Unit
+                u = QTableWidgetItem(target)
+                u.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                u.setForeground(QBrush(QColor("#FFF")))
+                self.table.setItem(row,2,u)
+
+                row += 1
+
+            # blank spacer
+            row += 1
+
+    def _on_cell_double_clicked(self, row, col):
+        # only for the Unit column
+        if col != 2:
             return
 
-        self.logger.debug(f"Updating Data Table with telemetry data: {json.dumps(telemetry_data, indent=2)}")
+        key_item = self.table.item(row,0)
+        if not key_item:
+            return
+        key = key_item.text()
 
-        # Calculate total number of rows: group headers + data rows + optional blank rows
-        total_rows = 0
-        for keys in self.groups.values():
-            total_rows += 1  # For the group header
-            total_rows += len(keys)  # For the data rows
-            total_rows += 1  # For the optional blank row after each group
+        # gather possible units: original, metric, imperial
+        orig = KEY_UNITS.get(key,"")
+        m    = self._metric_map.get(key,orig)
+        i    = self._imperial_map.get(key,orig)
+        choices = []
+        for x in (orig,m,i):
+            if x and x not in choices:
+                choices.append(x)
 
-        self.table_widget.setRowCount(total_rows)
+        current = self.unit_overrides.get(key,
+                   self.units_map.get(key,""))
 
-        current_row = 0
-        for group_name, keys in self.groups.items():
-            self.logger.debug(f"Processing group: {group_name}")
-            # Insert Group Header
-            group_header_item = QTableWidgetItem(group_name)
-            group_header_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            group_header_item.setForeground(QBrush(QColor("#1e90ff")))  # Blue text for headers
-            group_header_item.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-            group_header_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # Non-selectable
-            self.table_widget.setItem(current_row, 0, group_header_item)
-            # Span the header across all three columns
-            self.table_widget.setSpan(current_row, 0, 1, 3)
-            current_row += 1
+        unit, ok = QInputDialog.getItem(
+            self,
+            f"Select unit for {key}",
+            "Unit:",
+            choices,
+            current=choices.index(current) if current in choices else 0,
+            editable=False
+        )
+        if not ok:
+            return
 
-            # Insert Data Rows
-            for key in keys:
-                value = telemetry_data.get(key)
-                target_unit = self.units_map.get(key, "")
-                display_val = convert_value(key,value,target_unit)
-                #unit = self.units.get(key, "")
+        # apply override if differs; else remove override
+        if unit == self.units_map.get(key,""):
+            self.unit_overrides.pop(key, None)
+        else:
+            self.unit_overrides[key] = unit
 
-                # Log each key's value
-                self.logger.debug(f"Setting table row {current_row} - Parameter: {key}, Value: {value}, Unit: {target_unit}")
-
-                # Populate Parameter column
-                param_item = QTableWidgetItem(key)
-                param_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                param_item.setForeground(QBrush(QColor("#FFFFFF")))  # White text
-                self.table_widget.setItem(current_row, 0, param_item)
-
-                # Default display settings
-                display_value = str(display_val)
-                color = QColor("#FFFFFF")  # Default white text
-
-                # Special handling for specific keys
-                if key == TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0]:
-                    try:
-                        numeric_value = float(value)
-                        if numeric_value > 0:
-                            direction = "Forward"
-                            color = QColor("#00FF00")  # Green
-                        elif numeric_value < 0:
-                            direction = "Reverse"
-                            color = QColor("#FF0000")  # Red
-                        else:
-                            direction = "Stationary"
-                            color = QColor("#FFFFFF")  # White
-                        display_value = f"{numeric_value} ({direction})"
-                    except (ValueError, TypeError):
-                        display_value = f"{value} (Unknown)"
-                        color = QColor("#FFFF00")  # Yellow
-                else:
-                    # Additional special handling for error keys
-                    if key in self.error_keys:
-                        # Convert value to string and strip whitespace
-                        error_value_str = str(value).strip()
-                        # Check if it's something other than 'N/A', 'None', or '0'
-                        # If it is, we have an error, highlight red
-                        if error_value_str.lower() not in ["n/a", "none", "0", ""]:
-                            background_color = QColor("#FF0000")  # Red for errors
-                        else:
-                            background_color = None
-                    elif key in self.error_count_keys:
-                    # For error count keys, convert to int and check if greater than zero
-                        try:
-                            count = int(value)
-                            if count > 0:
-                            # Error count detected, highlight orange
-                                background_color = QColor("#FFA500")  # Orange
-                            else:
-                                # Count is zero, no highlight
-                                background_color = None
-                        except (ValueError, TypeError):
-                        # If it's not a valid number (e.g., "N/A"), treat as no error
-                            background_color = None
-                    else:
-                        background_color = None
-
-                # Populate Value column
-                value_item = QTableWidgetItem(display_value)
-                value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                value_item.setForeground(QBrush(color))
-
-                # Set background color if applicable
-                if background_color:
-                    value_item.setBackground(QBrush(background_color))
-
-                self.table_widget.setItem(current_row, 1, value_item)
-
-                # Populate Unit column
-                unit_item = QTableWidgetItem(target_unit)
-                unit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                unit_item.setForeground(QBrush(QColor("#FFFFFF")))  # White text
-                self.table_widget.setItem(current_row, 2, unit_item)
-
-                current_row += 1
-
-            # Optional: Add a blank row after each group for spacing
-            current_row += 1
+        # redraw with new per-key unit
+        if self._last_raw:
+            self.update_data(self._last_raw)
