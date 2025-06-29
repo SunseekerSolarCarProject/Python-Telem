@@ -175,9 +175,18 @@ class BufferData:
             return
 
         training_data_path = os.path.join(self.csv_handler.root_directory, training_data_file)
-        # Append only relevant data for training
+        # Append only relevant data for training –
+        # include the two we need for break-even (net-current) modeling.
+        from key_name_definitions import TelemetryKey
         training_fields = [
-            'BP_ISH_Amps', 'BP_PVS_Voltage', 'BP_PVS_Ah', 'Used_Ah_Remaining_Time'
+            TelemetryKey.BP_ISH_AMPS.value[0],            # 'BP_ISH_Amps'
+            TelemetryKey.BP_PVS_VOLTAGE.value[0],         # 'BP_PVS_Voltage'
+            TelemetryKey.BP_PVS_AH.value[0],              # 'BP_PVS_Ah'
+            TelemetryKey.USED_AH_REMAINING_TIME.value[0], # 'Used_Ah_Remaining_Time'
+
+            # ← NEW FIELDS for break-even model:
+            TelemetryKey.MC1VEL_SPEED.value[0],           # 'MC1VEL_Speed'
+            TelemetryKey.BP_PVS_MILLIAMP_S.value[0],      # 'BP_PVS_milliamp/s'
         ]
         training_entry = {key: self.combined_data.get(key, "N/A") for key in training_fields}
         self.csv_handler.append_to_csv(training_data_path, training_entry)

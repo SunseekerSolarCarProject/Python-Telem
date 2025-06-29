@@ -446,10 +446,15 @@ class TelemetryApplication(QObject):
                             'BP_PVS_Voltage': self.buffer.safe_float(combined_data.get('BP_PVS_Voltage', 0)),
                             'BP_PVS_Ah': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0))
                         }
+                        # new — this matches the features used in net-current training
                         input_data_break_even = {
-                            'Battery_Ah_Used': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0)),
-                            'Velocity': self.buffer.safe_float(combined_data.get('MC1VEL_SPEED', 0)),
-                            'MotorControllerCurrent': self.buffer.safe_float(combined_data.get('MC1BUS_CURRENT', 0))
+                            # exact string “MC1VEL_Speed” from your TelemetryKey
+                            TelemetryKey.MC1VEL_SPEED.value[0]:
+                                self.buffer.safe_float(combined_data.get(TelemetryKey.MC1VEL_SPEED.value[0], 0)),
+
+                            # exact string “BP_PVS_milliamp/s” from your TelemetryKey
+                            TelemetryKey.BP_PVS_MILLIAMP_S.value[0]:
+                                self.buffer.safe_float(combined_data.get(TelemetryKey.BP_PVS_MILLIAMP_S.value[0], 0)),
                         }
 
                         if self.ml_model.battery_life_model:

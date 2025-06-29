@@ -1,151 +1,153 @@
-# -------------------------
 # src/gui_files/gui_graph_tab.py
-# -------------------------
-from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QScrollArea
-from PyQt6.QtCore import QEvent
+
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QScrollArea, QInputDialog, QApplication
+)
+from PyQt6.QtCore import Qt, QEvent
+import logging, math
 import pyqtgraph as pg
-import logging
 
 from gui_files.custom_plot_widget import CustomPlotWidget
-from unit_conversion import convert_value
+from key_name_definitions import KEY_UNITS
+from unit_conversion import convert_value, build_metric_units_dict, build_imperial_units_dict
 
 class GraphTab(QWidget):
-    """
-    A tab for displaying generic telemetry as separate PyQtGraph plots 
-    with a fixed height (300px) and scrolling.
-    """
     def __init__(self, tab_name, keys, units, color_mapping):
         super().__init__()
-        self.tab_name = tab_name
-        self.keys = keys
-        self.units = units
-        self.logger = logging.getLogger(__name__)
+        self.tab_name      = tab_name
+        self.keys          = keys
+        self.units_map     = units.copy()
         self.color_mapping = color_mapping.copy()
-        self.data_buffers = {key: [] for key in keys}
-        self.max_points = 361  # Max points to display
+        self.logger        = logging.getLogger(__name__)
 
-        self.init_ui()
+        self.unit_overrides = {}
+        self._last_raw      = {}
+        self._metric_map    = build_metric_units_dict()
+        self._imperial_map  = build_imperial_units_dict()
+        self.data_buffers   = {k: [] for k in keys}
+        self.max_points     = 361
 
-    def init_ui(self):
-        main_layout = QVBoxLayout(self)
+        self._init_ui()
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        main_layout.addWidget(scroll_area)
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); layout.addWidget(scroll)
+        container = QWidget(); scroll.setWidget(container)
+        vbox = QVBoxLayout(container)
 
-        container = QWidget()
-        scroll_area.setWidget(container)
-
-        layout = QVBoxLayout(container)
-
-        title_label = QLabel(f"{self.tab_name} Telemetry")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold;")
-        layout.addWidget(title_label)
-
+        vbox.addWidget(QLabel(f"<b>{self.tab_name} Telemetry</b>"))
         self.graph_widgets = {}
 
         for key in self.keys:
             color = self.color_mapping.get(key, 'gray')
-            self.add_graph(layout, key, color)
+            self._add_graph(vbox, key, color)
 
-        layout.addStretch()
-
-        # For double-click zoom behavior
+        vbox.addStretch()
         container.installEventFilter(self)
         self.current_zoom_plot = None
 
+    def _add_graph(self, layout, key, color):
+        pw = CustomPlotWidget()
+        pw.setTitle(key)
+        pw.setLabel("left",   self._display_unit(key))
+        pw.setLabel("bottom", "Data Points")
+        pw.showGrid(x=True, y=True, alpha=0.5)
+        pw.setFixedHeight(300)
+        pw.graph_curve = pw.plot(pen=pg.mkPen(color=color))
+
+        # all dbl-clicks come here
+        pw.double_clicked.connect(lambda ev, pw=pw, key=key: self._on_dblclick(ev, pw, key))
+
+        self.graph_widgets[key] = pw
+        layout.addWidget(pw)
+
+    def _display_unit(self, key):
+        return self.unit_overrides.get(key, self.units_map.get(key, ""))
+
     def set_units_map(self, units_map, units_mode):
-        self.units_map  = units_map
-        self.units_mode = units_mode
+        self.units_map = units_map.copy()
+        self.unit_overrides.clear()
+        for key, pw in self.graph_widgets.items():
+            pw.setLabel("left", self._display_unit(key))
+        if self._last_raw:
+            self.update_graphs(self._last_raw)
 
-    def add_graph(self, layout, key, color):
-        plot_widget = CustomPlotWidget()
-        plot_widget.setTitle(key)
-        plot_widget.setLabel("left", self.get_unit(key))
-        plot_widget.setLabel("bottom", "Data Points")
+    def _on_double_click_unit(self, key):
+        orig     = KEY_UNITS.get(key, "")
+        metric_u = self._metric_map.get(key, orig)
+        imper_u  = self._imperial_map.get(key, orig)
+        choices  = [u for u in (orig, metric_u, imper_u) if u]
 
-        # Show a grid
-        plot_widget.showGrid(x=True, y=True, alpha=0.5)
+        current = self._display_unit(key)
+        idx = choices.index(current) if current in choices else 0
 
-        # Fix each graph's height
-        plot_widget.setFixedHeight(300)
+        unit, ok = QInputDialog.getItem(
+            self,
+            f"Select unit for {key}",
+            "Unit:",
+            choices,
+            idx, False
+        )
+        if not ok:
+            return
 
-        # Use the color
-        curve = plot_widget.plot(pen=pg.mkPen(color=color))
-        plot_widget.graph_curve = curve
+        default = self.units_map.get(key, orig)
+        if unit == default:
+            self.unit_overrides.pop(key, None)
+        else:
+            self.unit_overrides[key] = unit
 
-        self.graph_widgets[key] = plot_widget
+        pw = self.graph_widgets[key]
+        pw.setLabel("left", unit)
+        if self._last_raw:
+            self.update_graphs(self._last_raw)
 
-        # Connect double-click for zoom
-        plot_widget.double_clicked.connect(lambda pw=plot_widget: self.handle_double_click(pw))
-
-        layout.addWidget(plot_widget)
-
-    def handle_double_click(self, plot_widget):
-        if self.current_zoom_plot and self.current_zoom_plot != plot_widget:
+    def _toggle_zoom(self, pw):
+        if self.current_zoom_plot and self.current_zoom_plot != pw:
             self.current_zoom_plot.disable_zoom()
-        # Toggle zoom
-        if plot_widget.zoom_enabled:
-            plot_widget.disable_zoom()
+        if pw.zoom_enabled:
+            pw.disable_zoom()
             self.current_zoom_plot = None
         else:
-            plot_widget.enable_zoom()
-            self.current_zoom_plot = plot_widget
+            pw.enable_zoom()
+            self.current_zoom_plot = pw
+
+    def _on_dblclick(self, ev, pw, key):
+        AXIS_ZONE = 60
+        x = ev.pos().x()
+        mods = QApplication.keyboardModifiers()
+
+        if (mods & Qt.KeyboardModifier.ShiftModifier) and x < AXIS_ZONE:
+            self._on_double_click_unit(key)
+        else:
+            self._toggle_zoom(pw)
+
+    def update_graphs(self, telemetry_data):
+        self._last_raw = telemetry_data.copy()
+        for key, pw in self.graph_widgets.items():
+            if key not in telemetry_data:
+                continue
+            raw = telemetry_data[key]
+            tgt = self._display_unit(key)
+            try:
+                disp = convert_value(key, raw, tgt)
+            except:
+                disp = raw
+
+            buf = self.data_buffers[key]
+            buf.append(disp)
+            if len(buf) > self.max_points:
+                buf[:] = buf[-self.max_points:]
+
+            clean = [v for v in buf if isinstance(v, (int, float)) and math.isfinite(v)]
+            pw.graph_curve.setData(clean)
+            self.logger.debug(f"[{self.tab_name}] {key}: {raw} → {disp} {tgt}")
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Type.MouseButtonPress:
-            pos = event.position().toPoint()
-            widget_at_pos = source.childAt(pos)
-            on_plot = False
-            for pw in self.graph_widgets.values():
-                if pw == widget_at_pos or pw.isAncestorOf(widget_at_pos):
-                    on_plot = True
-                    break
-            if not on_plot and self.current_zoom_plot:
-                self.current_zoom_plot.disable_zoom()
-                self.current_zoom_plot = None
+            child = source.childAt(event.position().toPoint())
+            if not any(pw == child or pw.isAncestorOf(child) for pw in self.graph_widgets.values()):
+                if self.current_zoom_plot:
+                    self.current_zoom_plot.disable_zoom()
+                    self.current_zoom_plot = None
         return False
-
-    def get_unit(self, key):
-        return self.units.get(key, "")
-
-    def set_curve_color(self, key, color):
-        if key in self.graph_widgets:
-            try:
-                self.graph_widgets[key].graph_curve.setPen(pg.mkPen(color=color))
-                self.logger.info(f"Set color for '{key}' in '{self.tab_name}' to '{color}'")
-            except Exception as e:
-                self.logger.error(f"Failed to set color for '{key}' in '{self.tab_name}': {e}")
-        else:
-            self.logger.warning(f"Key '{key}' not found in '{self.tab_name}'")
-
-    def update_graph(self, key, value):
-        if key not in self.data_buffers:
-            self.logger.warning(f"Key '{key}' not recognized in '{self.tab_name}' GraphTab.")
-            return
-
-        if not isinstance(value, (int, float)):
-            self.logger.warning(f"Non-numeric value for '{key}': {value}")
-            return
-
-        self.data_buffers[key].append(value)
-        if len(self.data_buffers[key]) > self.max_points:
-            self.data_buffers[key] = self.data_buffers[key][-self.max_points:]
-
-        plot_widget = self.graph_widgets.get(key)
-        if plot_widget:
-            plot_widget.graph_curve.setData(self.data_buffers[key])
-
-    def update_graphs(self, telemetry_data):
-        try:             
-            for key in self.keys:
-               if key in telemetry_data:
-                    raw = telemetry_data[key]
-                    # look up the current desired unit for this key
-                    tgt = getattr(self, 'units_map', {}) .get(key, "")
-                    # one‐time conversion
-                    disp = convert_value(key, raw, tgt)
-                    self.update_graph(key, disp)
-                    self.logger.debug(f"Updated graph for '{key}' in '{self.tab_name}' with value: {disp}")
-        except Exception as e:
-            self.logger.error(f"Error updating graphs in '{self.tab_name}'. Exception: {e}")
