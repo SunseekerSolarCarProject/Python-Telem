@@ -46,8 +46,9 @@ class MachineLearningModel:
                 self.battery_life_model = joblib.load(self.battery_life_model_path)
                 # Check if the loaded model is fitted.
                 try:
-                    check_is_fitted(self.battery_life_model)
-                except NotFittedError:
+                    # Also insist on having a coef_ attribute
+                    check_is_fitted(self.battery_life_model, attributes=['coef_', 'n_features_in_'])
+                except (NotFittedError, AttributeError):
                     self.logger.warning("Loaded battery life model is not fitted. It will be retrained.")
                     self.battery_life_model = None
                 self.logger.info(f"Battery life model loaded from {self.battery_life_model_path}")
@@ -119,6 +120,12 @@ class MachineLearningModel:
         if not self.battery_life_model:
             self.logger.warning("Battery life model is not trained. Cannot make prediction.")
             return None
+        
+        # NEW guard:
+        if not hasattr(self.battery_life_model, 'coef_'):
+            self.logger.warning("Battery life model object has no `coef_`. Retrain first.")
+            return None
+
         try:
             # Ensure the model is fitted before predicting
             try:
@@ -149,8 +156,9 @@ class MachineLearningModel:
             try:
                 self.break_even_model = joblib.load(self.break_even_model_path)
                 try:
-                    check_is_fitted(self.break_even_model)
-                except NotFittedError:
+                    # Also insist on having a coef_ attribute
+                    check_is_fitted(self.break_even_model, attributes=['coef_', 'n_features_in_'])
+                except (NotFittedError, AttributeError):
                     self.logger.warning("Loaded break-even model is not fitted. It will be retrained.")
                     self.break_even_model = None
                 self.logger.info(f"Break-even speed model loaded from {self.break_even_model_path}")
@@ -225,6 +233,12 @@ class MachineLearningModel:
         if not self.break_even_model:
             self.logger.warning("Break-even speed model is not trained. Cannot make prediction.")
             return None
+        
+        # NEW guard:
+        if not hasattr(self.break_even_model, 'coef_'):
+            self.logger.warning("Battery life model object has no `coef_`. Retrain first.")
+            return None
+
         try:
             # Ensure the model is fitted before predicting
             try:
