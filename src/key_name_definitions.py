@@ -66,7 +66,7 @@ class TelemetryKey(Enum):
 
     # MPPTs information
     
-    # Shunt Remaining
+    # Shunt information
     SHUNT_REMAINING_AH = ("Shunt_Remaining_Ah", "Ah")
     USED_AH_REMAINING_AH = ("Used_Ah_Remaining_Ah", "Ah")
     SHUNT_REMAINING_WH = ("Shunt_Remaining_wh", "Wh")
@@ -74,6 +74,8 @@ class TelemetryKey(Enum):
     SHUNT_REMAINING_TIME = ("Shunt_Remaining_Time", "hours")
     USED_AH_REMAINING_TIME = ("Used_Ah_Remaining_Time", "hours")
     USED_AH_EXACT_TIME = ("Used_Ah_Exact_Time", "hh:mm:ss")
+    USED_AH_CHARGE_TIME = ("Charging_Time_hours", "hours")
+    USED_AH_CHARGE_EXACT_TIME = ("Charging_Exact_Time", "hh:mm:ss")
     
     # General
     TOTAL_CAPACITY_AH = ("Total_Capacity_Ah", "Ah")

@@ -215,3 +215,19 @@ class ExtraCalculations:
         except Exception as e:
             self.logger.error(f"Error updating used Ah: {e}")
             return used_Ah
+        
+    def calculate_charge_time_hours(self, remaining_ah, charge_current_a):
+        """
+        Estimate how many hours it will take to bring remaining_ah up to full
+        at a constant current of charge_current_a (in A).
+        """
+        try:
+            if charge_current_a is None or charge_current_a <= 0:
+                self.logger.warning("Charge current invalid for time-to-full calculation.")
+                return float('inf')
+            time_h = remaining_ah / charge_current_a
+            self.logger.debug(f"Estimated charge time: {time_h} hours for {remaining_ah} Ah at {charge_current_a} A")
+            return max(time_h, 0.0)
+        except Exception as e:
+            self.logger.error(f"Error calculating charge time: {e}")
+            return float('inf')
