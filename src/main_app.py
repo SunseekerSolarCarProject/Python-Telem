@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import QApplication
 from central_logger import CentralLogger  # Import the CentralLogger class
 
 def main():
+
     # Set default logging level
     default_log_level = 'INFO'
     log_level = getattr(logging, default_log_level.upper(), logging.INFO)

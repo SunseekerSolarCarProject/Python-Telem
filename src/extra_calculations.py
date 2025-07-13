@@ -106,6 +106,58 @@ class ExtraCalculations:
         self.logger.debug(f"Converted {wh} Wh to {joules} J")
         return joules
     
+    def convert_m_to_mi(self, m):
+        """
+        Convert meters to miles.
+        1 m = 0.000621371 mi
+        """
+        mi = m * 0.000621371
+        self.logger.debug(f"Converted {m} m to {mi} mi")
+        return mi
+
+    def convert_mi_to_m(self, mi):
+        """
+        Convert miles to meters.
+        1 mi = 1609.34 m
+        """
+        m = mi * 1609.34
+        self.logger.debug(f"Converted {mi} mi to {m} m")
+        return m
+    
+    def convert_wh_per_mi_to_wh_per_km(self, wh_per_mi):
+        """
+        Convert Wh per mile → Wh per kilometer.
+        1 mi = 1.60934 km
+        """
+        wh_per_km = wh_per_mi / 1.60934
+        self.logger.debug(f"Converted {wh_per_mi} Wh/mi to {wh_per_km} Wh/km")
+        return wh_per_km
+
+    def convert_wh_per_km_to_wh_per_mi(self, wh_per_km):
+        """
+        Convert Wh per kilometer → Wh per mile.
+        """
+        wh_per_mi = wh_per_km * 1.60934
+        self.logger.debug(f"Converted {wh_per_km} Wh/km to {wh_per_mi} Wh/mi")
+        return wh_per_mi
+
+    def calculate_wh_per_km(self, power_watts, speed_mps):
+        """
+        Calculate energy consumption in Wh per kilometer.
+        Wh/km = (power (W) / speed (m/s) * 1000 m/km) / 3600 s/h
+        """
+        try:
+            if speed_mps is None or speed_mps <= 0:
+                self.logger.warning("Invalid speed for Wh/km calculation.")
+                return float('inf')
+            joules_per_km = (power_watts / speed_mps) * 1000.0
+            wh_per_km = joules_per_km / 3600.0
+            self.logger.debug(f"Calculated energy consumption: {wh_per_km} Wh/km")
+            return wh_per_km
+        except Exception as e:
+            self.logger.error(f"Error calculating Wh per km: {e}")
+            return 0.0
+
     def calculate_battery_capacity(self, capacity_ah, voltage, quantity, series_strings):
         try:
             parallel_strings = quantity // series_strings

@@ -65,7 +65,7 @@ class TelemetryKey(Enum):
     BP_ISH_AMPS = ("BP_ISH_Amps", "A")
 
     # MPPTs information
-    
+ 
     # Shunt information
     SHUNT_REMAINING_AH = ("Shunt_Remaining_Ah", "Ah")
     USED_AH_REMAINING_AH = ("Used_Ah_Remaining_Ah", "Ah")
@@ -97,6 +97,9 @@ class TelemetryKey(Enum):
     MC2LIM_ERRORS = ("MC2LIM_Errors", "")
     MC2LIM_LIMITS = ("MC2LIM_Limits", "")
     
+    # Extra calculations
+    WH_PER_MILE = ("Wh_per_Mile","Wh/mi")
+
     # Remaining Capacity
     REMAINING_CAPACITY_AH = ("Remaining_Capacity_Ah", "Ah")
     CAPACITY_AH = ("capacity_ah", "Ah")

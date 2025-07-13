@@ -3,6 +3,7 @@
 import logging
 from logging.handlers import RotatingFileHandler
 import sys
+import io
 from PyQt6.QtWidgets import QMessageBox
 
 class CentralLogger:
@@ -29,7 +30,8 @@ class CentralLogger:
             file_handler = RotatingFileHandler(
                 self.log_file,
                 maxBytes=20*1024*1024,  # 20 MB
-                backupCount=5
+                backupCount=5,
+                encoding='utf-8'
             )
             file_handler.setLevel(self.level)
             file_formatter = logging.Formatter(
@@ -38,8 +40,14 @@ class CentralLogger:
             file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
 
-            # Console handler
-            console_handler = logging.StreamHandler(sys.stdout)
+            # Console handler using UTF-8 wrapper
+            utf8_stdout = io.TextIOWrapper(
+                sys.stdout.buffer,
+                encoding='utf-8',
+                errors='replace',
+                line_buffering=True
+            )
+            console_handler = logging.StreamHandler(stream=utf8_stdout)
             console_handler.setLevel(self.level)
             console_formatter = logging.Formatter(
                 "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -66,21 +74,17 @@ class CentralLogger:
                 handler.setLevel(self.level)
             
             # Log the level change
-            # To ensure this message is logged, temporarily set the handler levels to DEBUG
             original_levels = [handler.level for handler in self.logger.handlers]
             for handler in self.logger.handlers:
                 handler.setLevel(logging.DEBUG)
             self.logger.info(f"Logging level set to {logging.getLevelName(self.level)}.")
-            # Restore original handler levels
             for handler, orig_level in zip(self.logger.handlers, original_levels):
                 handler.setLevel(orig_level)
             self.logger.debug(f"Successfully set logging level to {logging.getLevelName(self.level)}.")
         except AttributeError as e:
-            # Handle invalid level strings gracefully
             self.logger.error(f"Invalid logging level: {level_str}. Exception: {e}")
             QMessageBox.critical(None, "Logging Level Error", f"Invalid logging level: {level_str}. Please select a valid level.")
         except Exception as e:
-            # Catch all other exceptions to prevent crashes
             self.logger.error(f"Error setting logging level to {level_str}: {e}")
             QMessageBox.critical(None, "Logging Configuration Error", f"An error occurred while setting the logging level: {e}")
 

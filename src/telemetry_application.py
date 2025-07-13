@@ -440,53 +440,55 @@ class TelemetryApplication(QObject):
                        used_ah=self.used_Ah
                         )
 
-                    if isinstance(combined_data, dict):
-                        input_data_battery_life = {
-                            'BP_ISH_Amps': self.buffer.safe_float(combined_data.get('BP_ISH_Amps', 0)),
-                            'BP_PVS_Voltage': self.buffer.safe_float(combined_data.get('BP_PVS_Voltage', 0)),
-                            'BP_PVS_Ah': self.buffer.safe_float(combined_data.get('BP_PVS_Ah', 0))
-                        }
-                        # new — this matches the features used in net-current training
-                        input_data_break_even = {
-                            # exact string “MC1VEL_Speed” from your TelemetryKey
-                            TelemetryKey.MC1VEL_SPEED.value[0]:
-                                self.buffer.safe_float(combined_data.get(TelemetryKey.MC1VEL_SPEED.value[0], 0)),
+                    if not isinstance(combined_data, dict):
+                        self.logger.error(f"Combined data is not a dict: {combined_data!r}")
+                        return
 
-                            # exact string “BP_PVS_milliamp/s” from your TelemetryKey
-                            TelemetryKey.BP_PVS_MILLIAMP_S.value[0]:
-                                self.buffer.safe_float(combined_data.get(TelemetryKey.BP_PVS_MILLIAMP_S.value[0], 0)),
-                        }
+                    # --- build exactly the 3 inputs your battery-life RF expects ---
+                    feat_batt = {
+                        'BP_PVS_milliamp/s': self.buffer.safe_float(
+                            combined_data.get('BP_PVS_milliamp/s', 0)
+                        ),
+                        'BP_PVS_Ah': self.buffer.safe_float(
+                            combined_data.get('BP_PVS_Ah', 0)
+                        ),
+                        'BP_PVS_Voltage': self.buffer.safe_float(
+                            combined_data.get('BP_PVS_Voltage', 0)
+                        ),
+                    }
 
-                        if self.ml_model.battery_life_model:
-                            predicted_time = self.ml_model.predict_battery_life(input_data_battery_life)
-                            if predicted_time is not None:
-                                combined_data['Predicted_Remaining_Time'] = predicted_time
-                                exact_time = self.extra_calculations.calculate_exact_time(predicted_time)
-                                combined_data['Predicted_Exact_Time'] = exact_time
-                            else:
-                                combined_data['Predicted_Remaining_Time'] = 'Prediction failed'
-                                combined_data['Predicted_Exact_Time'] = 'N/A'
-                        else:
-                            combined_data['Predicted_Remaining_Time'] = 'Battery Life Model not trained'
-                            combined_data['Predicted_Exact_Time'] = 'N/A'
+                    # --- build exactly the 2 inputs your break-even RF expects ---
+                    feat_be = {
+                        'BP_PVS_milliamp/s': feat_batt['BP_PVS_milliamp/s'],
+                        'BP_PVS_Voltage':    feat_batt['BP_PVS_Voltage'],
+                    }
 
-                        if self.ml_model.break_even_model:
-                            predicted_break_even_speed = self.ml_model.predict_break_even_speed(input_data_break_even)
-                            if predicted_break_even_speed is not None:
-                                combined_data['Predicted_BreakEven_Speed'] = predicted_break_even_speed
-                            else:
-                                combined_data['Predicted_BreakEven_Speed'] = 'Prediction failed'
-                        else:
-                            combined_data['Predicted_BreakEven_Speed'] = 'Break-Even Model not trained'
-
-                        if self.battery_info:
-                            combined_data.update(self.battery_info)
-
-                        self.update_data_signal.emit(combined_data)
-                        self.send_telemetry_data_to_server_async(combined_data, device_tag="device1")
-                        self.logger.debug(f"Emitted combined_data with battery_info: {combined_data}")
+                    # --- battery-life prediction ---
+                    pred_time = self.ml_model.predict_battery_life(feat_batt)
+                    if pred_time is None:
+                        combined_data['Predicted_Remaining_Time'] = 'Prediction failed'
+                        combined_data['Predicted_Exact_Time']     = 'N/A'
                     else:
-                        self.logger.error(f"Combined data is not a dict: {combined_data} (type: {type(combined_data)})")
+                        combined_data['Predicted_Remaining_Time'] = pred_time
+                        combined_data['Predicted_Exact_Time']     = (
+                            self.extra_calculations.calculate_exact_time(pred_time)
+                    )
+
+                    # --- break-even prediction ---
+                    pred_be = self.ml_model.predict_break_even_speed(feat_be)
+                    if pred_be is None:
+                        combined_data['Predicted_BreakEven_Speed'] = 'Prediction failed'
+                    else:
+                        combined_data['Predicted_BreakEven_Speed'] = pred_be
+
+                    # --- tack on static battery_info if present ---
+                    if self.battery_info:
+                        combined_data.update(self.battery_info)
+
+                    # --- emit to GUI & server ---
+                    self.update_data_signal.emit(combined_data)
+                    self.send_telemetry_data_to_server_async(combined_data, device_tag="device1")
+                    self.logger.debug(f"Emitted combined_data: {combined_data}")
         except Exception as e:
             self.logger.error(f"Error processing data: {data}, Exception: {e}")
 

@@ -169,26 +169,38 @@ class BufferData:
     def save_training_data(self, training_data_file='training_data.csv'):
         """
         Saves the combined data into a CSV file for training purposes.
+        Only writes a row if all required features & targets are numeric.
         """
         if not self.combined_data:
             self.logger.debug("No combined data to save for training.")
             return
 
-        training_data_path = os.path.join(self.csv_handler.root_directory, training_data_file)
-        # Append only relevant data for training –
-        # include the two we need for break-even (net-current) modeling.
-        from key_name_definitions import TelemetryKey
-        training_fields = [
-            TelemetryKey.BP_ISH_AMPS.value[0],            # 'BP_ISH_Amps'
-            TelemetryKey.BP_PVS_VOLTAGE.value[0],         # 'BP_PVS_Voltage'
-            TelemetryKey.BP_PVS_AH.value[0],              # 'BP_PVS_Ah'
-            TelemetryKey.USED_AH_REMAINING_TIME.value[0], # 'Used_Ah_Remaining_Time'
+        # grab floats (0.0 if conversion fails)
+        pvs_ma_s = self.safe_float(self.combined_data.get('BP_PVS_milliamp/s', None), default=None)
+        pvs_ah   = self.safe_float(self.combined_data.get('BP_PVS_Ah', None), default=None)
+        pvs_v    = self.safe_float(self.combined_data.get('BP_PVS_Voltage', None), default=None)
 
-            # ← NEW FIELDS for break-even model:
-            TelemetryKey.MC1VEL_SPEED.value[0],           # 'MC1VEL_Speed'
-            TelemetryKey.BP_PVS_MILLIAMP_S.value[0],      # 'BP_PVS_milliamp/s'
-        ]
-        training_entry = {key: self.combined_data.get(key, "N/A") for key in training_fields}
+        used_time = self.safe_float(self.combined_data.get('Used_Ah_Remaining_Time', None), default=None)
+        # for break-even, use actual speed as label
+        speed     = self.safe_float(self.combined_data.get('MC1VEL_Speed', None), default=None)
+
+        # skip if any required is missing
+        if None in (pvs_ma_s, pvs_ah, pvs_v, used_time, speed):
+            self.logger.debug("Skipping training row—incomplete data.")
+            return
+
+        training_data_path = os.path.join(self.csv_handler.root_directory, training_data_file)
+        training_entry = {
+            # battery-life inputs
+            'BP_PVS_milliamp/s': pvs_ma_s,
+            'BP_PVS_Ah'        : pvs_ah,
+            'BP_PVS_Voltage'   : pvs_v,
+            # battery-life target
+            'Used_Ah_Remaining_Time': used_time,
+            # break-even inputs (same PV fields)
+            'BreakEvenSpeed': speed
+        }
+
         self.csv_handler.append_to_csv(training_data_path, training_entry)
         self.logger.info(f"Training data saved to {training_data_path}")
 

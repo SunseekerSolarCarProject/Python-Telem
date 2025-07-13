@@ -15,6 +15,7 @@ from gui_files.gui_motor_controller_tab import MotorControllerGraphTab
 from gui_files.gui_battery_pack_tab import BatteryPackGraphTab
 from gui_files.gui_graph_tab import GraphTab
 from gui_files.gui_data_table import DataTableTab
+from gui_files.gui_custom_data_table import CustomizableDataTableTab
 from gui_files.gui_data_display_tab import DataDisplayTab
 from gui_files.gui_settings_tab import SettingsTab
 from gui_files.gui_csv_management import CSVManagementTab
@@ -319,6 +320,11 @@ class TelemetryGUI(QWidget):
         self.data_table_tab = DataTableTab(self.units, self.units_mode, data_table_groups)
         self.tabs.addTab(self.data_table_tab, "Data Table")
 
+        # Customizable Data Table Tab
+        self.custom_data_table_tab = CustomizableDataTableTab(self.units, self.units_mode, data_table_groups)
+        self.custom_data_table_tab.setObjectName("Customizable Data Table")
+        self.tabs.addTab(self.custom_data_table_tab, "Custom Data Table")
+
         # Data Display Tab
         self.data_display_tab = DataDisplayTab(self.units)
         self.tabs.addTab(self.data_display_tab, "Data Display")
@@ -370,6 +376,7 @@ class TelemetryGUI(QWidget):
             self.remaining_tab.update_graphs(graph_data)
             self.data_table_tab.update_data(telemetry_data)
             self.data_display_tab.update_display(telemetry_data)
+            self.custom_data_table_tab.update_data(telemetry_data)
         except Exception as e:
             self.logger.error(f"Error updating all tabs: {e}")
 

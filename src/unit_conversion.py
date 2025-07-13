@@ -68,6 +68,12 @@ _conversion_map = {
     # Wh ↔ J (if you need it)
     ("Wh", "J"):     calc.convert_Wh_to_J,
     ("J",  "Wh"):    lambda j: j/3600,
+    # Wh/mi ↔ Wh/km
+    ("Wh/mi", "Wh/km"): calc.convert_wh_per_mi_to_wh_per_km,
+    ("Wh/km", "Wh/mi"): calc.convert_wh_per_km_to_wh_per_mi,
+    # m ↔ miles
+    ("m", "miles"): calc.convert_m_to_mi,
+    ("miles", "m"): calc.convert_mi_to_m,
 }
 
 def convert_value(key: str, raw_value, target_unit: str):
