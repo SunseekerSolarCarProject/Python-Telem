@@ -53,6 +53,7 @@ class MachineLearningModel:
         # --- Model directory & paths ---
         base = os.path.dirname(os.path.abspath(__file__))
         if model_dir is None:
+            # default back-compat: sibling "models" folder next to this file
             model_dir = os.path.join(base, 'models')
         os.makedirs(model_dir, exist_ok=True)
 

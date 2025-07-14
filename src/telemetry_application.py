@@ -61,15 +61,6 @@ class TelemetryApplication(QObject):
         self.init_data_processors()
         self.init_machine_learning()
 
-        # ----------------------------------------------------------
-        # Start a periodic timer to retrain the model every 60 seconds.
-        # Adjust the interval (in milliseconds) as needed.
-        # ----------------------------------------------------------
-        self.training_timer = QTimer()
-        self.training_timer.setInterval(60000)  # 60 seconds
-        self.training_timer.timeout.connect(self.train_machine_learning_model)
-        self.training_timer.start()
-
     def init_logger(self):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(self.logging_level)
@@ -194,9 +185,14 @@ class TelemetryApplication(QObject):
         self.Data_Display = DataDisplay(self.units)
 
     def init_machine_learning(self):
-        self.ml_model = MachineLearningModel()
-        # Optionally, do an initial training if the training_data.csv exists.
-        self.train_machine_learning_model()
+        """
+        Create the ML model object but DO NOT train yet.
+        Training will only occur when the user clicks “Retrain…”.
+        """
+        # ensure there is a "models" subfolder under application_data
+        models_folder = os.path.join(self.csv_handler.root_directory, 'models')
+        os.makedirs(models_folder, exist_ok=True)
+        self.ml_model = MachineLearningModel(model_dir=models_folder)
 
     def connect_signals(self):
         if not self.signals_connected:
@@ -329,30 +325,43 @@ class TelemetryApplication(QObject):
         self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
 
     def handle_retrain_model(self):
+        """
+        Called when the user clicks “Retrain…”
+        Disables the button and kicks off one training run.
+        """
+        """Called when the user clicks “Retrain…” — disable the button and run one training pass."""
         self.logger.info("Retraining machine learning model...")
         self.gui.settings_tab.set_retrain_button_enabled(False)
-        self.clear_previous_data()
         self.train_machine_learning_model()
 
     def clear_previous_data(self):
         """
-        Clears previous data before starting new data collection.
+        (You can still use this if you want to clear any in-memory buffers;
+        but it should NOT trigger a retrain by itself.)
         """
         self.data_collector.clear_data()
         self.logger.info("Previous data cleared.")
-        self.train_machine_learning_model()
 
     def train_machine_learning_model(self):
         """
-        Trains machine learning models using training_data.csv.
+        Trains machine learning models using training_data.csv,
+        then emits training_complete_signal so the GUI re-enables the Retrain button.
         """
         training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
-        if os.path.exists(training_data_file) and os.path.getsize(training_data_file) > 0:
-            self.logger.info("Retraining machine learning models using training data...")
-            self.ml_model.train_battery_life_model(training_data_file)
-            self.ml_model.train_break_even_model(training_data_file)
-        else:
-            self.logger.warning(f"Training data file {training_data_file} is empty or does not exist. Cannot train model.")
+        error = None
+        try:
+            if os.path.exists(training_data_file) and os.path.getsize(training_data_file) > 0:
+                self.logger.info("Retraining machine learning models using training data...")
+                self.ml_model.train_battery_life_model(training_data_file)
+                self.ml_model.train_break_even_model(training_data_file)
+            else:
+                self.logger.warning(f"Training data file {training_data_file} is empty or does not exist. Cannot train model.")
+        except Exception as e:
+            error = e
+            self.logger.error(f"Error during model training: {e}")
+        finally:
+            # signal the GUI (with or without an error) so it can re-enable the button
+            self.training_complete_signal.emit(error)
 
     def on_training_complete(self, error=None):
         if error:
@@ -370,11 +379,17 @@ class TelemetryApplication(QObject):
         old_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
         combined_file = self.ml_model.combine_and_retrain(old_data_file, new_files)
         if combined_file:
+            # train both models on the combined data
             self.ml_model.train_battery_life_model(combined_file)
             self.ml_model.train_break_even_model(combined_file)
+            # finally emit completion so button is re-enabled
+            self.training_complete_signal.emit(None)
+            # before re-enabling, let on_training_complete know we succeeded
+            self.training_complete_signal.emit(None)
         else:
             self.logger.error("Failed to combine and retrain with additional files.")
-            QMessageBox.critical(None, "Retrain Model", "Failed to combine and retrain with the selected files.")
+            QMessageBox.critical(None, "Retrain Model", "Failed to combine and retrain the selected files.")
+            # still re-enable so user can try again
             self.gui.settings_tab.set_retrain_button_enabled(True)
 
     def handle_settings_applied(self, port, baudrate, log_level, endianness):
