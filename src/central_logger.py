@@ -40,20 +40,25 @@ class CentralLogger:
             file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
 
-            # Console handler using UTF-8 wrapper
-            utf8_stdout = io.TextIOWrapper(
-                sys.stdout.buffer,
-                encoding='utf-8',
-                errors='replace',
-                line_buffering=True
-            )
-            console_handler = logging.StreamHandler(stream=utf8_stdout)
-            console_handler.setLevel(self.level)
-            console_formatter = logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-            )
-            console_handler.setFormatter(console_formatter)
-            self.logger.addHandler(console_handler)
+        # Console handler with UTF-8 support and safety checks
+        try:
+            if sys.stdout is not None and hasattr(sys.stdout, 'buffer'):
+                utf8_stdout = io.TextIOWrapper(
+                    sys.stdout.buffer,
+                    encoding='utf-8',
+                    errors='replace',
+                    line_buffering=True
+                )
+                console_handler = logging.StreamHandler(stream=utf8_stdout)
+                console_handler.setLevel(self.level)
+                console_formatter = logging.Formatter(
+                    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+                )
+                console_handler.setFormatter(console_formatter)
+                self.logger.addHandler(console_handler)
+        except Exception as e:
+            # If console output fails, log it to file but continue
+            file_handler.warning(f"Could not initialize console logging: {e}")
 
     def set_level(self, level_str):
         """

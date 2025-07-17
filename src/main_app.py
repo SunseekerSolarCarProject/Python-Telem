@@ -1,5 +1,6 @@
 # src/main_app.py
 
+# imports for making the application to work when using the auto-py-to-exe tool
 import sys
 import os
 import logging
@@ -14,6 +15,14 @@ import numpy
 import serial
 import serial.tools.list_ports
 import pyqtgraph
+import shutil
+import sklearn.pipeline
+import sklearn.ensemble
+import sklearn.exceptions
+import sklearn.utils.validation
+import tufup.utils
+import tufup.client
+from tufup.client import Client  # More specific import
 from telemetry_application import TelemetryApplication
 from updater.update_checker import UpdateChecker  # Import the UpdateChecker class
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -51,7 +60,7 @@ def main():
     # initialize the UpdateChecker with metadata URL and download directory
     #-------------------------------------------------------------------------
     update_checker = UpdateChecker(
-        metadata_url="https://github.com/SunseekerSolarCarProject/Python-Telem/releases/latest",  # Replace with your update server URL
+        metadata_url="https://api.github.com/repos/SunseekerSolarCarProject/Python-Telem/releases/latest",  # Replace with your update server URL
         download_dir=os.path.join(storage_folder, "updates")
     )
     
