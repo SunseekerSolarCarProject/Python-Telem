@@ -24,6 +24,9 @@ load_dotenv()
 
 API_URL = "http://localhost:5000/ingest"
 API_KEY = os.getenv("TELEMETRY_INGESTION_API_KEY")
+SOLCAST_API_KEY = os.getenv("SOLCAST_API_KEY")
+SOLCAST_LATITUDE = os.getenv("SOLCAST_LATITUDE")
+SOLCAST_LONGITUDE = os.getenv("SOLCAST_LONGITUDE")
 
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
@@ -59,6 +62,7 @@ class TelemetryApplication(QObject):
         self.init_csv_handler()
         self.init_buffer()
         self.init_data_processors()
+        self.init_solcast()
         self.init_machine_learning()
 
     def init_logger(self):
@@ -156,7 +160,15 @@ class TelemetryApplication(QObject):
             TelemetryKey.MC2IVC_ID_VECTOR.value[0],
             TelemetryKey.MC2IVC_IQ_VECTOR.value[0],
             TelemetryKey.MC2BEM_BEMFD_VECTOR.value[0],
-            TelemetryKey.MC2BEM_BEMFQ_VECTOR.value[0]
+            TelemetryKey.MC2BEM_BEMFQ_VECTOR.value[0],
+            TelemetryKey.SOLCAST_LIVE_GHI.value[0],
+            TelemetryKey.SOLCAST_LIVE_DNI.value[0],
+            TelemetryKey.SOLCAST_LIVE_TEMP.value[0],
+            TelemetryKey.SOLCAST_LIVE_TIME.value[0],
+            TelemetryKey.SOLCAST_FCST_GHI.value[0],
+            TelemetryKey.SOLCAST_FCST_DNI.value[0],
+            TelemetryKey.SOLCAST_FCST_TEMP.value[0],
+            TelemetryKey.SOLCAST_FCST_TIME.value[0]
         ]
 
     def init_csv_handler(self):
@@ -183,6 +195,20 @@ class TelemetryApplication(QObject):
         self.data_processor = DataProcessor(endianness=self.endianness)
         self.extra_calculations = ExtraCalculations()
         self.Data_Display = DataDisplay(self.units)
+
+    def init_solcast(self):
+        self.solcast_key = os.getenv("SOLCAST_API_KEY")
+        self.lat = os.getenv("SOLCAST_LATITUDE")
+        self.lon = os.getenv("SOLCAST_LONGITUDE")
+        if not all((self.solcast_key, self.lat, self.lon)):
+            self.logger.warning("Missing Solcast configuration; skipping solar data fetch.")
+            return
+
+        # QTimer will fire every 5 minutes
+        self.solcast_timer = QTimer(self)
+        self.solcast_timer.timeout.connect(self.fetch_solcast_data)
+        self.solcast_timer.start(5 * 60 * 1000)  # 5 min
+        self.fetch_solcast_data()  # initial fetch
 
     def init_machine_learning(self):
         """
@@ -236,6 +262,52 @@ class TelemetryApplication(QObject):
             self.logger.info("Telemetry data sent successfully.")
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Failed to send telemetry data: {e}")
+
+    def fetch_solcast_data(self):
+        """Fetch both live and forecast irradiance & emit into the GUI."""
+        headers = {"Authorization": f"Bearer {self.solcast_key}"}
+
+        try:
+            # Live estimated actuals (last 7 days): get most recent point
+            url_live = (
+                f"https://api.solcast.com.au/data/live/radiation_and_weather"
+                f"?latitude={self.lat}&longitude={self.lon}"
+                f"&hours=1&period=PT5M&output_parameters=ghi,dni,air_temp&format=json"
+            )
+            r_live = requests.get(url_live, headers=headers, timeout=10)
+            r_live.raise_for_status()
+            live = r_live.json().get("estimated_actuals", [])
+            if live:
+                last = live[0]
+                self.update_data_signal.emit({
+                    "Solcast_Live_GHI":   last.get("ghi"),
+                    "Solcast_Live_DNI":   last.get("dni"),
+                    "Solcast_Live_Temp":  last.get("air_temp"),
+                    "Solcast_Live_Time":  last.get("period_end")
+                })
+
+            # Forecast (next 24 h): get the first forecast interval
+            url_fc = (
+                f"https://api.solcast.com.au/data/forecast/radiation_and_weather"
+                f"?latitude={self.lat}&longitude={self.lon}"
+                f"&hours=24&period=PT30M"
+                f"&output_parameters=ghi,dni,air_temp&format=json"
+            )
+            r_fc = requests.get(url_fc, headers=headers, timeout=10)
+            r_fc.raise_for_status()
+            fc = r_fc.json().get("forecasts", [])
+            if fc:
+                nxt = fc[0]
+                self.update_data_signal.emit({
+                    "Solcast_Fcst_GHI":   nxt.get("ghi"),
+                    "Solcast_Fcst_DNI":   nxt.get("dni"),
+                    "Solcast_Fcst_Temp":  nxt.get("air_temp"),
+                    "Solcast_Fcst_Time":  nxt.get("period_end")
+                })
+
+            self.logger.info("Solcast data fetched and emitted.")
+        except Exception as e:
+            self.logger.error(f"Solcast fetch failed: {e}")
 
     def set_battery_info(self, config_data):
         self.battery_info = config_data.get("battery_info")

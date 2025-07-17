@@ -310,6 +310,18 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0],
                 TelemetryKey.MC2LIM_ERRORS.value[0], TelemetryKey.MC2LIM_LIMITS.value[0]
             ],
+            "Solar Data (Live)": [
+                TelemetryKey.SOLCAST_LIVE_TIME.value[0],
+                TelemetryKey.SOLCAST_LIVE_GHI.value[0],
+                TelemetryKey.SOLCAST_LIVE_DNI.value[0],
+                TelemetryKey.SOLCAST_LIVE_TEMP.value[0],
+            ],
+            "Solar Data (Forecast)": [
+                TelemetryKey.SOLCAST_FCST_TIME.value[0],
+                TelemetryKey.SOLCAST_FCST_GHI.value[0],
+                TelemetryKey.SOLCAST_FCST_DNI.value[0],
+                TelemetryKey.SOLCAST_FCST_TEMP.value[0],
+            ],
             "General": [
                 TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0],
                 TelemetryKey.TOTAL_VOLTAGE.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],

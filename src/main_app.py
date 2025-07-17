@@ -15,11 +15,11 @@ import serial
 import serial.tools.list_ports
 import pyqtgraph
 from telemetry_application import TelemetryApplication
-from PyQt6.QtWidgets import QApplication
+from updater.update_checker import UpdateChecker  # Import the UpdateChecker class
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from central_logger import CentralLogger  # Import the CentralLogger class
 
 def main():
-
     # Set default logging level
     default_log_level = 'INFO'
     log_level = getattr(logging, default_log_level.upper(), logging.INFO)
@@ -46,6 +46,32 @@ def main():
 
     # Initialize QApplication
     app = QApplication(sys.argv)
+
+    #-------------------------------------------------------------------------
+    # initialize the UpdateChecker with metadata URL and download directory
+    #-------------------------------------------------------------------------
+    update_checker = UpdateChecker(
+        metadata_url="https://github.com/SunseekerSolarCarProject/Python-Telem/releases/latest",  # Replace with your update server URL
+        download_dir=os.path.join(storage_folder, "updates")
+    )
+    
+    # Check for updates
+    if update_checker.check_for_updates():
+        reply = QMessageBox.question(
+            None, 
+            'Update Available',
+            'A new version is available. Would you like to update now?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            if update_checker.download_and_apply_update():
+                QMessageBox.information(
+                    None,
+                    'Update Successful',
+                    'The application has been updated. Please restart to apply changes.'
+                )
+                sys.exit(0)
 
     # ---------------------------------------------------------------------
     # 2) Initialize TelemetryApplication with a reference to the same folder

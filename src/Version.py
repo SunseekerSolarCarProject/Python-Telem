@@ -1,0 +1,1 @@
+VERSION = "1.5.1"  # Update this when releasing new versions

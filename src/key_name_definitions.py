@@ -60,7 +60,7 @@ class TelemetryKey(Enum):
     BP_TMX_TEMPERATURE = ("BP_TMX_Temperature", "°F")
     BP_PVS_VOLTAGE = ("BP_PVS_Voltage", "V")
     BP_PVS_AH = ("BP_PVS_Ah", "Ah")
-    BP_PVS_MILLIAMP_S = ("BP_PVS_milliamp/s", "mA/s")
+    BP_PVS_MILLIAMP_S = ("BP_PVS_milliamp*s", "mA*s")
     BP_ISH_SOC = ("BP_ISH_SOC", "%")
     BP_ISH_AMPS = ("BP_ISH_Amps", "A")
 
@@ -99,6 +99,17 @@ class TelemetryKey(Enum):
     
     # Extra calculations
     WH_PER_MILE = ("Wh_per_Mile","Wh/mi")
+
+    # Solcast data
+    SOLCAST_LIVE_GHI    = ("Solcast_Live_GHI",   "W/m²")
+    SOLCAST_LIVE_DNI    = ("Solcast_Live_DNI",   "W/m²")
+    SOLCAST_LIVE_TEMP   = ("Solcast_Live_Temp",  "°C")
+    SOLCAST_LIVE_TIME   = ("Solcast_Live_Time",  "ISO")
+
+    SOLCAST_FCST_GHI    = ("Solcast_Fcst_GHI",   "W/m²")
+    SOLCAST_FCST_DNI    = ("Solcast_Fcst_DNI",   "W/m²")
+    SOLCAST_FCST_TEMP   = ("Solcast_Fcst_Temp",  "°C")
+    SOLCAST_FCST_TIME   = ("Solcast_Fcst_Time",  "ISO")
 
     # Remaining Capacity
     REMAINING_CAPACITY_AH = ("Remaining_Capacity_Ah", "Ah")
