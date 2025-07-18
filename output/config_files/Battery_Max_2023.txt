@@ -1,4 +1,0 @@
-Battery cell capacity amps hours, 3.4
-Battery cell nominal voltage, 4.2
-Amount of battery cells, 420
-Number of battery series, 35

@@ -1,0 +1,145 @@
+{
+ "version": "auto-py-to-exe-configuration_v1",
+ "pyinstallerOptions": [
+  {
+   "optionDest": "noconfirm",
+   "value": true
+  },
+  {
+   "optionDest": "filenames",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/main_app.py"
+  },
+  {
+   "optionDest": "onefile",
+   "value": true
+  },
+  {
+   "optionDest": "console",
+   "value": false
+  },
+  {
+   "optionDest": "icon_file",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/assets/logo-icon.ico"
+  },
+  {
+   "optionDest": "clean_build",
+   "value": false
+  },
+  {
+   "optionDest": "strip",
+   "value": false
+  },
+  {
+   "optionDest": "noupx",
+   "value": false
+  },
+  {
+   "optionDest": "disable_windowed_traceback",
+   "value": false
+  },
+  {
+   "optionDest": "uac_admin",
+   "value": false
+  },
+  {
+   "optionDest": "uac_uiaccess",
+   "value": false
+  },
+  {
+   "optionDest": "argv_emulation",
+   "value": false
+  },
+  {
+   "optionDest": "bootloader_ignore_signals",
+   "value": false
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/gui_files;gui_files/"
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/learning_datasets;learning_datasets/"
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/__init__.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/buffer_data.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/central_logger.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/csv_handler.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/data_display.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/data_processor.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/extra_calculations.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/key_name_definitions.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/serial_reader.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/telemetry_application.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/unit_conversion.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/Version.py;."
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "tufup.client"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "tufup.utils"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "sklearn.utils._typedefs"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "sklearn.neighbors._partition_nodes"
+  },
+  {
+   "optionDest": "hookspath",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/hooks"
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/updater;updater/"
+  },
+  {
+   "optionDest": "datas",
+   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/updater/metadata;metadata/"
+  }
+ ],
+ "nonPyinstallerOptions": {
+  "increaseRecursionLimit": true,
+  "manualArguments": ""
+ }
+}
