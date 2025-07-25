@@ -1,3 +1,7 @@
+# update_checker.py
+# This module checks for updates and handles legacy versions of the application.
+# It uses TUF (The Update Framework) to manage metadata and updates securely.
+import sys
 import os
 import json
 import shutil
@@ -49,8 +53,9 @@ class UpdateChecker(QObject):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         
-        # Create download directory
-        os.makedirs(download_dir, exist_ok=True)
+        # Parse GitHub URL for proper endpoints
+        self.github_base = metadata_url.replace('/releases/latest', '')
+        self.download_dir = download_dir
         
         # Set up metadata directory
         self.metadata_dir = os.path.join(download_dir, 'metadata')
@@ -70,16 +75,36 @@ class UpdateChecker(QObject):
         # Verify/fix metadata structure
         self._verify_root_metadata(target_root)
 
+        # Initialize client with correct URLs
+        self.client = Client(
+            app_name="Python-Telem",
+            app_install_dir=os.path.dirname(os.path.dirname(__file__)),
+            current_version=VERSION,
+            metadata_dir=self.metadata_dir,
+            metadata_base_url=f"{self.github_base}/releases/latest/download",
+            target_dir=download_dir,
+            target_base_url=f"{self.github_base}/releases/download"
+        )
+
     def check_for_updates(self):
-        """Check if a new version is available"""
+        """Check if updates are available using GitHub releases"""
         try:
-            update_available = self.client.check_for_updates()
-            if update_available:
-                new_version = self.client.get_latest_version()
-                if new_version > self.current_version:
-                    self.update_available.emit(new_version)
-                    return True
+            # Get latest release info from GitHub
+            import requests
+            response = requests.get(
+                f"{self.github_base}/releases/latest",
+                headers={'Accept': 'application/vnd.github.v3+json'}
+            )
+            response.raise_for_status()
+            
+            latest = response.json()
+            latest_version = latest['tag_name'].lstrip('v')
+            
+            if latest_version > VERSION:
+                self.update_available.emit(latest_version)
+                return True
             return False
+            
         except Exception as e:
             self.logger.error(f"Update check failed: {str(e)}")
             self.update_error.emit(str(e))

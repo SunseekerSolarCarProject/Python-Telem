@@ -5,25 +5,33 @@
         "consistent_snapshot": false,
         "version": 1,
         "expires": "2030-01-01T00:00:00Z",
-        "keys": {},
+        "keys": {
+            "keyid1": {
+                "keytype": "ET9nggMM",
+                "scheme": "ET9nggMM",
+                "keyval": {
+                    "public": "ET9nggMMNiG8/xEJP3kOc8m9VaMKw7hkrTGqddou2N0="
+                }
+        },
         "roles": {
             "root": {
-                "keyids": [],
+                "keyids": ["keyid1"],
                 "threshold": 1
             },
             "targets": {
-                "keyids": [],
+                "keyids": ["keyid1"],
                 "threshold": 1
             },
             "snapshot": {
-                "keyids": [],
+                "keyids": ["keyid1"],
                 "threshold": 1
             },
             "timestamp": {
-                "keyids": [],
+                "keyids": ["keyid1"],
                 "threshold": 1
             }
         }
     },
     "signatures": []
+    }
 }

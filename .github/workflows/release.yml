@@ -1,0 +1,54 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.13'
+
+      - name: Install build & tufup
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller tufup
+
+      - name: Build executable
+        run: |
+          pyinstaller src/main_app.py --name telemetry --onefile
+
+      - name: Generate TUF metadata
+        run: |
+          # 1) add the new exe as a target
+          tufup add-target \
+            --metadata-dir=src/updater/metadata \
+            dist/telemetry.exe
+          # 2) regenerate all metadata (signing keys should be in keys/)
+          tufup generate-metadata \
+            --metadata-dir=src/updater/metadata \
+            --keydir=src/updater/keys \
+            --signing-passwords-file=src/updater/keys/passwords.json
+
+      - name: Prepare release assets
+        run: |
+          mkdir release
+          cp dist/telemetry.exe release/
+          # Copy *all* metadata files
+          cp src/updater/metadata/* release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/telemetry.exe
+            release/*.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
