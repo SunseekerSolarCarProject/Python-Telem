@@ -32,6 +32,6 @@
             }
         }
     },
-    "signatures": []
+    "signatures": [{"keyid": "keyid1", "sig": "signature_value"}]
     }
 }

@@ -1,14 +1,20 @@
 # -------------------------
 # src/gui_files/telemetry_gui.py
 # -------------------------
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QMessageBox, QProgressBar
+from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QColor
+from PyQt6.QtCore import pyqtSignal, QTimer
 import json
 import os
 import logging
 
 # Make sure this import is correct in your environment.
-from key_name_definitions import TelemetryKey  
+from key_name_definitions import TelemetryKey
+
+# Import for updating the application
+from updater.update_checker import UpdateChecker
+from Version import VERSION
 
 # Import your custom tabs
 from gui_files.gui_motor_controller_tab import MotorControllerGraphTab
@@ -50,6 +56,19 @@ class TelemetryGUI(QWidget):
         self.init_ui()
         self.apply_dark_mode()
         self.logger.info("Telemetry GUI Initialized")
+        
+        metadata_url = "https://github.com/SunseekerSolarCarProject/Python-Telem/releases/latest/download"
+        download_dir = os.path.join(os.path.dirname(__file__), "updates")
+        os.makedirs(download_dir, exist_ok=True)
+
+        self.updater = UpdateChecker(metadata_url, download_dir)
+        # connect signals:
+        self.updater.update_available.connect(self.on_update_available)
+        self.updater.update_progress.connect(self.on_update_progress)
+        self.updater.update_error.connect(self.on_update_error)
+
+        # Check after the UI is shown
+        QTimer.singleShot(1000, self.updater.check_for_updates)
 
     def get_preset_colors(self):
         """
@@ -370,6 +389,25 @@ class TelemetryGUI(QWidget):
                 self.logger.warning(f"Stylesheet file not found: {stylesheet_path}. Using default styles.")
         except Exception as e:
             self.logger.error(f"Failed to apply dark mode stylesheet: {e}")
+
+    def on_update_available(self, latest_version: str):
+        reply = QMessageBox.question(
+            self,
+            "Update Available",
+            f"A new version ({latest_version}) is available.\n"
+            f"You’re currently on {VERSION}.\n\n"
+            "Download and install now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.updater.download_and_apply_update()
+
+    def on_update_progress(self, percent: int):
+        # e.g. update a QProgressBar
+        self.progressBar.setValue(percent)
+
+    def on_update_error(self, error: str):
+        QMessageBox.warning(self, "Update Error", error)
 
     def update_all_tabs(self, telemetry_data: dict):
         """

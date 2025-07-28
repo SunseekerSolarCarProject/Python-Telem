@@ -23,6 +23,7 @@ import sklearn.utils.validation
 import tufup.utils
 import tufup.client
 from tufup.client import Client  # More specific import
+from Version import VERSION
 from telemetry_application import TelemetryApplication
 from updater.update_checker import UpdateChecker  # Import the UpdateChecker class
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -59,28 +60,23 @@ def main():
     #-------------------------------------------------------------------------
     # initialize the UpdateChecker with metadata URL and download directory
     #-------------------------------------------------------------------------
-    update_checker = UpdateChecker(
-        metadata_url="https://api.github.com/repos/SunseekerSolarCarProject/Python-Telem/releases/latest",  # Replace with your update server URL
-        download_dir=os.path.join(storage_folder, "updates")
+    uc = UpdateChecker(
+        repo_owner="SunseekerSolarCarProject",
+        repo_name="Python-Telem",
+        version=VERSION,
+        app_install_dir=base_dir
     )
-    
-    # Check for updates
-    if update_checker.check_for_updates():
+    if uc.check_for_updates():
         reply = QMessageBox.question(
-            None, 
-            'Update Available',
-            'A new version is available. Would you like to update now?',
+            None,
+            "Update Available",
+            f"A new version is available (you’re on v{VERSION}).\n"
+            "Download and install now?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
         if reply == QMessageBox.StandardButton.Yes:
-            if update_checker.download_and_apply_update():
-                QMessageBox.information(
-                    None,
-                    'Update Successful',
-                    'The application has been updated. Please restart to apply changes.'
-                )
-                sys.exit(0)
+            uc.download_and_apply_update()
+            # download_and_apply_update() never returns—your app will restart.
 
     # ---------------------------------------------------------------------
     # 2) Initialize TelemetryApplication with a reference to the same folder
