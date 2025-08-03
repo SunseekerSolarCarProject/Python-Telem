@@ -28,12 +28,23 @@ jobs:
           pyinstaller src/main_app.py --name telemetry --onefile --distpath dist
 
       - name: Add new TUF target
+        shell: bash
         run: |
-          py -3.13 -m tufup targets add --repo-dir src/updater/metadata --keys-dir  src/updater/keys dist/telemetry.exe
+          # strip "refs/tags/" from GITHUB_REF
+          version=${GITHUB_REF#refs/tags/}
+          py -3.13 -m tufup targets add \
+            "$version" \
+            dist \
+            src/updater/keys
 
       - name: Sign metadata
+        shell: bash
         run: |
-          py -3.13 -m tufup sign --repo-dir src/updater/metadata --keys-dir  src/updater/keys
+          version=${GITHUB_REF#refs/tags/}
+          py -3.13 -m tufup sign \
+            "$version" \
+            dist \
+            src/updater/keys
 
       - name: Prepare release assets
         run: |
