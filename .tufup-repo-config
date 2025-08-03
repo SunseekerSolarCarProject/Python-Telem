@@ -1,0 +1,38 @@
+{
+    "app_name": "Python-Telem",
+    "app_version_attr": null,
+    "encrypted_keys": [
+        "root",
+        "targets",
+        "snapshot",
+        "timestamp"
+    ],
+    "expiration_days": {
+        "root": 60,
+        "snapshot": 60,
+        "targets": 60,
+        "timestamp": 60
+    },
+    "key_map": {
+        "root": [
+            "root"
+        ],
+        "snapshot": [
+            "snapshot"
+        ],
+        "targets": [
+            "targets"
+        ],
+        "timestamp": [
+            "timestamp"
+        ]
+    },
+    "keys_dir": "src/updater/keys",
+    "repo_dir": "src/updater/metadata",
+    "thresholds": {
+        "root": 1,
+        "snapshot": 1,
+        "targets": 1,
+        "timestamp": 1
+    }
+}

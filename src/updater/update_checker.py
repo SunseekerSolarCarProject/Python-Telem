@@ -35,7 +35,7 @@ class UpdateChecker:
 
         # 4) Initialize the TUF Updater
         self.updater = Updater(
-            repository_dir=self.metadata_dir,
+            self.metadata_dir,
             metadata_base_url=base + "/",  # :contentReference[oaicite:1]{index=1}
             target_base_url=base + "/"
         )
