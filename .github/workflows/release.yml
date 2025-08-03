@@ -25,23 +25,15 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller src/main_app.py \
-            --name telemetry \
-            --onefile \
-            --distpath dist
+          pyinstaller src/main_app.py --name telemetry --onefile --distpath dist
 
       - name: Add new TUF target
         run: |
-          py -3.13 -m tufup targets add \
-            --repo-dir src/updater/metadata \
-            --keys-dir  src/updater/keys \
-            dist/telemetry.exe
+          py -3.13 -m tufup targets add --repo-dir src/updater/metadata --keys-dir  src/updater/keys dist/telemetry.exe
 
       - name: Sign metadata
         run: |
-          py -3.13 -m tufup sign \
-            --repo-dir src/updater/metadata \
-            --keys-dir  src/updater/keys
+          py -3.13 -m tufup sign --repo-dir src/updater/metadata --keys-dir  src/updater/keys
 
       - name: Prepare release assets
         run: |
