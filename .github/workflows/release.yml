@@ -3,13 +3,15 @@ name: Create Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*'     # run whenever you push a tag like "v1.2.3"
 
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v2
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -23,32 +25,38 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller src/main_app.py --name telemetry --onefile
+          pyinstaller src/main_app.py \
+            --name telemetry \
+            --onefile \
+            --distpath dist
 
-      - name: Generate TUF metadata
+      - name: Add new TUF target
         run: |
-          # 1) add the new exe as a target
-          tufup add-target \
-            --metadata-dir=src/updater/metadata \
+          py -3.13 -m tufup targets add \
+            --repo-dir src/updater/metadata \
+            --keys-dir  src/updater/keys \
             dist/telemetry.exe
-          # 2) regenerate all metadata (signing keys should be in keys/)
-          tufup generate-metadata \
-            --metadata-dir=src/updater/metadata \
-            --keydir=src/updater/keys \
-            --signing-passwords-file=src/updater/keys/passwords.json
+
+      - name: Sign metadata
+        run: |
+          py -3.13 -m tufup sign \
+            --repo-dir src/updater/metadata \
+            --keys-dir  src/updater/keys
 
       - name: Prepare release assets
         run: |
           mkdir release
-          cp dist/telemetry.exe release/
-          # Copy *all* metadata files
-          cp src/updater/metadata/* release/
+          cp dist/telemetry.exe   release/
+          cp src/updater/metadata/*.json release/
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             release/telemetry.exe
-            release/*.json
+            release/root.json
+            release/snapshot.json
+            release/targets.json
+            release/timestamp.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

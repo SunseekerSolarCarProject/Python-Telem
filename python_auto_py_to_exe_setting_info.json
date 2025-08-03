@@ -22,6 +22,10 @@
    "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/assets/logo-icon.ico"
   },
   {
+   "optionDest": "name",
+   "value": "Telemetry"
+  },
+  {
    "optionDest": "clean_build",
    "value": false
   },
@@ -136,6 +140,10 @@
   {
    "optionDest": "datas",
    "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/updater/metadata;metadata/"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "tuf.ngclient"
   }
  ],
  "nonPyinstallerOptions": {

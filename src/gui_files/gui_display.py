@@ -1,6 +1,7 @@
 # -------------------------
 # src/gui_files/telemetry_gui.py
 # -------------------------
+import sys
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QMessageBox, QProgressBar
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QColor
@@ -38,6 +39,11 @@ class TelemetryGUI(QWidget):
 
     def __init__(self, data_keys, units, csv_handler, config_file='config.json'):
         super().__init__()
+        if getattr(sys, "frozen", False):
+            app_install_dir = os.path.dirname(sys.executable)
+        else:
+            app_install_dir = os.path.dirname(os.path.abspath(__file__))
+
         self.data_keys = data_keys
         self.csv_handler = csv_handler
         self.units = units
@@ -57,11 +63,13 @@ class TelemetryGUI(QWidget):
         self.apply_dark_mode()
         self.logger.info("Telemetry GUI Initialized")
         
-        metadata_url = "https://github.com/SunseekerSolarCarProject/Python-Telem/releases/latest/download"
-        download_dir = os.path.join(os.path.dirname(__file__), "updates")
-        os.makedirs(download_dir, exist_ok=True)
-
-        self.updater = UpdateChecker(metadata_url, download_dir)
+        # Instantiate with (repo_owner, repo_name, version, app_install_dir)
+        self.updater = UpdateChecker(
+            repo_owner="SunseekerSolarCarProject",
+            repo_name="Python-Telem",
+            version=VERSION,
+            app_install_dir=app_install_dir
+        )
         # connect signals:
         self.updater.update_available.connect(self.on_update_available)
         self.updater.update_progress.connect(self.on_update_progress)
