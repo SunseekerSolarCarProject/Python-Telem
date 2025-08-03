@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
@@ -17,43 +18,69 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install build & tufup
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller tufup
 
       - name: Build executable
-        run: pyinstaller src/main_app.py --name telemetry --onefile --distpath dist
-
-      - name: Add new TUF target
-        # use bash so we can peel off "refs/tags/v" cleanly
         shell: bash
         run: |
-          # GITHUB_REF is e.g. "refs/tags/v1.6.5"
-          version=${GITHUB_REF#refs/tags/}    # "v1.6.5"
-          version=${version#v}                # "1.6.5"
+          pyinstaller src/main_app.py \
+            --noconfirm \
+            --onefile \
+            --windowed \
+            --distpath dist \
+            --name telemetry \
+            --icon src/assets/logo-icon.ico \
+            --add-data "src/gui_files;gui_files/" \
+            --add-data "src/learning_datasets;learning_datasets/" \
+            --add-data "src/__init__.py;." \
+            --add-data "src/buffer_data.py;." \
+            --add-data "src/central_logger.py;." \
+            --add-data "src/csv_handler.py;." \
+            --add-data "src/data_display.py;." \
+            --add-data "src/data_processor.py;." \
+            --add-data "src/extra_calculations.py;." \
+            --add-data "src/key_name_definitions.py;." \
+            --add-data "src/serial_reader.py;." \
+            --add-data "src/telemetry_application.py;." \
+            --add-data "src/unit_conversion.py;." \
+            --add-data "src/Version.py;." \
+            --add-data "src/updater;updater/" \
+            --add-data "src/updater/metadata;metadata/" \
+            --hidden-import tufup.client \
+            --hidden-import tufup.utils \
+            --hidden-import sklearn.utils._typedefs \
+            --hidden-import sklearn.neighbors._partition_nodes \
+            --hidden-import tuf.ngclient \
+            --additional-hooks-dir src/hooks
+
+      - name: Add new TUF target
+        shell: bash
+        run: |
+          # strip "refs/tags/vX.Y.Z" → "X.Y.Z"
+          version=${GITHUB_REF#refs/tags/}
+          version=${version#v}
           python -m tufup targets add \
             "$version" \
             dist \
             src/updater/keys
 
       - name: Sign targets metadata
-        shell: bash
         run: python -m tufup sign targets src/updater/keys
 
       - name: Sign snapshot metadata
-        shell: bash
         run: python -m tufup sign snapshot src/updater/keys
 
       - name: Sign timestamp metadata
-        shell: bash
         run: python -m tufup sign timestamp src/updater/keys
 
       - name: Prepare release assets
         run: |
           mkdir release
-          cp dist/telemetry.exe           release/
-          cp src/updater/metadata/*.json  release/
+          cp dist/telemetry.exe              release/
+          cp src/updater/metadata/*.json     release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
