@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     tags:
-      - 'v*'     # run whenever you push a tag like "v1.2.3"
+      - 'v*'     # runs on tags like v1.8.0
 
 jobs:
   build:
@@ -24,35 +24,39 @@ jobs:
           pip install pyinstaller tufup
 
       - name: Build executable
+        run: pyinstaller src/main_app.py --name telemetry --onefile --distpath dist
+
+      - name: Determine version
+        id: ver
         run: |
-          pyinstaller src/main_app.py --name telemetry --onefile --distpath dist
+          # strip refs/tags/vX.Y.Z → X.Y.Z
+          full=${GITHUB_REF##*/}  
+          echo "::set-output name=VERSION::${full#v}"
 
       - name: Add new TUF target
-        shell: bash
         run: |
-          # get the tag name (e.g. "v1.8.0"), strip off the "v" → "1.8.0"
-          full=${GITHUB_REF##*/}  
-          version=${full#v}        
           py -3.13 -m tufup targets add \
-            "$version" \
+            "${{ steps.ver.outputs.VERSION }}" \
             dist \
             src/updater/keys
 
-      - name: Sign metadata
-        shell: bash
+      - name: Sign targets metadata
         run: |
-          full=${GITHUB_REF##*/}  
-          version=${full#v}        
-          py -3.13 -m tufup sign \
-            "$version" \
-            dist \
-            src/updater/keys
+          py -3.13 -m tufup sign targets src/updater/keys
+
+      - name: Sign snapshot metadata
+        run: |
+          py -3.13 -m tufup sign snapshot src/updater/keys
+
+      - name: Sign timestamp metadata
+        run: |
+          py -3.13 -m tufup sign timestamp src/updater/keys
 
       - name: Prepare release assets
         run: |
           mkdir release
-          cp dist/telemetry.exe   release/
-          cp src/updater/metadata/*.json release/
+          cp dist/telemetry.exe             release/
+          cp src/updater/metadata/*.json    release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -60,8 +64,8 @@ jobs:
           files: |
             release/telemetry.exe
             release/root.json
-            release/snapshot.json
             release/targets.json
+            release/snapshot.json
             release/timestamp.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
