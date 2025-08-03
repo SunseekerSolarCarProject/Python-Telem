@@ -30,8 +30,9 @@ jobs:
       - name: Add new TUF target
         shell: bash
         run: |
-          # strip "refs/tags/" from GITHUB_REF
-          version=${GITHUB_REF#refs/tags/}
+          # get the tag name (e.g. "v1.8.0"), strip off the "v" → "1.8.0"
+          full=${GITHUB_REF##*/}  
+          version=${full#v}        
           py -3.13 -m tufup targets add \
             "$version" \
             dist \
@@ -40,7 +41,8 @@ jobs:
       - name: Sign metadata
         shell: bash
         run: |
-          version=${GITHUB_REF#refs/tags/}
+          full=${GITHUB_REF##*/}  
+          version=${full#v}        
           py -3.13 -m tufup sign \
             "$version" \
             dist \
