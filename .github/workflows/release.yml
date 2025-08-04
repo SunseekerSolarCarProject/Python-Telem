@@ -34,14 +34,11 @@ jobs:
           --distpath dist \
           --name telemetry \
           --icon src/assets/logo-icon.ico \
-          \
           # data folders
           --add-data "src/gui_files;gui_files/" \
           --add-data "src/learning_datasets;learning_datasets/" \
           --add-data "src/updater;updater/" \
           --add-data "src/updater/metadata;updater/metadata/" \
-          \
-          # single-file modules you import dynamically
           --add-data "src/__init__.py;." \
           --add-data "src/buffer_data.py;." \
           --add-data "src/central_logger.py;." \
@@ -54,14 +51,10 @@ jobs:
           --add-data "src/telemetry_application.py;." \
           --add-data "src/unit_conversion.py;." \
           --add-data "src/Version.py;." \
-          \
-          # your PyInstaller hooks
           --additional-hooks-dir src/hooks \
-          \
-          # hidden imports for TUF, sklearn, etc.
           --hidden-import tufup.client \
           --hidden-import tufup.utils \
-          --hidden-import tuf.ngclient \
+          --hidden-import tufup.ngclient \
           --hidden-import sklearn.utils._typedefs \
           --hidden-import sklearn.neighbors._partition_nodes \
           --hidden-import pyqtgraph
