@@ -27,14 +27,13 @@ jobs:
     - name: Build executable with all data & hooks
       shell: bash
       run: |
-        pyinstaller src/main_app.py \
+        bash -lc 'pyinstaller src/main_app.py \
           --noconfirm \
           --onefile \
           --windowed \
           --distpath dist \
           --name telemetry \
           --icon src/assets/logo-icon.ico \
-          # data folders
           --add-data "src/gui_files;gui_files/" \
           --add-data "src/learning_datasets;learning_datasets/" \
           --add-data "src/updater;updater/" \
@@ -57,7 +56,7 @@ jobs:
           --hidden-import tufup.ngclient \
           --hidden-import sklearn.utils._typedefs \
           --hidden-import sklearn.neighbors._partition_nodes \
-          --hidden-import pyqtgraph
+          --hidden-import pyqtgraph'
 
     - name: Add new TUF target
       shell: bash
