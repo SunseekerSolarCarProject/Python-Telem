@@ -219,6 +219,7 @@ class TelemetryApplication(QObject):
         models_folder = os.path.join(self.csv_handler.root_directory, 'models')
         os.makedirs(models_folder, exist_ok=True)
         self.ml_model = MachineLearningModel(model_dir=models_folder)
+        self.logger.info("Machine learning model initialized.")
 
     def connect_signals(self):
         if not self.signals_connected:

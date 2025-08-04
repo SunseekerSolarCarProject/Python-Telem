@@ -1,6 +1,0 @@
-this is to help with the inputs of dynamically setting the input if necessary
-set_log_level DEBUG
-set_log_level INFO
-set_log_level WARNING
-set_log_level ERROR
-set_log_level CRITICAL
