@@ -23,10 +23,10 @@ import sklearn.utils.validation
 import tufup.utils
 import tufup.client
 from tufup.client import Client  # More specific import
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from Version import VERSION
 from telemetry_application import TelemetryApplication
 from updater.update_checker import UpdateChecker  # Import the UpdateChecker class
-from PyQt6.QtWidgets import QApplication, QMessageBox
 from central_logger import CentralLogger  # Import the CentralLogger class
 
 def main():
