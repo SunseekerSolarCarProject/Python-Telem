@@ -75,8 +75,6 @@ class TelemetryGUI(QWidget):
         self.updater.update_progress.connect(self.on_update_progress)
         self.updater.update_error.connect(self.on_update_error)
 
-        # Check after the UI is shown
-        QTimer.singleShot(1000, self.updater.check_for_updates)
 
     def get_preset_colors(self):
         """

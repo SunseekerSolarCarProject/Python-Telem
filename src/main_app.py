@@ -29,6 +29,7 @@ from telemetry_application import TelemetryApplication
 from updater.update_checker import UpdateChecker  # Import the UpdateChecker class
 from central_logger import CentralLogger  # Import the CentralLogger class
 
+
 def main():
     # Set default logging level
     default_log_level = 'INFO'
@@ -56,27 +57,6 @@ def main():
 
     # Initialize QApplication
     app = QApplication(sys.argv)
-
-    #-------------------------------------------------------------------------
-    # initialize the UpdateChecker with metadata URL and download directory
-    #-------------------------------------------------------------------------
-    uc = UpdateChecker(
-        repo_owner="SunseekerSolarCarProject",
-        repo_name="Python-Telem",
-        version=VERSION,
-        app_install_dir=base_dir
-    )
-    if uc.check_for_updates():
-        reply = QMessageBox.question(
-            None,
-            "Update Available",
-            f"A new version is available (you’re on v{VERSION}).\n"
-            "Download and install now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            uc.download_and_apply_update()
-            # download_and_apply_update() never returns—your app will restart.
 
     # ---------------------------------------------------------------------
     # 2) Initialize TelemetryApplication with a reference to the same folder

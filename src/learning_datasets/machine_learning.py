@@ -111,7 +111,7 @@ class MachineLearningModel:
         """
         self.batt_pipe = Pipeline([
             ('smooth', MovingAverage(window=5, cols=[
-                'BP_PVS_milliamp/s',
+                'BP_PVS_milliamp*s',
                 'BP_PVS_Ah',
                 'BP_PVS_Voltage'
             ])),
@@ -126,11 +126,11 @@ class MachineLearningModel:
     def train_battery_life_model(self, csv_path: str):
         """
         Train battery-life model:
-          features = [ 'BP_PVS_milliamp/s', 'BP_PVS_Ah', 'BP_PVS_Voltage' ]
+          features = [ 'BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage' ]
           target   =   'Used_Ah_Remaining_Time'
         """
         df = pd.read_csv(csv_path)
-        feats  = ['BP_PVS_milliamp/s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
+        feats  = ['BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
         target = 'Used_Ah_Remaining_Time'
 
         missing = [c for c in feats + [target] if c not in df.columns]
@@ -150,13 +150,13 @@ class MachineLearningModel:
     def predict_battery_life(self, data: dict) -> float:
         """
         Predict remaining time (hours) given:
-          data['BP_PVS_milliamp/s'],
+          data['BP_PVS_milliamp*s'],
           data['BP_PVS_Ah'],
           data['BP_PVS_Voltage']
         """
         from sklearn.exceptions import NotFittedError
 
-        feats = ['BP_PVS_milliamp/s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
+        feats = ['BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
         if any(k not in data for k in feats):
             self.log.error(f"Missing features for battery-life: {feats}")
             return None
@@ -183,7 +183,7 @@ class MachineLearningModel:
         """
         self.be_pipe = Pipeline([
             ('smooth', MovingAverage(window=5, cols=[
-                'BP_PVS_milliamp/s',
+                'BP_PVS_milliamp*s',
                 'BP_PVS_Voltage'
             ])),
             ('rf', RandomForestRegressor(
@@ -197,11 +197,11 @@ class MachineLearningModel:
     def train_break_even_model(self, csv_path: str):
         """
         Train break-even model:
-          features = [ 'BP_PVS_milliamp/s', 'BP_PVS_Voltage' ]
+          features = [ 'BP_PVS_milliamp*s', 'BP_PVS_Voltage' ]
           target   =   'BreakEvenSpeed'
         """
         df = pd.read_csv(csv_path)
-        feats  = ['BP_PVS_milliamp/s', 'BP_PVS_Voltage']
+        feats  = ['BP_PVS_milliamp*s', 'BP_PVS_Voltage']
         target = 'BreakEvenSpeed'
 
         missing = [c for c in feats + [target] if c not in df.columns]
@@ -222,11 +222,11 @@ class MachineLearningModel:
     def predict_break_even_speed(self, data: dict) -> float:
         """
         Predict break-even speed (mph) given:
-          data['BP_PVS_milliamp/s'], data['BP_PVS_Voltage']
+          data['BP_PVS_milliamp*s'], data['BP_PVS_Voltage']
         """
         from sklearn.exceptions import NotFittedError
 
-        feats = ['BP_PVS_milliamp/s', 'BP_PVS_Voltage']
+        feats = ['BP_PVS_milliamp*s', 'BP_PVS_Voltage']
         if any(k not in data for k in feats):
             self.log.error(f"Missing features for break-even: {feats}")
             return None

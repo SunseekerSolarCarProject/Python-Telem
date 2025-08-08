@@ -1,16 +1,27 @@
 #src/gui_files/gui_config_dialog.py
 import os
+import sys
 import logging
 from PyQt6.QtWidgets import (
-    QDialog, QFormLayout, QComboBox, QPushButton, QDialogButtonBox, QMessageBox, QInputDialog, QLabel
+    QDialog, QFormLayout, QComboBox, QPushButton, QDialogButtonBox, QMessageBox, QInputDialog, QLabel,
+    QProgressBar
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, QTimer
+from updater.update_checker import UpdateChecker
+from Version import VERSION
 import serial.tools.list_ports
 
 class ConfigDialog(QDialog):
     config_data_signal = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self,
+        parent=None,
+        repo_owner: str = "SunseekerSolarCarProject",
+        repo_name: str = "Python-Telem",
+        version: str = VERSION,
+        app_install_dir: str | None = None,
+        target_asset: str = "telemetry.exe",   # must match your release asset name
+        ):
         super().__init__(parent)
         self.setWindowTitle("Configuration")
         self.setModal(True)
@@ -22,7 +33,29 @@ class ConfigDialog(QDialog):
         self.baud_rate = 9600  # Default baud rate
         self.endianness = "little"  # Default endianness
 
+        # Resolve install dir
+        if app_install_dir is None:
+            if getattr(sys, "frozen", False):
+                app_install_dir = os.path.dirname(sys.executable)
+            else:
+                app_install_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # --- Updater wiring ---
+        self.updater = UpdateChecker(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            version=version,
+            app_install_dir=app_install_dir,
+            target_name=target_asset
+        )
+        self.updater.update_available.connect(self.on_update_available)
+        self.updater.update_progress.connect(self.on_update_progress)
+        self.updater.update_error.connect(self.on_update_error)
+
         self.init_ui()
+
+        # fire the check shortly after the dialog loads so UI doesn't hitch
+        QTimer.singleShot(150, self._check_for_updates_safely)
 
     def init_ui(self):
         layout = QFormLayout(self)
@@ -80,6 +113,13 @@ class ConfigDialog(QDialog):
         layout.addRow(self.vehicle_year_dropdown)
         # -------------------------------------
 
+        # Progress bar for updater
+        self.update_progress = QProgressBar()
+        self.update_progress.setRange(0, 100)
+        self.update_progress.setValue(0)
+        self.update_progress.setVisible(False)
+        layout.addRow("Updater:", self.update_progress)
+
         # Dialog Buttons
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -88,6 +128,38 @@ class ConfigDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+    def _check_for_updates_safely(self):
+        # Only checks in packaged builds; dev runs silently skip
+        try:
+            self.updater.check_for_updates()
+        except Exception as e:
+            self.logger.debug(f"Update check skipped/failed: {e}")
+
+     # --- Updater slots ---
+    def on_update_available(self, latest_version: str):
+        reply = QMessageBox.question(
+            self,
+            "Update Available",
+            f"A new version ({latest_version}) is available.\n"
+            f"You're currently on {VERSION}.\n\n"
+            "Download and install now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.update_progress.setVisible(True)
+            self.updater.download_and_apply_update()
+
+    def on_update_progress(self, percent: int):
+        self.update_progress.setVisible(True)
+        self.update_progress.setValue(percent)
+
+    def on_update_error(self, error: str):
+        # Don't spam in dev mode; only warn if we’re packaged
+        if getattr(sys, "frozen", False):
+            QMessageBox.warning(self, "Update Error", error)
+        self.update_progress.setVisible(False)
+        self.update_progress.setValue(0)
 
     def populate_config_dropdown(self):
         config_dir = "config_files"
@@ -239,29 +311,20 @@ class ConfigDialog(QDialog):
         """
         Called when user clicks OK.
         """
-        # 1) If the user typed a year that doesn't exist in the dropdown list, add & save it
+       # (1) Persist typed year if not in list
         typed_year = self.vehicle_year_dropdown.currentText()
         if typed_year and typed_year not in [self.vehicle_year_dropdown.itemText(i)
-                                         for i in range(self.vehicle_year_dropdown.count())]:
-            # Add it to the combo box
+                                             for i in range(self.vehicle_year_dropdown.count())]:
             self.vehicle_year_dropdown.addItem(typed_year)
-            # Persist it to vehicle_years.txt
             self.save_vehicle_year(typed_year)
 
-        # 2) Continue with your normal checks
+        # (2) sanity check
         if not self.battery_info:
-            QMessageBox.warning(self, "Incomplete Configuration", "Please load or input the battery configuration before proceeding.")
+            QMessageBox.warning(self, "Incomplete Configuration",
+                                "Please load or input the battery configuration before proceeding.")
             self.logger.warning("Attempted to accept configuration without battery info.")
             return
 
-        # 3) Emit the config data (including the typed year)
-        self.emit_config_data()
-        super().accept()
-
-        if not self.battery_info:
-            QMessageBox.warning(self, "Incomplete Configuration", "Please load or input the battery configuration before proceeding.")
-            self.logger.warning("Attempted to accept configuration without battery info.")
-            return
-
+        # (3) emit + close
         self.emit_config_data()
         super().accept()

@@ -12,6 +12,10 @@ class CSVHandler:
         """
         Initializes the CSVHandler with a root directory for default files.
         """
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logs
+
         self.lock = threading.Lock()
         self.root_directory = os.path.abspath(root_directory)
         self.ensure_directory_exists(self.root_directory)
@@ -19,18 +23,18 @@ class CSVHandler:
         # Define CSV file paths
         self.primary_csv_file = os.path.join(self.root_directory, "telemetry_data.csv")
         self.secondary_csv_file = os.path.join(self.root_directory, "raw_hex_data.csv")
-        
-        # Initialize logger
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logs
+        self.training_data_csv = os.path.join(self.root_directory, "training_data.csv")
 
         # Define headers using TelemetryKey enum
         self.primary_headers = self.generate_primary_headers()
         self.secondary_headers = self.generate_secondary_headers()
+        self.training_data_headers = self.generate_training_headers()
 
         # Ensure the default CSV files exist with correct headers
         self.setup_csv(self.primary_csv_file, self.primary_headers)
         self.setup_csv(self.secondary_csv_file, self.secondary_headers)
+        self.setup_csv(self.training_data_csv, self.training_data_headers)
+
 
     def ensure_directory_exists(self, directory):
         """
@@ -97,6 +101,14 @@ class CSVHandler:
         :return: List of secondary CSV headers.
         """
         return ["timestamp", "raw_data"]
+
+    def generate_training_headers(self):
+        """
+        Generates training CSV headers.
+
+        :return: List of training CSV headers.
+        """
+        return ['BP_PVS_milliamp*s','BP_PVS_Ah','BP_PVS_Voltage','Used_Ah_Remaining_Time','BreakEvenSpeed']
 
     def setup_csv(self, csv_file, headers):
         """
@@ -188,6 +200,12 @@ class CSVHandler:
         Returns the current secondary CSV file path.
         """
         return self.secondary_csv_file
+    
+    def get_training_data_csv_path(self):
+        """
+        Returns the current training data CSV file path.
+        """
+        return self.training_data_csv
 
     def finalize_csv(self, original_csv, new_csv_path):
         """

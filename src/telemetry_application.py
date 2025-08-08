@@ -18,6 +18,7 @@ from csv_handler import CSVHandler
 from learning_datasets.machine_learning import MachineLearningModel
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
+from Version import VERSION  # Import the version number
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -175,7 +176,11 @@ class TelemetryApplication(QObject):
         """
         Initialize CSVHandler, ensuring CSV files go into self.storage_folder.
         """
-        root_directory = self.storage_folder if self.storage_folder else os.getcwd()
+        if not self.storage_folder:
+            base = os.path.dirname(os.path.abspath(__file__))
+            self.storage_folder = os.path.join(base, "application_data")
+            os.makedirs(self.storage_folder, exist_ok=True)
+        root_directory = self.storage_folder
         self.csv_handler = CSVHandler(root_directory=root_directory)
         self.csv_file = self.csv_handler.get_csv_file_path()
         self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
@@ -350,7 +355,19 @@ class TelemetryApplication(QObject):
 
     def run_application(self):
         try:
-            config_dialog = ConfigDialog()
+            # resolve install dir for updater
+            if getattr(sys, "frozen", False):
+                app_install_dir = os.path.dirname(sys.executable)
+            else:
+                app_install_dir = os.path.dirname(os.path.abspath(__file__))
+
+            config_dialog = ConfigDialog(
+                repo_owner="SunseekerSolarCarProject",
+                repo_name="Python-Telem",
+                version=VERSION,
+                app_install_dir=app_install_dir,
+                target_asset="telemetry.exe"   # must match your release asset name
+            )
             config_dialog.config_data_signal.connect(self.set_battery_info)
 
             if not config_dialog.exec():
@@ -420,15 +437,15 @@ class TelemetryApplication(QObject):
         Trains machine learning models using training_data.csv,
         then emits training_complete_signal so the GUI re-enables the Retrain button.
         """
-        training_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
+        training_path = self.csv_handler.get_training_data_csv_path()
         error = None
         try:
-            if os.path.exists(training_data_file) and os.path.getsize(training_data_file) > 0:
+            if os.path.exists(training_path) and os.path.getsize(training_path) > 0:
                 self.logger.info("Retraining machine learning models using training data...")
-                self.ml_model.train_battery_life_model(training_data_file)
-                self.ml_model.train_break_even_model(training_data_file)
+                self.ml_model.train_battery_life_model(training_path)
+                self.ml_model.train_break_even_model(training_path)
             else:
-                self.logger.warning(f"Training data file {training_data_file} is empty or does not exist. Cannot train model.")
+                self.logger.warning(f"Training data file {training_path} is empty or does not exist. Cannot train model.")
         except Exception as e:
             error = e
             self.logger.error(f"Error during model training: {e}")
@@ -534,8 +551,8 @@ class TelemetryApplication(QObject):
 
                     # --- build exactly the 3 inputs your battery-life RF expects ---
                     feat_batt = {
-                        'BP_PVS_milliamp/s': self.buffer.safe_float(
-                            combined_data.get('BP_PVS_milliamp/s', 0)
+                        'BP_PVS_milliamp*s': self.buffer.safe_float(
+                            combined_data.get('BP_PVS_milliamp*s', 0)
                         ),
                         'BP_PVS_Ah': self.buffer.safe_float(
                             combined_data.get('BP_PVS_Ah', 0)
@@ -547,7 +564,7 @@ class TelemetryApplication(QObject):
 
                     # --- build exactly the 2 inputs your break-even RF expects ---
                     feat_be = {
-                        'BP_PVS_milliamp/s': feat_batt['BP_PVS_milliamp/s'],
+                        'BP_PVS_milliamp*s': feat_batt['BP_PVS_milliamp*s'],
                         'BP_PVS_Voltage':    feat_batt['BP_PVS_Voltage'],
                     }
 

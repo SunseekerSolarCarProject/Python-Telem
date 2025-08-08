@@ -166,7 +166,7 @@ class BufferData:
         self.logger.debug(f"Final combined_data after processing: {self.combined_data}")
         return self.combined_data
 
-    def save_training_data(self, training_data_file='training_data.csv'):
+    def save_training_data(self):
         """
         Saves the combined data into a CSV file for training purposes.
         Only writes a row if all required features & targets are numeric.
@@ -176,7 +176,7 @@ class BufferData:
             return
 
         # grab floats (0.0 if conversion fails)
-        pvs_ma_s = self.safe_float(self.combined_data.get('BP_PVS_milliamp/s', None), default=None)
+        pvs_ma_s = self.safe_float(self.combined_data.get('BP_PVS_milliamp*s', None), default=None)
         pvs_ah   = self.safe_float(self.combined_data.get('BP_PVS_Ah', None), default=None)
         pvs_v    = self.safe_float(self.combined_data.get('BP_PVS_Voltage', None), default=None)
 
@@ -189,10 +189,13 @@ class BufferData:
             self.logger.debug("Skipping training row—incomplete data.")
             return
 
-        training_data_path = os.path.join(self.csv_handler.root_directory, training_data_file)
+        training_data_path = self.csv_handler.get_training_data_csv_path()
+        if not training_data_path:
+            self.logger.error("Training data CSV path is not set. Cannot save training data.")
+            return
         training_entry = {
             # battery-life inputs
-            'BP_PVS_milliamp/s': pvs_ma_s,
+            'BP_PVS_milliamp*s': pvs_ma_s,
             'BP_PVS_Ah'        : pvs_ah,
             'BP_PVS_Voltage'   : pvs_v,
             # battery-life target
