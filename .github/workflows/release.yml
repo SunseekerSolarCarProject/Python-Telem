@@ -129,15 +129,30 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
-        TAG="${{ github.ref_name }}"   # e.g. v1.7.0
-        VERSION="${TAG#v}"             # -> 1.7.0 (PEP 440 compliant)
 
-        # For multi-platform: add everything in release/targets
+        # Get tag name (v1.7.0) and strip the 'v' => 1.7.0
+        TAG="${{ github.ref_name }}"
+        VERSION="${TAG#v}"
+
+        # Debug prints so you can see it in logs
+        echo "TAG=$TAG"
+        echo "VERSION=$VERSION"
+
+        # Hard stop if empty or malformed
+        [[ -n "$VERSION" ]] || { echo "ERROR: VERSION is empty"; exit 1; }
+        [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { echo "ERROR: VERSION '$VERSION' not PEP440"; exit 1; }
+
+        # Sanity check paths before running tufup
+        test -f src/updater/metadata/root.json || { echo "Missing src/updater/metadata/root.json"; exit 1; }
+        test -d release/targets || { echo "Missing release/targets directory"; ls -la; exit 1; }
+        ls -la release/targets
+
+        # Add ALL platform targets in release/targets to TUF metadata for this version
         python -m tufup targets add \
-        --metadata-dir src/updater/metadata \
-        "$VERSION" \
-        release/targets \
-        src/updater/keys
+          --metadata-dir src/updater/metadata \
+          "$VERSION" \
+          release/targets \
+          src/updater/keys
 
     - name: Sign targets
       run: python -m tufup sign targets --metadata-dir src/updater/metadata src/updater/keys
