@@ -14,13 +14,16 @@ class UpdateChecker(QObject):
     update_error     = pyqtSignal(str)
 
     def __init__(self, repo_owner: str, repo_name: str, version: str, app_install_dir: str,
-                 target_name: str = "telemetry.exe"):
+                 target_name: str | None = None):
         super().__init__()
         self.repo_owner = repo_owner
         self.repo_name  = repo_name
         self.version    = version
         self.app_install_dir = app_install_dir
         self.target_name = target_name  # MUST match the asset name you upload in Releases
+
+        # 🔽 Auto-select the correct asset if none provided
+        self.target_name = target_name or self._default_target_name()
 
         # State dirs
         self.metadata_dir = os.path.join(app_install_dir, "tuf_metadata")
@@ -39,6 +42,22 @@ class UpdateChecker(QObject):
             metadata_base_url=base + "/",
             target_base_url=base + "/"
         )
+
+    @staticmethod
+    def _default_target_name() -> str:
+        """
+        Map current platform to the asset name you publish in your release.
+        Keep these in sync with your GitHub Actions matrix asset names.
+        """
+        if sys.platform.startswith("win"):
+            return "telemetry-windows.exe"
+        if sys.platform == "darwin":
+            # If you later ship separate Intel/ARM builds, you can split here:
+            # arch = platform.machine().lower()
+            # return "telemetry-macos-arm64" if arch in ("arm64","aarch64") else "telemetry-macos-x64"
+            return "telemetry-macos"
+        # Linux default (adjust if you add arch-specific assets)
+        return "telemetry-linux"
 
     # ---------- helpers ----------
     def _latest_version_from_github(self) -> str | None:

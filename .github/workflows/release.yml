@@ -1,39 +1,58 @@
-name: Create Release
+name: Create Release (multi-platform)
 
 on:
   push:
     tags:
-      - 'v*'   # fires on v1.6.6, v1.7.0, etc.
+      - 'v*'   # e.g. v1.7.0
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            py: '3.13'
+            bin_path: dist/telemetry.exe
+            asset_name: telemetry-windows.exe
+            pyinstaller_extra: '--windowed --name telemetry --icon src/assets/logo-icon.ico'
+          - os: macos-latest
+            py: '3.13'
+            bin_path: dist/telemetry
+            asset_name: telemetry-macos
+            pyinstaller_extra: '--windowed --name telemetry'     # add --icon src/assets/app.icns if you have one
+          - os: ubuntu-latest
+            py: '3.13'
+            bin_path: dist/telemetry
+            asset_name: telemetry-linux
+            pyinstaller_extra: '--name telemetry'
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.13.1'
+        python-version: ${{ matrix.py }}
 
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirement.txt
-        pip install pyinstaller tufup
-
-    - name: Build executable with all data & hooks
       shell: bash
       run: |
-        bash -lc 'pyinstaller src/main_app.py \
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install -r requirement.txt; fi
+        pip install pyinstaller tufup
+
+    - name: Build executable
+      shell: bash
+      run: |
+        pyinstaller src/main_app.py \
           --noconfirm \
           --onefile \
-          --windowed \
           --distpath dist \
-          --name telemetry \
-          --icon src/assets/logo-icon.ico \
+          ${{ matrix.pyinstaller_extra }} \
           --add-data "src/gui_files;gui_files/" \
           --add-data "src/learning_datasets;learning_datasets/" \
           --add-data "src/updater;updater/" \
@@ -53,45 +72,111 @@ jobs:
           --additional-hooks-dir src/hooks \
           --hidden-import tufup.client \
           --hidden-import tufup.utils \
-          --hidden-import tufup.ngclient \
           --hidden-import sklearn.utils._typedefs \
           --hidden-import sklearn.neighbors._partition_nodes \
-          --hidden-import pyqtgraph'
+          --hidden-import pyqtgraph
 
-    - name: Add new TUF target
+    - name: Rename artifact
       shell: bash
       run: |
-        # strip "refs/tags/vX.Y.Z" → "X.Y.Z"
-        version=${GITHUB_REF#refs/tags/}
-        version=${version#v}
+        mkdir -p out
+        cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: built-${{ matrix.os }}
+        path: out/*
+        if-no-files-found: error
+
+  tuf_release:
+    name: Sign & Release (TUF + assets)
+    runs-on: ubuntu-latest
+    needs: [build]
+
+    steps:
+    - name: Checkout (for root.json & keys)
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install tufup
+      run: pip install tufup
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: true
+
+    - name: Prepare release directory
+      shell: bash
+      run: |
+        mkdir -p release/targets
+        cp artifacts/* release/targets/
+        # Ensure metadata dir and bootstrap root.json exist
+        test -f src/updater/metadata/root.json || { echo "Missing src/updater/metadata/root.json"; exit 1; }
+
+    - name: Add all targets to TUF metadata
+      shell: bash
+      run: |
+        version="${GITHUB_REF#refs/tags/}"
+        version="${version#v}"
         python -m tufup targets add \
+          --metadata-dir src/updater/metadata \
           "$version" \
-          dist \
+          release/targets \
           src/updater/keys
 
-    - name: Sign targets metadata
-      run: python -m tufup sign targets src/updater/keys
+    - name: Sign targets
+      run: python -m tufup sign targets --metadata-dir src/updater/metadata src/updater/keys
 
-    - name: Sign snapshot metadata
-      run: python -m tufup sign snapshot src/updater/keys
+    - name: Sign snapshot
+      run: python -m tufup sign snapshot --metadata-dir src/updater/metadata src/updater/keys
 
-    - name: Sign timestamp metadata
-      run: python -m tufup sign timestamp src/updater/keys
+    - name: Sign timestamp
+      run: python -m tufup sign timestamp --metadata-dir src/updater/metadata src/updater/keys
 
-    - name: Prepare release assets
+    - name: Verify telemetry targets present
+      shell: bash
       run: |
-        mkdir release
-        cp dist/telemetry.exe               release/
-        cp src/updater/metadata/*.json      release/
+        python - << 'PY'
+        import json, sys
+        with open('src/updater/metadata/targets.json','r', encoding='utf-8') as f:
+          data = json.load(f)
+        targets = set((data.get('signed') or {}).get('targets', {}).keys())
+        need = {'telemetry-windows.exe','telemetry-macos','telemetry-linux'}
+        missing = need - targets
+        if missing:
+            raise SystemExit(f"ERROR: missing in targets.json: {missing}; have: {targets}")
+        print("OK: all platform targets present in TUF metadata")
+        PY
+
+    - name: Stage release payload
+      shell: bash
+      run: |
+        mkdir -p release
+        cp src/updater/metadata/root.json      release/
+        cp src/updater/metadata/targets.json   release/
+        cp src/updater/metadata/snapshot.json  release/
+        cp src/updater/metadata/timestamp.json release/
+        # also include the built targets
+        cp release/targets/* release/
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
-          release/telemetry.exe
+          release/telemetry-windows.exe
+          release/telemetry-macos
+          release/telemetry-linux
           release/root.json
           release/targets.json
           release/snapshot.json
           release/timestamp.json
+        make_latest: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

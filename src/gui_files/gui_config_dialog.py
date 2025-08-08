@@ -20,7 +20,7 @@ class ConfigDialog(QDialog):
         repo_name: str = "Python-Telem",
         version: str = VERSION,
         app_install_dir: str | None = None,
-        target_asset: str = "telemetry.exe",   # must match your release asset name
+        target_asset: str | None = None,
         ):
         super().__init__(parent)
         self.setWindowTitle("Configuration")
@@ -46,7 +46,7 @@ class ConfigDialog(QDialog):
             repo_name=repo_name,
             version=version,
             app_install_dir=app_install_dir,
-            target_name=target_asset
+            target_name= target_asset
         )
         self.updater.update_available.connect(self.on_update_available)
         self.updater.update_progress.connect(self.on_update_progress)
