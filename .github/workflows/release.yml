@@ -125,16 +125,19 @@ jobs:
         # Ensure metadata dir and bootstrap root.json exist
         test -f src/updater/metadata/root.json || { echo "Missing src/updater/metadata/root.json"; exit 1; }
 
-    - name: Add all targets to TUF metadata
+    - name: Add targets to TUF metadata
       shell: bash
       run: |
-        version="${GITHUB_REF#refs/tags/}"
-        version="${version#v}"
+        set -euo pipefail
+        TAG="${{ github.ref_name }}"   # e.g. v1.7.0
+        VERSION="${TAG#v}"             # -> 1.7.0 (PEP 440 compliant)
+
+        # For multi-platform: add everything in release/targets
         python -m tufup targets add \
-          --metadata-dir src/updater/metadata \
-          "$version" \
-          release/targets \
-          src/updater/keys
+        --metadata-dir src/updater/metadata \
+        "$VERSION" \
+        release/targets \
+        src/updater/keys
 
     - name: Sign targets
       run: python -m tufup sign targets --metadata-dir src/updater/metadata src/updater/keys
