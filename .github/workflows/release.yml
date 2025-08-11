@@ -14,85 +14,84 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            py: '3.13'
+            py: '3.12'
             sep: ';'
             icon_arg: '--icon src/assets/logo-icon.ico --windowed'
             bin_path: dist/telemetry.exe
             asset_name: telemetry-windows.exe
           - os: macos-latest
-            py: '3.13'
+            py: '3.12'
             sep: ':'
-            # Use an .icns if you have it; otherwise leave icon_arg empty or set '--windowed'
-            icon_arg: '--windowed' # or: --icon src/assets/app.icns --windowed
+            icon_arg: '--windowed'  # or: --icon src/assets/app.icns --windowed
             bin_path: dist/telemetry
             asset_name: telemetry-macos
           - os: ubuntu-latest
-            py: '3.13'
+            py: '3.12'
             sep: ':'
-            icon_arg: ''           # no icon on Linux, fine
+            icon_arg: ''
             bin_path: dist/telemetry
             asset_name: telemetry-linux
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.py }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
 
-    - name: Install dependencies
-      shell: bash
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install -r requirement.txt; fi
-        pip install pyinstaller tufup
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install -r requirement.txt; fi
+          pip install pyinstaller tufup
 
-    - name: Build executable
-      shell: bash
-      run: |
-        pyinstaller src/main_app.py \
-          --noconfirm \
-          --onefile \
-          --distpath dist \
-          --name telemetry \
-          ${{ matrix.icon_arg }} \
-          --add-data "src/gui_files${{ matrix.sep }}gui_files/" \
-          --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/" \
-          --add-data "src/updater${{ matrix.sep }}updater/" \
-          --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/" \
-          --add-data "src/__init__.py${{ matrix.sep }}." \
-          --add-data "src/buffer_data.py${{ matrix.sep }}." \
-          --add-data "src/central_logger.py${{ matrix.sep }}." \
-          --add-data "src/csv_handler.py${{ matrix.sep }}." \
-          --add-data "src/data_display.py${{ matrix.sep }}." \
-          --add-data "src/data_processor.py${{ matrix.sep }}." \
-          --add-data "src/extra_calculations.py${{ matrix.sep }}." \
-          --add-data "src/key_name_definitions.py${{ matrix.sep }}." \
-          --add-data "src/serial_reader.py${{ matrix.sep }}." \
-          --add-data "src/telemetry_application.py${{ matrix.sep }}." \
-          --add-data "src/unit_conversion.py${{ matrix.sep }}." \
-          --add-data "src/Version.py${{ matrix.sep }}." \
-          --additional-hooks-dir src/hooks \
-          --hidden-import tufup.client \
-          --hidden-import tufup.utils \
-          --hidden-import sklearn.utils._typedefs \
-          --hidden-import sklearn.neighbors._partition_nodes \
-          --hidden-import pyqtgraph
+      - name: Build executable
+        shell: bash
+        run: |
+          pyinstaller src/main_app.py \
+            --noconfirm \
+            --onefile \
+            --distpath dist \
+            --name telemetry \
+            ${{ matrix.icon_arg }} \
+            --add-data "src/gui_files${{ matrix.sep }}gui_files/" \
+            --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/" \
+            --add-data "src/updater${{ matrix.sep }}updater/" \
+            --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/" \
+            --add-data "src/__init__.py${{ matrix.sep }}." \
+            --add-data "src/buffer_data.py${{ matrix.sep }}." \
+            --add-data "src/central_logger.py${{ matrix.sep }}." \
+            --add-data "src/csv_handler.py${{ matrix.sep }}." \
+            --add-data "src/data_display.py${{ matrix.sep }}." \
+            --add-data "src/data_processor.py${{ matrix.sep }}." \
+            --add-data "src/extra_calculations.py${{ matrix.sep }}." \
+            --add-data "src/key_name_definitions.py${{ matrix.sep }}." \
+            --add-data "src/serial_reader.py${{ matrix.sep }}." \
+            --add-data "src/telemetry_application.py${{ matrix.sep }}." \
+            --add-data "src/unit_conversion.py${{ matrix.sep }}." \
+            --add-data "src/Version.py${{ matrix.sep }}." \
+            --additional-hooks-dir src/hooks \
+            --hidden-import tufup.client \
+            --hidden-import tufup.utils \
+            --hidden-import sklearn.utils._typedefs \
+            --hidden-import sklearn.neighbors._partition_nodes \
+            --hidden-import pyqtgraph
 
-    - name: Rename artifact
-      shell: bash
-      run: |
-        mkdir -p out
-        cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+      - name: Rename artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: built-${{ matrix.os }}
-        path: out/*
-        if-no-files-found: error
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-${{ matrix.os }}
+          path: out/*
+          if-no-files-found: error
 
   tuf_release:
     name: Sign & Release (TUF + assets)
@@ -100,99 +99,67 @@ jobs:
     needs: [build]
 
     steps:
-    - name: Checkout (for root.json & keys)
-      uses: actions/checkout@v4
+      - name: Checkout (for root.json & keys and script)
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-    - name: Install tufup
-      run: pip install tufup
+      - name: Install tufup
+        run: pip install tufup
 
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-        merge-multiple: true
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
-    # Turn onefile binaries into 3 "bundle" folders (tufup will tar.gz them)
-    - name: Stage bundles per platform
-      shell: bash
-      run: |
-        set -euo pipefail
-        ls -la artifacts
-        mkdir -p bundles/windows bundles/macos bundles/linux
-        cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
-        cp artifacts/telemetry-macos       bundles/macos/telemetry
-        cp artifacts/telemetry-linux       bundles/linux/telemetry
+      - name: Stage bundles per platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Artifacts present:"
+          ls -la artifacts
+          test -f artifacts/telemetry-windows.exe || { echo "Missing telemetry-windows.exe"; exit 1; }
+          test -f artifacts/telemetry-macos       || { echo "Missing telemetry-macos"; exit 1; }
+          test -f artifacts/telemetry-linux       || { echo "Missing telemetry-linux"; exit 1; }
 
-    # Build a TUF repository and add one bundle per platform using the Python API
-    - name: Build TUF repo & add targets
-      shell: bash
-      env:
-        TAG: ${{ github.ref_name }}      # e.g. v1.7.0
-      run: |
-        set -euo pipefail
-        VERSION="${TAG#v}"
-        echo "VERSION=${VERSION}"
+          mkdir -p bundles/windows bundles/macos bundles/linux
+          cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
+          cp artifacts/telemetry-macos       bundles/macos/telemetry
+          cp artifacts/telemetry-linux       bundles/linux/telemetry
 
-        python - <<'PY'
-from pathlib import Path
-from tufup.repo import Repository
-import os
+      - name: Build TUF repo & add targets (repo script)
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}      # e.g. v1.7.0
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          echo "VERSION=${VERSION}"
+          python scripts/build_tuf_repo.py
 
-version     = os.environ["VERSION"]
-repo_dir    = Path("release")
-meta_dir    = repo_dir / "metadata"
-targets_dir = repo_dir / "targets"
-keys_dir    = Path("src/updater/keys")
+      - name: Show release payload
+        shell: bash
+        run: |
+          echo "::group::Metadata"
+          ls -la release/metadata
+          echo "::endgroup::"
+          echo "::group::Targets"
+          ls -la release/targets
+          echo "::endgroup::"
 
-# Ensure dirs & bootstrap trusted root
-meta_dir.mkdir(parents=True, exist_ok=True)
-targets_dir.mkdir(parents=True, exist_ok=True)
-root_src = Path("src/updater/metadata/root.json")
-if not root_src.exists():
-    raise SystemExit("Missing src/updater/metadata/root.json")
-(meta_dir / "root.json").write_bytes(root_src.read_bytes())
-
-def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
-    # app_name must match what clients expect (telemetry-windows/macos/linux)
-    repo = Repository(app_name=app_name, repo_dir=repo_dir)
-    repo.save_config()   # writes repo/config.json if needed
-    repo.initialize()    # loads roles (root), creates metadata/targets dirs
-    # Add the "bundle" folder; tufup makes telemetry-<platform>-<ver>.tar.gz
-    repo.add_bundle(bundle_dir, new_version=version, skip_patch=True,
-                    custom_metadata={"platform": platform_tag})
-    # Sign targets/snapshot/timestamp with your keys, write metadata
-    repo.publish_changes([keys_dir])
-
-add_platform("telemetry-windows", "bundles/windows", "windows")
-add_platform("telemetry-macos",   "bundles/macos",   "macos")
-add_platform("telemetry-linux",   "bundles/linux",   "linux")
-PY
-
-    - name: Show release payload
-      shell: bash
-      run: |
-        echo "::group::Metadata"
-        ls -la release/metadata
-        echo "::endgroup::"
-        echo "::group::Targets"
-        ls -la release/targets
-        echo "::endgroup::"
-
-    # Publish all metadata + the created archives
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          release/metadata/root.json
-          release/metadata/targets.json
-          release/metadata/snapshot.json
-          release/metadata/timestamp.json
-          release/targets/*
-        make_latest: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/metadata/root.json
+            release/metadata/targets.json
+            release/metadata/snapshot.json
+            release/metadata/timestamp.json
+            release/targets/*
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
