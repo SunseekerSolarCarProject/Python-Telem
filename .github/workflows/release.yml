@@ -93,6 +93,14 @@ jobs:
         name: built-${{ matrix.os }}
         path: out/*
         if-no-files-found: error
+    - name: Stage bundles as directories (onefile -> a folder each)
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p bundles/windows bundles/macos bundles/linux
+        cp dist/telemetry-windows.exe bundles/windows/telemetry.exe
+        cp dist/telemetry-macos       bundles/macos/telemetry
+        cp dist/telemetry-linux       bundles/linux/telemetry
 
   tuf_release:
     name: Sign & Release (TUF + assets)
@@ -117,82 +125,82 @@ jobs:
         path: artifacts
         merge-multiple: true
 
-    - name: Prepare release directory
-      shell: bash
-      run: |
-        mkdir -p release/targets
-        cp artifacts/* release/targets/
-        # Ensure metadata dir and bootstrap root.json exist
-        test -f src/updater/metadata/root.json || { echo "Missing src/updater/metadata/root.json"; exit 1; }
-
-    - name: Add targets to TUF metadata
+    # Turn onefile binaries into 3 "bundle" folders (tufup will tar.gz them)
+    - name: Stage bundles per platform
       shell: bash
       run: |
         set -euo pipefail
-        set -x
+        ls -la artifacts
+        mkdir -p bundles/windows bundles/macos bundles/linux
+        cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
+        cp artifacts/telemetry-macos       bundles/macos/telemetry
+        cp artifacts/telemetry-linux       bundles/linux/telemetry
 
-        TAG="${{ github.ref_name }}"   # e.g., v1.7.0
-        VERSION="${TAG#v}"             # -> 1.7.0
-
-        echo "TAG=$TAG"
-        echo "VERSION=$VERSION"
-
-        # Quick sanity checks
-        [[ -n "$VERSION" ]] || { echo "ERROR: VERSION is empty"; exit 1; }
-        [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { echo "ERROR: VERSION '$VERSION' not PEP440"; exit 1; }
-        test -f src/updater/metadata/root.json || { echo "Missing src/updater/metadata/root.json"; exit 1; }
-        test -d release/targets || { echo "Missing release/targets"; ls -la; exit 1; }
-        ls -la release/targets
-
-        # Force end-of-options with `--` so nothing else gets treated as flags
-        python -m tufup targets add -m src/updater/metadata -- "$VERSION" "release/targets" "src/updater/keys"
-
-    - name: Sign targets
-      run: python -m tufup sign targets --metadata-dir src/updater/metadata src/updater/keys
-
-    - name: Sign snapshot
-      run: python -m tufup sign snapshot --metadata-dir src/updater/metadata src/updater/keys
-
-    - name: Sign timestamp
-      run: python -m tufup sign timestamp --metadata-dir src/updater/metadata src/updater/keys
-
-    - name: Verify telemetry targets present
+    # Build a TUF repository and add one bundle per platform using the Python API
+    - name: Build TUF repo & add targets
       shell: bash
+      env:
+        TAG: ${{ github.ref_name }}      # e.g. v1.7.0
       run: |
-        python - << 'PY'
-        import json, sys
-        with open('src/updater/metadata/targets.json','r', encoding='utf-8') as f:
-          data = json.load(f)
-        targets = set((data.get('signed') or {}).get('targets', {}).keys())
-        need = {'telemetry-windows.exe','telemetry-macos','telemetry-linux'}
-        missing = need - targets
-        if missing:
-            raise SystemExit(f"ERROR: missing in targets.json: {missing}; have: {targets}")
-        print("OK: all platform targets present in TUF metadata")
+        set -euo pipefail
+        VERSION="${TAG#v}"
+        echo "VERSION=${VERSION}"
+
+        python - <<'PY'
+        from pathlib import Path
+        from tufup.repo import Repository
+        import os
+
+        version     = os.environ["VERSION"]
+        repo_dir    = Path("release")
+        meta_dir    = repo_dir / "metadata"
+        targets_dir = repo_dir / "targets"
+        keys_dir    = Path("src/updater/keys")
+
+        # Ensure dirs & bootstrap trusted root
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        targets_dir.mkdir(parents=True, exist_ok=True)
+        root_src = Path("src/updater/metadata/root.json")
+        if not root_src.exists():
+            raise SystemExit("Missing src/updater/metadata/root.json")
+        (meta_dir / "root.json").write_bytes(root_src.read_bytes())
+
+        def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
+          # app_name must match what your clients expect (e.g., telemetry-windows)
+        repo = Repository(app_name=app_name, repo_dir=repo_dir)
+        repo.save_config()   # writes repo/config.json if needed
+        repo.initialize()    # loads roles (root), creates metadata/targets dirs
+        # Add the "bundle" folder; tufup makes telemetry-<platform>-<ver>.tar.gz
+        repo.add_bundle(bundle_dir, new_version=version, skip_patch=True,
+                    custom_metadata={"platform": platform_tag})
+        # Sign targets/snapshot/timestamp with your keys, write metadata
+        repo.publish_changes([keys_dir])
+
+        add_platform("telemetry-windows", "bundles/windows", "windows")
+        add_platform("telemetry-macos",   "bundles/macos",   "macos")
+        add_platform("telemetry-linux",   "bundles/linux",   "linux")
         PY
 
-    - name: Stage release payload
+    - name: Show release payload
       shell: bash
       run: |
-        mkdir -p release
-        cp src/updater/metadata/root.json      release/
-        cp src/updater/metadata/targets.json   release/
-        cp src/updater/metadata/snapshot.json  release/
-        cp src/updater/metadata/timestamp.json release/
-        # also include the built targets
-        cp release/targets/* release/
+        echo "::group::Metadata"
+        ls -la release/metadata
+        echo "::endgroup::"
+        echo "::group::Targets"
+        ls -la release/targets
+        echo "::endgroup::"
 
+    # Publish all metadata + the created archives
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          release/telemetry-windows.exe
-          release/telemetry-macos
-          release/telemetry-linux
-          release/root.json
-          release/targets.json
-          release/snapshot.json
-          release/timestamp.json
+          release/metadata/root.json
+          release/metadata/targets.json
+          release/metadata/snapshot.json
+          release/metadata/timestamp.json
+          release/targets/*
         make_latest: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
