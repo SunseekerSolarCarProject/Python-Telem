@@ -130,7 +130,16 @@ jobs:
           cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
           cp artifacts/telemetry-macos       bundles/macos/telemetry
           cp artifacts/telemetry-linux       bundles/linux/telemetry
-
+      
+      - name: Write signing keys from secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/updater/keys
+          printf '%s' "${{ secrets.TUF_KEY_TARGETS_JSON }}"   > src/updater/keys/targets
+          printf '%s' "${{ secrets.TUF_KEY_SNAPSHOT_JSON }}"  > src/updater/keys/snapshot
+          printf '%s' "${{ secrets.TUF_KEY_TIMESTAMP_JSON }}" > src/updater/keys/timestamp
+          chmod 600 src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp
       - name: Build TUF repo & add targets (repo script)
         shell: bash
         env:
