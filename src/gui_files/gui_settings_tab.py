@@ -17,6 +17,10 @@ class SettingsTab(QWidget):
     machine_learning_retrain_signal = pyqtSignal()  # Signal to retrain ML model (no args)
     additional_files_selected = pyqtSignal(list) #adding files to the ML model.
 
+    # New signals for updater version management
+    refresh_versions_requested = pyqtSignal()
+    install_version_requested = pyqtSignal(str)
+
     def __init__(self, groups, color_mapping):
         super().__init__()
         self.logger = logging.getLogger(__name__)
@@ -39,6 +43,23 @@ class SettingsTab(QWidget):
 
         # Layout inside the container
         layout = QVBoxLayout(container)
+
+        # ---- Updater: Version management ----
+        versions_label = QLabel("Application Version (install/rollback):")
+        versions_label.setMinimumWidth(200)
+        layout.addWidget(versions_label)
+
+        versions_row = QHBoxLayout()
+        self.version_dropdown = QComboBox()
+        self.version_dropdown.setMinimumWidth(200)
+        versions_row.addWidget(self.version_dropdown)
+        self.refresh_versions_btn = QPushButton("Refresh")
+        self.refresh_versions_btn.clicked.connect(lambda: self.refresh_versions_requested.emit())
+        versions_row.addWidget(self.refresh_versions_btn)
+        self.install_version_btn = QPushButton("Install Selected")
+        self.install_version_btn.clicked.connect(self._emit_install_selected)
+        versions_row.addWidget(self.install_version_btn)
+        layout.addLayout(versions_row)
 
         # Logging Level Controls
         log_level_label = QLabel("Select Logging Level:")
@@ -219,6 +240,24 @@ class SettingsTab(QWidget):
         # Emit signal for COM port, baud rate, log level, and endianness changes
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
         self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}, Endianness={endianness}")
+
+    # ----- Updater helpers -----
+    def set_versions(self, versions: list[str], current_version: str | None = None):
+        try:
+            self.version_dropdown.clear()
+            for v in versions:
+                self.version_dropdown.addItem(v)
+            if current_version:
+                idx = self.version_dropdown.findText(current_version)
+                if idx != -1:
+                    self.version_dropdown.setCurrentIndex(idx)
+        except Exception as e:
+            self.logger.error(f"Failed to set versions: {e}")
+
+    def _emit_install_selected(self):
+        v = self.version_dropdown.currentText().strip()
+        if v:
+            self.install_version_requested.emit(v)
 
     def on_retrain_button_clicked(self):
         """

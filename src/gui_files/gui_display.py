@@ -374,7 +374,16 @@ class TelemetryGUI(QWidget):
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)
         self.settings_tab.machine_learning_retrain_signal.connect(self.machine_learning_retrain_signal.emit)
         self.settings_tab.additional_files_selected.connect(self.machine_learning_retrain_signal_with_files.emit)
+        # Updater version management wiring
+        self.settings_tab.refresh_versions_requested.connect(self.on_refresh_versions)
+        self.settings_tab.install_version_requested.connect(self.on_install_version_requested)
         self.tabs.addTab(self.settings_tab, "Settings")
+
+        # Populate versions shortly after UI loads (non-blocking)
+        try:
+            QTimer.singleShot(300, self.on_refresh_versions)
+        except Exception:
+            pass
 
         # CSV Management Tab
         self.csv_management_tab = CSVManagementTab(self.csv_handler)
@@ -414,6 +423,27 @@ class TelemetryGUI(QWidget):
 
     def on_update_error(self, error: str):
         QMessageBox.warning(self, "Update Error", error)
+
+    # ----- Updater version management -----
+    def on_refresh_versions(self):
+        try:
+            versions = self.updater.list_available_versions(limit=20)
+            from Version import VERSION
+            self.settings_tab.set_versions(versions, VERSION)
+            if not versions:
+                QMessageBox.information(self, "Versions", "No versions found or network error.")
+        except Exception as e:
+            QMessageBox.warning(self, "Versions", f"Failed to fetch versions: {e}")
+
+    def on_install_version_requested(self, version: str):
+        reply = QMessageBox.question(
+            self,
+            "Install Version",
+            f"Install version {version}? This will restart the app.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.updater.download_and_apply_version(version)
 
     def update_all_tabs(self, telemetry_data: dict):
         """

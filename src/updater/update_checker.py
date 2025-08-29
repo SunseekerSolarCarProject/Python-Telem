@@ -58,6 +58,14 @@ class UpdateChecker(QObject):
         # Linux default (adjust if you add arch-specific assets)
         return "telemetry"
 
+    def _platform_prefix(self) -> str:
+        if sys.platform.startswith("win"):
+            return "telemetry-windows-"
+        elif sys.platform == "darwin":
+            return "telemetry-macos-"
+        else:
+            return "telemetry-linux-"
+
     @staticmethod
     def _bundle_name_for(version: str) -> str:
         """
@@ -206,6 +214,136 @@ class UpdateChecker(QObject):
                     start "" %OLD%
                     """)
                 subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)  # CREATE_NO_WINDOW
+                sys.exit(0)
+            else:
+                backup = old_exe + ".bak"
+                try:
+                    os.replace(old_exe, backup)
+                except Exception:
+                    pass
+                os.replace(new_exe_path, old_exe)
+                subprocess.Popen([old_exe] + sys.argv[1:])
+                sys.exit(0)
+
+        except Exception as e:
+            self.update_error.emit(str(e))
+            return False
+
+    # ---------- multi-version support ----------
+    def list_available_versions(self, limit: int = 15) -> list[str]:
+        """
+        Return a list of available version strings by querying GitHub Releases
+        and filtering for assets that match this platform's bundle prefix.
+        """
+        try:
+            url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases?per_page={limit}"
+            r = requests.get(url, timeout=8)
+            r.raise_for_status()
+            releases = r.json() or []
+            pref = self._platform_prefix()
+            versions: list[str] = []
+            for rel in releases:
+                tag = (rel.get('tag_name') or '').strip()
+                if tag.lower().startswith('v'):
+                    tag = tag[1:]
+                if tag.startswith('.'):
+                    tag = tag[1:]
+                # Ensure matching asset exists
+                assets = rel.get('assets') or []
+                found = any((a.get('name') or '').startswith(pref) and (a.get('name') or '').endswith('.tar.gz') for a in assets)
+                if found and tag:
+                    versions.append(tag)
+            # Deduplicate while preserving order
+            seen = set()
+            out: list[str] = []
+            for v in versions:
+                if v not in seen:
+                    seen.add(v)
+                    out.append(v)
+            return out
+        except Exception:
+            return []
+
+    def download_and_apply_version(self, version: str) -> bool:
+        """
+        Download and apply a specific version by pointing the Updater at the
+        tag-specific release URLs (v{version}). Uses TUF metadata within that
+        release to verify the bundle.
+        """
+        if not getattr(sys, "frozen", False):
+            self.update_error.emit("Updater only runs in a packaged build.")
+            return False
+
+        try:
+            base = f"https://github.com/{self.repo_owner}/{self.repo_name}/releases/download/v{version}"
+            # Create a temporary Updater for this tag
+            updater = Updater(
+                self.metadata_dir,
+                metadata_base_url=base + "/",
+                target_base_url=base + "/",
+            )
+            updater.refresh()
+
+            bundle_name = self._bundle_name_for(version)
+            ti = updater.get_targetinfo(bundle_name)
+            if ti is None:
+                self.update_error.emit(f"Bundle '{bundle_name}' not found in TUF metadata for v{version}.")
+                return False
+
+            bundle_path = os.path.join(self.download_dir, bundle_name)
+            def _progress(pct):
+                try:
+                    self.update_progress.emit(int(pct))
+                except Exception:
+                    pass
+            updater.download_target(ti, filepath=bundle_path, progress_callback=_progress)
+
+            # Extract and swap-in (reuse logic)
+            import tarfile, tempfile
+            extract_dir = tempfile.mkdtemp(prefix="tuf_bundle_")
+            try:
+                with tarfile.open(bundle_path, "r:gz") as tf:
+                    tf.extractall(path=extract_dir)
+            except Exception as e:
+                self.update_error.emit(f"Failed to extract bundle: {e}")
+                return False
+
+            # Find expected binary name inside extracted contents
+            binary_name = self.target_name
+            candidate = None
+            for root, _dirs, files in os.walk(extract_dir):
+                if binary_name in files:
+                    candidate = os.path.join(root, binary_name)
+                    break
+            if not candidate:
+                self.update_error.emit(f"Bundle did not contain expected binary '{binary_name}'.")
+                return False
+
+            new_exe_path = os.path.join(self.download_dir, binary_name)
+            try:
+                shutil.copy2(candidate, new_exe_path)
+            except Exception as e:
+                self.update_error.emit(f"Failed staging new binary: {e}")
+                return False
+
+            old_exe = self._running_binary_path()
+            if not old_exe:
+                self.update_error.emit("No runnable binary path detected.")
+                return False
+
+            if os.name == "nt":
+                bat_path = os.path.join(self.download_dir, "apply_update.bat")
+                with open(bat_path, "w", encoding="utf-8") as f:
+                    f.write(f"""@echo off
+                    set NEW="{new_exe_path}"
+                    set OLD="{old_exe}"
+                    :wait
+                    ping 127.0.0.1 -n 2 >nul
+                    tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
+                    move /Y %NEW% %OLD%
+                    start "" %OLD%
+                    """)
+                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)
                 sys.exit(0)
             else:
                 backup = old_exe + ".bak"
