@@ -22,8 +22,8 @@ class UpdateChecker(QObject):
         self.app_install_dir = app_install_dir
         self.target_name = target_name  # MUST match the asset name you upload in Releases
 
-        # 🔽 Auto-select the correct asset if none provided
-        self.target_name = target_name or self._default_target_name()
+        # ðŸ”½ Auto-select the correct asset if none provided
+        self.target_name = target_name or self._default_binary_name()
 
         # State dirs
         self.metadata_dir = os.path.join(app_install_dir, "tuf_metadata")
@@ -44,20 +44,36 @@ class UpdateChecker(QObject):
         )
 
     @staticmethod
-    def _default_target_name() -> str:
+    def _default_binary_name() -> str:
         """
-        Map current platform to the asset name you publish in your release.
-        Keep these in sync with your GitHub Actions matrix asset names.
+        Name of the runnable binary inside the bundle.
         """
         if sys.platform.startswith("win"):
-            return "telemetry-windows.exe"
+            return "telemetry.exe"
         if sys.platform == "darwin":
             # If you later ship separate Intel/ARM builds, you can split here:
             # arch = platform.machine().lower()
             # return "telemetry-macos-arm64" if arch in ("arm64","aarch64") else "telemetry-macos-x64"
-            return "telemetry-macos"
+            return "telemetry"
         # Linux default (adjust if you add arch-specific assets)
-        return "telemetry-linux"
+        return "telemetry"
+
+    @staticmethod
+    def _bundle_name_for(version: str) -> str:
+        """
+        Compute the TUF target file name (tar.gz bundle) for the given
+        version. This matches scripts/build_tuf_repo.py where we call
+        repo.add_bundle with app_name per platform:
+          telemetry-windows | telemetry-macos | telemetry-linux
+        -> bundle names: telemetry-<platform>-<version>.tar.gz
+        """
+        if sys.platform.startswith("win"):
+            app = "telemetry-windows"
+        elif sys.platform == "darwin":
+            app = "telemetry-macos"
+        else:
+            app = "telemetry-linux"
+        return f"{app}-{version}.tar.gz"
 
     # ---------- helpers ----------
     def _latest_version_from_github(self) -> str | None:
@@ -74,7 +90,7 @@ class UpdateChecker(QObject):
         # Only self-update in frozen builds
         if getattr(sys, "frozen", False):
             return sys.executable
-        # Dev mode: don’t try to rewrite python.exe; just no-op
+        # Dev mode: donâ€™t try to rewrite python.exe; just no-op
         return ""
 
     # ---------- public API ----------
@@ -92,13 +108,14 @@ class UpdateChecker(QObject):
             if not latest or latest == self.version:
                 return False  # up-to-date or unknown
 
-            # Verify a target with our fixed asset name actually exists in TUF metadata
+            # Verify the bundle for the latest version exists in TUF metadata
             self.updater.refresh()
-            ti = self.updater.get_targetinfo(self.target_name)
+            bundle_name = self._bundle_name_for(latest)
+            ti = self.updater.get_targetinfo(bundle_name)
             if ti is None:
                 self.update_error.emit(
-                    f"TUF metadata does not contain target '{self.target_name}'. "
-                    f"Make sure your release assets include TUF metadata + {self.target_name}."
+                    f"TUF metadata does not contain bundle '{bundle_name}'. "
+                    f"Make sure your release assets include TUF metadata + {bundle_name}."
                 )
                 return False
 
@@ -119,12 +136,15 @@ class UpdateChecker(QObject):
             return False
 
         try:
-            ti = self.updater.get_targetinfo(self.target_name)
+            latest = self._latest_version_from_github() or self.version
+            bundle_name = self._bundle_name_for(latest)
+            ti = self.updater.get_targetinfo(bundle_name)
             if ti is None:
-                self.update_error.emit(f"Target '{self.target_name}' not found in TUF metadata.")
+                self.update_error.emit(f"Bundle '{bundle_name}' not found in TUF metadata.")
                 return False
 
-            new_exe_path = os.path.join(self.download_dir, self.target_name)
+            # Download the tar.gz bundle
+            bundle_path = os.path.join(self.download_dir, bundle_name)
             def _progress(pct):
                 # pct is float 0..100 (or bytes); normalize to int 0..100 when possible
                 try:
@@ -132,7 +152,35 @@ class UpdateChecker(QObject):
                 except Exception:
                     pass
 
-            self.updater.download_target(ti, filepath=new_exe_path, progress_callback=_progress)
+            self.updater.download_target(ti, filepath=bundle_path, progress_callback=_progress)
+
+            # Extract bundle and locate the binary inside
+            import tarfile, tempfile
+            extract_dir = tempfile.mkdtemp(prefix="tuf_bundle_")
+            try:
+                with tarfile.open(bundle_path, "r:gz") as tf:
+                    tf.extractall(path=extract_dir)
+            except Exception as e:
+                self.update_error.emit(f"Failed to extract bundle: {e}")
+                return False
+
+            # Find expected binary inside extracted contents
+            binary_name = self.target_name
+            candidate = None
+            for root, _dirs, files in os.walk(extract_dir):
+                if binary_name in files:
+                    candidate = os.path.join(root, binary_name)
+                    break
+            if not candidate:
+                self.update_error.emit(f"Bundle did not contain expected binary '{binary_name}'.")
+                return False
+
+            new_exe_path = os.path.join(self.download_dir, binary_name)
+            try:
+                shutil.copy2(candidate, new_exe_path)
+            except Exception as e:
+                self.update_error.emit(f"Failed staging new binary: {e}")
+                return False
 
             old_exe = self._running_binary_path()
             if not old_exe:
