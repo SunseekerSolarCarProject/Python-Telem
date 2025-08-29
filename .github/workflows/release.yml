@@ -164,6 +164,16 @@ jobs:
 
           chmod 600 src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp
 
+      - name: Inspect key files (size only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp; do
+            printf "%s size=" "$f"; wc -c < "$f"
+            # Print first bytes in hex only (no secrets leaked)
+            head -c 16 "$f" | hexdump -C | sed -n '1p'
+          done
+
       - name: Validate key JSON
         shell: bash
         run: |
@@ -223,7 +233,7 @@ jobs:
             release/metadata/targets.json
             release/metadata/snapshot.json
             release/metadata/timestamp.json
-              release/targets/*
-            make_latest: true
-              env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            release/targets/*
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
