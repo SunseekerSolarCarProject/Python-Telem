@@ -137,54 +137,32 @@ jobs:
           set -euo pipefail
           mkdir -p src/updater/keys
 
-          write_json_key() {
-            local path="$1"; shift
-            local raw="$1"; shift
-            local b64="$1"; shift
-            if [ -n "$b64" ]; then
-              echo "$b64" | base64 -d > "$path"
-            else
-              # Preserve exact content including newlines
-              cat > "$path" <<'JSON'
-              ${{ secrets.TUF_KEY_TARGETS_JSON }}
-              JSON
-                          fi
-                        }
+          # Prefer base64 variants if provided (avoids any quoting issues)
+          if [ -n "${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}" ]; then
+            echo "Decoding targets key from *_B64 secret"
+            echo "${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}" | base64 -d > src/updater/keys/targets
+          else
+            echo "Writing targets key from raw JSON secret"
+            printf '%s' "${{ secrets.TUF_KEY_TARGETS_JSON }}" > src/updater/keys/targets
+          fi
 
-                        # targets
-                        if [ -n "${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}" ]; then
-                          echo "Writing targets key from *_B64 secret"
-                          echo "${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}" | base64 -d > src/updater/keys/targets
-                        else
-                          echo "Writing targets key from raw JSON secret"
-                          cat > src/updater/keys/targets <<'JSON'
-              ${{ secrets.TUF_KEY_TARGETS_JSON }}
-              JSON
-                        fi
+          if [ -n "${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}" ]; then
+            echo "Decoding snapshot key from *_B64 secret"
+            echo "${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}" | base64 -d > src/updater/keys/snapshot
+          else
+            echo "Writing snapshot key from raw JSON secret"
+            printf '%s' "${{ secrets.TUF_KEY_SNAPSHOT_JSON }}" > src/updater/keys/snapshot
+          fi
 
-                        # snapshot
-                        if [ -n "${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}" ]; then
-                          echo "Writing snapshot key from *_B64 secret"
-                          echo "${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}" | base64 -d > src/updater/keys/snapshot
-                        else
-                          echo "Writing snapshot key from raw JSON secret"
-                          cat > src/updater/keys/snapshot <<'JSON'
-              ${{ secrets.TUF_KEY_SNAPSHOT_JSON }}
-              JSON
-                        fi
+          if [ -n "${{ secrets.TUF_KEY_TIMESTAMP_JSON_B64 }}" ]; then
+            echo "Decoding timestamp key from *_B64 secret"
+            echo "${{ secrets.TUF_KEY_TIMESTAMP_JSON_B64 }}" | base64 -d > src/updater/keys/timestamp
+          else
+            echo "Writing timestamp key from raw JSON secret"
+            printf '%s' "${{ secrets.TUF_KEY_TIMESTAMP_JSON }}" > src/updater/keys/timestamp
+          fi
 
-                        # timestamp
-                        if [ -n "${{ secrets.TUF_KEY_TIMESTAMP_JSON_B64 }}" ]; then
-                          echo "Writing timestamp key from *_B64 secret"
-                          echo "${{ secrets.TUF_KEY_TIMESTAMP_JSON_B64 }}" | base64 -d > src/updater/keys/timestamp
-                        else
-                          echo "Writing timestamp key from raw JSON secret"
-                          cat > src/updater/keys/timestamp <<'JSON'
-              ${{ secrets.TUF_KEY_TIMESTAMP_JSON }}
-              JSON
-                        fi
-
-                        chmod 600 src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp
+          chmod 600 src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp
 
                     - name: Validate key JSON
                       shell: bash
