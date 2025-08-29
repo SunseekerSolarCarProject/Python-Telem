@@ -7,6 +7,7 @@ import hashlib
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 from tuf.ngclient.updater import Updater  # TUF verification
+from updater.progress_fetcher import ProgressFetcher
 
 class UpdateChecker(QObject):
     update_available = pyqtSignal(str)   # latest version string
@@ -37,10 +38,13 @@ class UpdateChecker(QObject):
 
         # IMPORTANT: point at "latest" so we can discover updates
         base = f"https://github.com/{repo_owner}/{repo_name}/releases/latest/download"
+        # Set up a progress-capable fetcher and reuse it for all operations
+        self._fetcher = ProgressFetcher()
         self.updater = Updater(
             self.metadata_dir,
             metadata_base_url=base + "/",
-            target_base_url=base + "/"
+            target_base_url=base + "/",
+            fetcher=self._fetcher,
         )
 
     @staticmethod
@@ -158,18 +162,16 @@ class UpdateChecker(QObject):
 
             # Download the tar.gz bundle
             bundle_path = os.path.join(self.download_dir, bundle_name)
-            # Note: python-tuf ngclient.download_target does not support a
-            # progress callback in all versions; call without it for
-            # compatibility and optionally update UI elsewhere.
-            try:
-                self.update_progress.emit(5)
-            except Exception:
-                pass
+            # Use our progress fetcher to emit per-byte progress
+            def _emit(received: int, total: int | None, pct: int | None):
+                if pct is not None:
+                    try:
+                        self.update_progress.emit(int(pct))
+                    except Exception:
+                        pass
+            self._fetcher.set_callback(_emit)
             self.updater.download_target(ti, filepath=bundle_path)
-            try:
-                self.update_progress.emit(100)
-            except Exception:
-                pass
+            self._fetcher.set_callback(None)
 
             # Extract bundle and locate the binary inside
             import tarfile, tempfile
@@ -285,6 +287,7 @@ class UpdateChecker(QObject):
                 self.metadata_dir,
                 metadata_base_url=base + "/",
                 target_base_url=base + "/",
+                fetcher=self._fetcher,
             )
             updater.refresh()
 
@@ -295,16 +298,15 @@ class UpdateChecker(QObject):
                 return False
 
             bundle_path = os.path.join(self.download_dir, bundle_name)
-            # See note above re: progress callback compatibility
-            try:
-                self.update_progress.emit(5)
-            except Exception:
-                pass
+            def _emit2(received: int, total: int | None, pct: int | None):
+                if pct is not None:
+                    try:
+                        self.update_progress.emit(int(pct))
+                    except Exception:
+                        pass
+            self._fetcher.set_callback(_emit2)
             updater.download_target(ti, filepath=bundle_path)
-            try:
-                self.update_progress.emit(100)
-            except Exception:
-                pass
+            self._fetcher.set_callback(None)
 
             # Extract and swap-in (reuse logic)
             import tarfile, tempfile

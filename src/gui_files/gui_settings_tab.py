@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,
-    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog
+    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog, QProgressBar
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
@@ -60,6 +60,14 @@ class SettingsTab(QWidget):
         self.install_version_btn.clicked.connect(self._emit_install_selected)
         versions_row.addWidget(self.install_version_btn)
         layout.addLayout(versions_row)
+
+        # Progress status + bar for updates (install/rollback)
+        self.updater_status = QLabel("Updater: Idle")
+        layout.addWidget(self.updater_status)
+        self.updater_progress = QProgressBar()
+        self.updater_progress.setRange(0, 100)
+        self.updater_progress.setValue(0)
+        layout.addWidget(self.updater_progress)
 
         # Logging Level Controls
         log_level_label = QLabel("Select Logging Level:")
@@ -258,6 +266,21 @@ class SettingsTab(QWidget):
         v = self.version_dropdown.currentText().strip()
         if v:
             self.install_version_requested.emit(v)
+
+    def set_update_progress(self, value: int):
+        try:
+            self.updater_progress.setValue(int(value))
+            self.updater_status.setText(f"Downloading update: {int(value)}%")
+        except Exception:
+            pass
+
+    def set_update_status(self, text: str, *, reset_progress: bool = False):
+        try:
+            self.updater_status.setText(text)
+            if reset_progress:
+                self.updater_progress.setValue(0)
+        except Exception:
+            pass
 
     def on_retrain_button_clicked(self):
         """

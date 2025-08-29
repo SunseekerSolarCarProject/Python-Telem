@@ -415,13 +415,25 @@ class TelemetryGUI(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.settings_tab.set_update_status(f"Downloading v{latest_version}...")
+                self.settings_tab.set_update_progress(0)
+            except Exception:
+                pass
             self.updater.download_and_apply_update()
 
     def on_update_progress(self, percent: int):
-        # e.g. update a QProgressBar
-        self.progressBar.setValue(percent)
+        # Forward to Settings tab progress bar
+        try:
+            self.settings_tab.set_update_progress(percent)
+        except Exception:
+            pass
 
     def on_update_error(self, error: str):
+        try:
+            self.settings_tab.set_update_status(f"Update error: {error}", reset_progress=True)
+        except Exception:
+            pass
         QMessageBox.warning(self, "Update Error", error)
 
     # ----- Updater version management -----
@@ -443,6 +455,11 @@ class TelemetryGUI(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.settings_tab.set_update_status(f"Downloading v{version}...")
+                self.settings_tab.set_update_progress(0)
+            except Exception:
+                pass
             self.updater.download_and_apply_version(version)
 
     def update_all_tabs(self, telemetry_data: dict):
