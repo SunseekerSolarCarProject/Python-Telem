@@ -168,20 +168,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c "import json,sys; paths=['src/updater/keys/targets','src/updater/keys/snapshot','src/updater/keys/timestamp'];
-for p in paths:
-    try:
-        json.load(open(p,'r',encoding='utf-8'))
-    except Exception as e:
-        head=open(p,'rb').read(200); hint=''
-        if b'@@@@' in head:
-            hint=' (looks like an ENCRYPTED key file; use scripts/exported_keys/*.json instead)'
-        elif (b'keytype: ed25519' in head) or (b'scheme: ed25519' in head):
-            hint=' (looks like YAML-like text; you must paste exact JSON with double quotes)'
-        elif not head.strip().startswith(b'\x7b') and not head.strip().startswith(b'{'):
-            hint=' (does not start with {; ensure you pasted the full JSON)'
-        print(f'ERROR: {p} is not valid JSON: {e}{hint}'); sys.exit(1)
-print('Keys JSON looks valid.')"
+          python - <<'PY'
+          import json, sys
+          paths = [
+            'src/updater/keys/targets',
+            'src/updater/keys/snapshot',
+            'src/updater/keys/timestamp',
+          ]
+          for p in paths:
+              try:
+                  with open(p, 'r', encoding='utf-8') as f:
+                      json.load(f)
+              except Exception as e:
+                  # Try to give a helpful hint without leaking secrets
+                  with open(p, 'rb') as bf:
+                      head = bf.read(200)
+                  hint = ''
+                  if b'@@@@' in head:
+                      hint = ' (looks like an ENCRYPTED key file; use scripts/exported_keys/*.json instead)'
+                  elif b'keytype: ed25519' in head or b'scheme: ed25519' in head:
+                      hint = ' (looks like YAML-like text; you must paste exact JSON with double quotes)'
+                  elif not head.strip().startswith(b'{'):
+                      hint = ' (does not start with {; ensure you pasted the full JSON)'
+                  print(f"ERROR: {p} is not valid JSON: {e}{hint}")
+                  sys.exit(1)
+              print('Keys JSON looks valid.')
+              PY
 
       - name: Build TUF repo & add targets (repo script)
         shell: bash
@@ -211,7 +223,7 @@ print('Keys JSON looks valid.')"
             release/metadata/targets.json
             release/metadata/snapshot.json
             release/metadata/timestamp.json
-            release/targets/*
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              release/targets/*
+            make_latest: true
+              env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
