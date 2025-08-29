@@ -27,15 +27,25 @@ if not root_src.exists():
 
 def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
     # app_name must match what clients expect (telemetry-windows/macos/linux)
-    repo = Repository(app_name=app_name, repo_dir=repo_dir)
+    repo = Repository(app_name=app_name, repo_dir=repo_dir, keys_dir=repo_dir / 'keystore')
     repo.save_config()   # writes repo/config.json if needed
-    # Avoid interactive key creation/overwrite prompts in CI. We load root.json
-    # ourselves and provide signing keys via repo.publish_changes([keys_dir]).
-    try:
-        repo.initialize(create_keys=False)  # tufup>=0.19 supports this kwarg
-    except TypeError:
-        # Fallback for older tufup: still call initialize(), but note this may
-        # try to create keys if none exist. In CI we ensure keys are provided.
+    # Manually perform a non-interactive init compatible with older tufup:
+    # - ensure dirs exist
+    # - load keys/roles WITHOUT creating/overwriting keys (avoid prompts)
+    for p in [repo.keys_dir, repo.metadata_dir, repo.targets_dir]:
+        p.mkdir(parents=True, exist_ok=True)
+    # Older tufup exposes a private helper with this behavior
+    if hasattr(repo, '_load_keys_and_roles'):
+        repo._load_keys_and_roles(create_keys=False)  # type: ignore[attr-defined]
+    else:
+        # As a last resort, call initialize but ensure keystore is empty to avoid prompts
+        # (should not happen with known tufup versions)
+        try:
+            import shutil
+            if repo.keys_dir.exists():
+                shutil.rmtree(repo.keys_dir)
+        except Exception:
+            pass
         repo.initialize()
     # Add the "bundle" folder; tufup creates telemetry-<platform>-<ver>.tar.gz
     repo.add_bundle(bundle_dir, new_version=version, skip_patch=True,
