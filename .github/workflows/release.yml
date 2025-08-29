@@ -131,38 +131,17 @@ jobs:
           cp artifacts/telemetry-macos       bundles/macos/telemetry
           cp artifacts/telemetry-linux       bundles/linux/telemetry
       
-      - name: Write signing keys from secrets
-        shell: bash
+      - name: Write signing keys (secrets or fallback)
+        env:
+          TUF_KEY_TARGETS_JSON_B64:   ${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}
+          TUF_KEY_SNAPSHOT_JSON_B64:  ${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}
+          TUF_KEY_TIMESTAMP_JSON_B64: ${{ secrets.TUF_KEY_TIMESTAMP_JSON_B64 }}
+          TUF_KEY_TARGETS_JSON:       ${{ secrets.TUF_KEY_TARGETS_JSON }}
+          TUF_KEY_SNAPSHOT_JSON:      ${{ secrets.TUF_KEY_SNAPSHOT_JSON }}
+          TUF_KEY_TIMESTAMP_JSON:     ${{ secrets.TUF_KEY_TIMESTAMP_JSON }}
         run: |
           set -euo pipefail
-          mkdir -p src/updater/keys
-
-          # Prefer base64 variants if provided (avoids any quoting issues)
-          if [ -n "${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}" ]; then
-            echo "Decoding targets key from *_B64 secret"
-            echo "${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}" | base64 -d > src/updater/keys/targets
-          else
-            echo "Writing targets key from raw JSON secret"
-            printf '%s' "${{ secrets.TUF_KEY_TARGETS_JSON }}" > src/updater/keys/targets
-          fi
-
-          if [ -n "${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}" ]; then
-            echo "Decoding snapshot key from *_B64 secret"
-            echo "${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}" | base64 -d > src/updater/keys/snapshot
-          else
-            echo "Writing snapshot key from raw JSON secret"
-            printf '%s' "${{ secrets.TUF_KEY_SNAPSHOT_JSON }}" > src/updater/keys/snapshot
-          fi
-
-          if [ -n "${{ secrets.TUF_KEY_TIMESTAMP_JSON_B64 }}" ]; then
-            echo "Decoding timestamp key from *_B64 secret"
-            echo "${{ secrets.TUF_KEY_TIMESTAMP_JSON_B64 }}" | base64 -d > src/updater/keys/timestamp
-          else
-            echo "Writing timestamp key from raw JSON secret"
-            printf '%s' "${{ secrets.TUF_KEY_TIMESTAMP_JSON }}" > src/updater/keys/timestamp
-          fi
-
-          chmod 600 src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp
+          python scripts/prepare_keys.py --from-dir scripts/exported_keys --keys-dir src/updater/keys
 
       - name: Inspect key files (size only)
         shell: bash

@@ -8,7 +8,7 @@ def validate_paths(paths: list[str]) -> int:
     for p in paths:
         try:
             with open(p, 'r', encoding='utf-8') as f:
-                json.load(f)
+                data = json.load(f)
         except Exception as e:
             # Try to give a helpful hint without leaking secrets
             try:
@@ -27,7 +27,19 @@ def validate_paths(paths: list[str]) -> int:
             print(f"ERROR: {p} is not valid JSON: {e}{hint}")
             ok = False
         else:
-            print(f"{p}: OK")
+            # Sanity-check that this looks like a private key JSON, not TUF metadata
+            if isinstance(data, dict) and 'keyval' in data and isinstance(data.get('keyval'), dict):
+                if 'private' in data['keyval'] and 'public' in data['keyval']:
+                    print(f"{p}: OK (private key JSON)")
+                else:
+                    print(f"ERROR: {p} JSON lacks 'keyval.private'/'keyval.public' fields")
+                    ok = False
+            elif isinstance(data, dict) and 'signed' in data and 'signatures' in data:
+                print(f"ERROR: {p} parsed JSON but looks like TUF metadata (has 'signed'); expected a private key JSON. Use scripts/exported_keys/*.json or GitHub secrets TUF_KEY_*_JSON.")
+                ok = False
+            else:
+                print(f"ERROR: {p} parsed JSON but does not look like a private key JSON (missing 'keyval').")
+                ok = False
     return 0 if ok else 1
 
 
@@ -52,4 +64,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main(sys.argv))
-
