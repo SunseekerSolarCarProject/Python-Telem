@@ -158,14 +158,18 @@ class UpdateChecker(QObject):
 
             # Download the tar.gz bundle
             bundle_path = os.path.join(self.download_dir, bundle_name)
-            def _progress(pct):
-                # pct is float 0..100 (or bytes); normalize to int 0..100 when possible
-                try:
-                    self.update_progress.emit(int(pct))
-                except Exception:
-                    pass
-
-            self.updater.download_target(ti, filepath=bundle_path, progress_callback=_progress)
+            # Note: python-tuf ngclient.download_target does not support a
+            # progress callback in all versions; call without it for
+            # compatibility and optionally update UI elsewhere.
+            try:
+                self.update_progress.emit(5)
+            except Exception:
+                pass
+            self.updater.download_target(ti, filepath=bundle_path)
+            try:
+                self.update_progress.emit(100)
+            except Exception:
+                pass
 
             # Extract bundle and locate the binary inside
             import tarfile, tempfile
@@ -291,12 +295,16 @@ class UpdateChecker(QObject):
                 return False
 
             bundle_path = os.path.join(self.download_dir, bundle_name)
-            def _progress(pct):
-                try:
-                    self.update_progress.emit(int(pct))
-                except Exception:
-                    pass
-            updater.download_target(ti, filepath=bundle_path, progress_callback=_progress)
+            # See note above re: progress callback compatibility
+            try:
+                self.update_progress.emit(5)
+            except Exception:
+                pass
+            updater.download_target(ti, filepath=bundle_path)
+            try:
+                self.update_progress.emit(100)
+            except Exception:
+                pass
 
             # Extract and swap-in (reuse logic)
             import tarfile, tempfile
