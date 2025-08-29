@@ -164,54 +164,55 @@ jobs:
 
           chmod 600 src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp
 
-                    - name: Validate key JSON
-                      shell: bash
-                      run: |
-                        set -euo pipefail
-                        python - <<'PY'
-              import json, sys
-              for p in (
-                'src/updater/keys/targets',
-                'src/updater/keys/snapshot',
-                'src/updater/keys/timestamp',
-              ):
-                  try:
-                      with open(p, 'r', encoding='utf-8') as f:
-                          json.load(f)
-                  except Exception as e:
-                      print(f"ERROR: {p} is not valid JSON: {e}")
-                      sys.exit(1)
-              print('Keys JSON looks valid.')
-              PY
-                    - name: Build TUF repo & add targets (repo script)
-                      shell: bash
-                      env:
-                        TAG: ${{ github.ref_name }}      # e.g. v1.7.0
-                      run: |
-                        set -euo pipefail
-                        VERSION="${TAG#v}"
-                        echo "VERSION=${VERSION}"
-                        python scripts/build_tuf_repo.py
+      - name: Validate key JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys
+          for p in (
+            'src/updater/keys/targets',
+            'src/updater/keys/snapshot',
+            'src/updater/keys/timestamp',
+          ):
+              try:
+                  with open(p, 'r', encoding='utf-8') as f:
+                      json.load(f)
+              except Exception as e:
+                  print(f"ERROR: {p} is not valid JSON: {e}")
+                  sys.exit(1)
+          print('Keys JSON looks valid.')
+          PY
 
-                    - name: Show release payload
-                      shell: bash
-                      run: |
-                        echo "::group::Metadata"
-                        ls -la release/metadata
-                        echo "::endgroup::"
-                        echo "::group::Targets"
-                        ls -la release/targets
-                        echo "::endgroup::"
+                - name: Build TUF repo & add targets (repo script)
+                  shell: bash
+                  env:
+                    TAG: ${{ github.ref_name }}      # e.g. v1.7.0
+                  run: |
+                    set -euo pipefail
+                    VERSION="${TAG#v}"
+                    echo "VERSION=${VERSION}"
+                    python scripts/build_tuf_repo.py
 
-                    - name: Create GitHub Release
-                      uses: softprops/action-gh-release@v2
-                      with:
-                        files: |
-                          release/metadata/root.json
-                          release/metadata/targets.json
-                          release/metadata/snapshot.json
-                          release/metadata/timestamp.json
-                          release/targets/*
-                        make_latest: true
-                      env:
-                        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                - name: Show release payload
+                  shell: bash
+                  run: |
+                    echo "::group::Metadata"
+                    ls -la release/metadata
+                    echo "::endgroup::"
+                    echo "::group::Targets"
+                    ls -la release/targets
+                    echo "::endgroup::"
+
+                - name: Create GitHub Release
+                  uses: softprops/action-gh-release@v2
+                  with:
+                    files: |
+                      release/metadata/root.json
+                      release/metadata/targets.json
+                      release/metadata/snapshot.json
+                      release/metadata/timestamp.json
+                      release/targets/*
+                    make_latest: true
+                  env:
+                    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
