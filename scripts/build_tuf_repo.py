@@ -2,19 +2,35 @@
 from pathlib import Path
 from tufup.repo import Repository
 import os
+import re
 import sys
 
-# VERSION comes from the workflow step that calls this script:
-#   env TAG=v1.7.0 → VERSION=1.7.0 (stripped in the YAML step)
-version = os.environ.get("VERSION") or os.environ.get("TAG", "").lstrip("v")
+
+def _extract_version(raw: str) -> str | None:
+    """
+    Extract semver-like version from a tag/string.
+    Accepts: 'v1.7.0', 'v.1.7.0', '1.7.0', 'v1.7.0-rc1', etc.
+    Returns version only, e.g. '1.7.0' or '1.7.0-rc1'.
+    """
+    if not raw:
+        return None
+    raw = raw.strip()
+    raw = re.sub(r"^[vV][._-]?", "", raw)
+    m = re.match(r"^(\d+\.\d+\.\d+(?:[-.+][0-9A-Za-z]+)*)$", raw)
+    return m.group(1) if m else None
+
+
+# VERSION comes from the workflow step; if absent sanitize TAG
+raw = os.environ.get("VERSION") or os.environ.get("TAG", "")
+version = _extract_version(raw)
 if not version:
-    print("ERROR: VERSION env var is empty", file=sys.stderr)
+    print(f"ERROR: Could not parse VERSION from '{raw}'. Use tag like v1.7.0", file=sys.stderr)
     sys.exit(1)
 
-repo_dir    = Path("release")
-meta_dir    = repo_dir / "metadata"
+repo_dir = Path("release")
+meta_dir = repo_dir / "metadata"
 targets_dir = repo_dir / "targets"
-keys_dir    = Path("src/updater/keys")
+keys_dir = Path("src/updater/keys")
 
 # Ensure dirs & bootstrap trusted root
 meta_dir.mkdir(parents=True, exist_ok=True)
@@ -25,17 +41,18 @@ if not root_src.exists():
     sys.exit(1)
 (meta_dir / "root.json").write_bytes(root_src.read_bytes())
 
+
 def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
     # app_name must match what clients expect (telemetry-windows/macos/linux)
-    repo = Repository(app_name=app_name, repo_dir=repo_dir, keys_dir=repo_dir / 'keystore')
-    repo.save_config()   # writes repo/config.json if needed
+    repo = Repository(app_name=app_name, repo_dir=repo_dir, keys_dir=repo_dir / "keystore")
+    repo.save_config()  # writes repo/config.json if needed
     # Manually perform a non-interactive init compatible with older tufup:
     # - ensure dirs exist
     # - load keys/roles WITHOUT creating/overwriting keys (avoid prompts)
     for p in [repo.keys_dir, repo.metadata_dir, repo.targets_dir]:
         p.mkdir(parents=True, exist_ok=True)
     # Older tufup exposes a private helper with this behavior
-    if hasattr(repo, '_load_keys_and_roles'):
+    if hasattr(repo, "_load_keys_and_roles"):
         repo._load_keys_and_roles(create_keys=False)  # type: ignore[attr-defined]
     else:
         # As a last resort, call initialize but ensure keystore is empty to avoid prompts
@@ -48,12 +65,18 @@ def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
             pass
         repo.initialize()
     # Add the "bundle" folder; tufup creates telemetry-<platform>-<ver>.tar.gz
-    repo.add_bundle(bundle_dir, new_version=version, skip_patch=True,
-                    custom_metadata={"platform": platform_tag})
+    repo.add_bundle(
+        bundle_dir,
+        new_version=version,
+        skip_patch=True,
+        custom_metadata={"platform": platform_tag},
+    )
     # Sign targets/snapshot/timestamp with your keys, write metadata
     repo.publish_changes([keys_dir])
 
+
 add_platform("telemetry-windows", "bundles/windows", "windows")
-add_platform("telemetry-macos",   "bundles/macos",   "macos")
-add_platform("telemetry-linux",   "bundles/linux",   "linux")
+add_platform("telemetry-macos", "bundles/macos", "macos")
+add_platform("telemetry-linux", "bundles/linux", "linux")
 print("TUF repo built. Metadata and targets in ./release")
+

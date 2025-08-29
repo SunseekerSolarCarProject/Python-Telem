@@ -82,7 +82,12 @@ class UpdateChecker(QObject):
             r = requests.get(url, timeout=6)
             r.raise_for_status()
             tag = (r.json().get("tag_name") or "").strip()
-            return tag[1:] if tag.lower().startswith("v") else tag or None
+            if tag.lower().startswith("v"):
+                tag = tag[1:]
+            # tolerate an accidental separator like 'v.1.7.0'
+            if tag.startswith("."):
+                tag = tag[1:]
+            return tag or None
         except Exception:
             return None
 
