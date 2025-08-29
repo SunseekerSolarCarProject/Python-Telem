@@ -16,3 +16,6 @@ output/main_app.exe
 output/main_app_6-26-2025.exe
 wh_per_mile_summary.csv
 dist/Telemetry.exe
+scripts/exported_keys/timestamp.json
+scripts/exported_keys/targets.json
+scripts/exported_keys/snapshot.json

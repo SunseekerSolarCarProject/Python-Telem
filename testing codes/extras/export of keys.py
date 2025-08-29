@@ -9,12 +9,13 @@ KEYS_DIR = Path("src/updater/keys")
 # Where to write the decrypted JSON (gitignored recommended)
 OUT_DIR = Path("scripts/exported_keys")
 
-def export_one(name: str):
+def export_one(name: str, pw_cache: dict):
     src = KEYS_DIR / name
     if not src.exists():
         print(f"ERROR: missing {src}", file=sys.stderr)
         return False
     pw = getpass.getpass(f"Password for '{src}': ")
+    pw_cache[name] = pw
     key = import_ed25519_privatekey_from_file(str(src), password=pw)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / f"{name}.json"
@@ -24,8 +25,9 @@ def export_one(name: str):
     return True
 
 ok = True
+passwords = {}
 for name in ("targets", "snapshot", "timestamp"):
-    ok &= export_one(name)
+    ok &= export_one(name, passwords)
 
 if not ok:
     sys.exit(1)
@@ -37,3 +39,7 @@ print(
     "  - TUF_KEY_SNAPSHOT_JSON  -> snapshot.json\n"
     "  - TUF_KEY_TIMESTAMP_JSON -> timestamp.json\n"
 )
+
+print("\nPasswords you entered (store securely):")
+for name in ("targets", "snapshot", "timestamp"):
+    print(f"  {name:9s}: {passwords.get(name, '')}")
