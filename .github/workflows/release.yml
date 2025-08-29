@@ -203,7 +203,7 @@ jobs:
                   print(f"ERROR: {p} is not valid JSON: {e}{hint}")
                   sys.exit(1)
               print('Keys JSON looks valid.')
-              PY
+              'PY'
 
       - name: Build TUF repo & add targets (repo script)
         shell: bash
