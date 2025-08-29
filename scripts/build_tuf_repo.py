@@ -29,7 +29,14 @@ def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
     # app_name must match what clients expect (telemetry-windows/macos/linux)
     repo = Repository(app_name=app_name, repo_dir=repo_dir)
     repo.save_config()   # writes repo/config.json if needed
-    repo.initialize()    # loads roles (root), creates metadata/targets dirs
+    # Avoid interactive key creation/overwrite prompts in CI. We load root.json
+    # ourselves and provide signing keys via repo.publish_changes([keys_dir]).
+    try:
+        repo.initialize(create_keys=False)  # tufup>=0.19 supports this kwarg
+    except TypeError:
+        # Fallback for older tufup: still call initialize(), but note this may
+        # try to create keys if none exist. In CI we ensure keys are provided.
+        repo.initialize()
     # Add the "bundle" folder; tufup creates telemetry-<platform>-<ver>.tar.gz
     repo.add_bundle(bundle_dir, new_version=version, skip_patch=True,
                     custom_metadata={"platform": platform_tag})
