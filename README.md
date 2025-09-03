@@ -31,3 +31,17 @@ If wanting to add new battery configs to the software dropdown follow these step
 Devs that want to create a new executable for the telemetry software on windows side follow the instructions ahead. Make sure auto-py-to-exe is installed with this command 'pip install auto-py-to-exe'. then once it is installed run this command either 'auto-py-to-exe' if you are dealing in another program editor. If entering into VSCode then use this command 'python -m auto_py_to_exe' as this makes it work because the VSCode thinks that there is multiple versions of python in VSCode.
 
 There is a entire debug feature that is implemented into this program for developers that want to see what is happening within the code if some new features break the program and can't figure out where the data is going to. The data logs are backup 5 times at each size of 20MB.
+## Repository Layout (cleaned)
+- `src/`: application source code
+- `src/hooks/`: PyInstaller hooks (used in builds)
+- `scripts/`: TUF signing/release helper scripts
+- `config_files/`: battery configuration text files for runtime
+- `dev/testing/`: old testing/experimental scripts moved here
+- `dev/checks/`: small one-off check scripts
+- `dev/packaging/`: auto-py-to-exe settings and packaging helpers
+- `dist/`: build outputs (ignored by Git)
+- `src/application_data/`: runtime logs/CSVs (ignored by Git)
+- `combined_training_data.csv`, `wh_per_mile_summary.csv`: local dev artifacts (ignored)
+- `vehicle_years.txt`: GUI dropdown values (kept at repo root)
+
+> Note: `__pycache__/` and `*.pyc` are ignored and were cleaned from the working tree. `.venv/` remains local-only.

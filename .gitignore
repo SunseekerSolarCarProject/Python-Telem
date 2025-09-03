@@ -19,3 +19,32 @@ dist/Telemetry.exe
 scripts/exported_keys/timestamp.json
 scripts/exported_keys/targets.json
 scripts/exported_keys/snapshot.json
+
+# General Python ignores
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.python-version
+
+# Virtual environments
+env/
+venv/
+.venv/
+
+# Build artifacts
+build/
+dist/
+*.spec
+out/
+output/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# App runtime data
+src/application_data/*.csv
+src/application_data/*.log
+src/application_data/updates/metadata/*.json
