@@ -24,6 +24,7 @@ from gui_files.gui_graph_tab import GraphTab
 from gui_files.gui_data_table import DataTableTab
 from gui_files.gui_custom_data_table import CustomizableDataTableTab
 from gui_files.gui_data_display_tab import DataDisplayTab
+from gui_files.gui_image_annotation_tab import ImageAnnotationTab
 from gui_files.gui_settings_tab import SettingsTab
 from gui_files.gui_csv_management import CSVManagementTab
 from gui_files.gui_config_dialog import ConfigDialog
@@ -366,6 +367,16 @@ class TelemetryGUI(QWidget):
         self.data_display_tab = DataDisplayTab(self.units)
         self.tabs.addTab(self.data_display_tab, "Data Display")
 
+        # Image Annotation Tabs
+        try:
+            self.battery_image_tab = ImageAnnotationTab("battery", "Battery Image", self.config_file)
+            self.array_image_tab = ImageAnnotationTab("array", "Array Image", self.config_file)
+            self.tabs.addTab(self.battery_image_tab, "Battery Image")
+            self.tabs.addTab(self.array_image_tab, "Array Image")
+        except Exception as e:
+            # Fail-safe: don't block the rest of UI if these fail
+            self.logger.error(f"Failed to init image tabs: {e}")
+
         # Settings Tab
         self.settings_tab = SettingsTab(graph_groups, self.color_mapping)
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
@@ -480,6 +491,17 @@ class TelemetryGUI(QWidget):
             self.data_table_tab.update_data(telemetry_data)
             self.data_display_tab.update_display(telemetry_data)
             self.custom_data_table_tab.update_data(telemetry_data)
+
+            # Feed battery temperature probe updates into the Battery Image tab
+            try:
+                pid_key = TelemetryKey.BP_TMX_ID.value[0]
+                t_key = TelemetryKey.BP_TMX_TEMPERATURE.value[0]
+                if hasattr(self, 'battery_image_tab') and pid_key in telemetry_data and t_key in telemetry_data:
+                    pid_val = telemetry_data.get(pid_key)
+                    temp_val = telemetry_data.get(t_key)
+                    self.battery_image_tab.update_probe_reading(pid_val, temp_val)
+            except Exception as e:
+                self.logger.error(f"Image tab update error: {e}")
         except Exception as e:
             self.logger.error(f"Error updating all tabs: {e}")
 
@@ -555,4 +577,11 @@ class TelemetryGUI(QWidget):
         Override the closeEvent to ensure color mapping is saved before exiting.
         """
         self.save_color_mapping()
+        # Persist image annotations if present
+        try:
+            for tab in (getattr(self, 'battery_image_tab', None), getattr(self, 'array_image_tab', None)):
+                if tab and hasattr(tab, 'save_state'):
+                    tab.save_state()
+        except Exception:
+            pass
         event.accept()

@@ -48,3 +48,4 @@ Thumbs.db
 src/application_data/*.csv
 src/application_data/*.log
 src/application_data/updates/metadata/*.json
+src/application_data/user_images/battery.png
