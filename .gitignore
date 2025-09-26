@@ -49,3 +49,5 @@ src/application_data/*.csv
 src/application_data/*.log
 src/application_data/updates/metadata/*.json
 src/application_data/user_images/battery.png
+src/application_data/user_logs/array_temps.csv
+src/application_data/user_logs/battery_temps.csv

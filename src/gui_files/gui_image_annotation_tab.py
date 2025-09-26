@@ -1,10 +1,8 @@
 from __future__ import annotations
-
 import os
 import json
 import shutil
 from typing import List, Tuple, Optional, Dict
-
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap, QColor, QPen, QBrush
 from PyQt6.QtWidgets import (
@@ -19,15 +17,12 @@ from PyQt6.QtWidgets import (
     QFrame,
     QSpinBox,
 )
-
-
 class _ImageCanvas(QWidget):
     points_changed = pyqtSignal()
     """
     A QWidget that displays an image (pixmap) with aspect fit and allows
     clicking to add points. Points are stored as normalized (x,y) in [0,1].
     """
-
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setMinimumSize(300, 200)
@@ -39,11 +34,9 @@ class _ImageCanvas(QWidget):
         self._point_ids: List[Optional[int]] = []
         self._point_temps: List[Optional[float]] = []
         self._hottest_index: Optional[int] = None
-
     def set_pixmap(self, pm: Optional[QPixmap]):
         self._pixmap = pm
         self.update()
-
     def set_points(self, pts: List[Tuple[float, float]]):
         self._points = list(pts)
         # Keep meta arrays aligned
@@ -54,10 +47,8 @@ class _ImageCanvas(QWidget):
             self._point_temps = (self._point_temps + [None] * n)[:n]
         self.points_changed.emit()
         self.update()
-
     def points(self) -> List[Tuple[float, float]]:
         return list(self._points)
-
     def clear_points(self):
         self._points.clear()
         self._point_ids.clear()
@@ -65,7 +56,6 @@ class _ImageCanvas(QWidget):
         self._hottest_index = None
         self.points_changed.emit()
         self.update()
-
     def undo_last(self):
         if self._points:
             self._points.pop()
@@ -77,7 +67,6 @@ class _ImageCanvas(QWidget):
                 self._hottest_index = None
             self.points_changed.emit()
             self.update()
-
     def _image_target_rect(self) -> Optional[QRectF]:
         if not self._pixmap or self._pixmap.isNull():
             return None
@@ -90,7 +79,6 @@ class _ImageCanvas(QWidget):
         x = (W - dw) / 2
         y = (H - dh) / 2
         return QRectF(x, y, dw, dh)
-
     def mousePressEvent(self, event):
         if not self._pixmap or self._pixmap.isNull():
             return
@@ -104,7 +92,7 @@ class _ImageCanvas(QWidget):
             return
         nx = (px - r.x()) / r.width()
         ny = (py - r.y()) / r.height()
-        # clamp 0..1
+        # clamp 0.1
         nx = max(0.0, min(1.0, nx))
         ny = max(0.0, min(1.0, ny))
         self._points.append((nx, ny))
@@ -114,12 +102,10 @@ class _ImageCanvas(QWidget):
         self.points_changed.emit()
         self.update()
         super().mousePressEvent(event)
-
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.fillRect(self.rect(), QColor(30, 30, 30))
-
         if self._pixmap and not self._pixmap.isNull():
             r = self._image_target_rect() or QRectF(0, 0, self.width(), self.height())
             # draw image
@@ -128,7 +114,6 @@ class _ImageCanvas(QWidget):
             temps = [t for t in self._point_temps if isinstance(t, (int, float))]
             tmin = min(temps) if temps else None
             tmax = max(temps) if temps else None
-
             for i, (nx, ny) in enumerate(self._points):
                 cx = r.x() + nx * r.width()
                 cy = r.y() + ny * r.height()
@@ -145,12 +130,33 @@ class _ImageCanvas(QWidget):
                 p.setPen(QPen(QColor(0, 0, 0, 180), 2))
                 p.setBrush(QBrush(col))
                 p.drawEllipse(QPointF(cx, cy), self._dot_radius_px, self._dot_radius_px)
-
                 # label with ID if available
                 if i < len(self._point_ids) and self._point_ids[i] is not None:
-                    p.setPen(QPen(QColor(240, 240, 240)))
-                    p.drawText(int(cx + 8), int(cy - 8), str(self._point_ids[i]))
-
+                    label_text = str(self._point_ids[i])
+                    temp_val = self._point_temps[i] if i < len(self._point_temps) else None
+                    lines = [label_text]
+                    if isinstance(temp_val, (int, float)):
+                        lines.append(f"{temp_val:.1f}")
+                    metrics = p.fontMetrics()
+                    line_height = metrics.height()
+                    line_spacing = 2
+                    baseline_x = cx + self._dot_radius_px + 8
+                    baseline_y = cy - self._dot_radius_px - 2 - (len(lines) - 1) * (line_height + line_spacing)
+                    text_width = max(metrics.horizontalAdvance(line) for line in lines) if lines else 0
+                    left = baseline_x - 4
+                    top = baseline_y - metrics.ascent() - 3
+                    bottom = baseline_y + metrics.descent() + (len(lines) - 1) * (line_height + line_spacing) + 3
+                    right = baseline_x + text_width + 4
+                    bg_rect = QRectF(left, top, right - left, bottom - top)
+                    p.save()
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(QBrush(QColor(20, 20, 20, 220)))
+                    p.drawRoundedRect(bg_rect, 3, 3)
+                    p.restore()
+                    p.setPen(QPen(QColor(255, 215, 0)))
+                    for line_index, text_line in enumerate(lines):
+                        line_y = baseline_y + line_index * (line_height + line_spacing)
+                        p.drawText(QPointF(baseline_x, line_y), text_line)
                 # highlight hottest
                 if self._hottest_index is not None and i == self._hottest_index:
                     p.setPen(QPen(QColor(255, 215, 0), 3))
@@ -162,7 +168,6 @@ class _ImageCanvas(QWidget):
             msg = "Click 'Load Image' to choose a picture"
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, msg)
         p.end()
-
     # meta setters used by parent tab
     def set_point_ids(self, ids: List[Optional[int]]):
         self._point_ids = list(ids)
@@ -171,7 +176,6 @@ class _ImageCanvas(QWidget):
         if len(self._point_ids) != n:
             self._point_ids = (self._point_ids + [None] * n)[:n]
         self.update()
-
     def set_point_temps(self, temps: List[Optional[float]]):
         self._point_temps = list(temps)
         # align with points length
@@ -179,16 +183,19 @@ class _ImageCanvas(QWidget):
         if len(self._point_temps) != n:
             self._point_temps = (self._point_temps + [None] * n)[:n]
         self.update()
-
     def set_hottest_index(self, idx: Optional[int]):
         self._hottest_index = idx
         self.update()
-
-
+class _NoWheelSpinBox(QSpinBox):
+    """QSpinBox that ignores wheel scroll to avoid accidental changes."""
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+    def wheelEvent(self, event):
+        event.ignore()
 class ImageAnnotationTab(QWidget):
     """
     Generic image-annotation tab (click to add dots) with simple persistence.
-
     Persists to JSON at `config_file` under key:
       image_annotations[tab_key] = {
         "image": "relative/path/inside/storage_dir",
@@ -196,7 +203,6 @@ class ImageAnnotationTab(QWidget):
       }
     The actual image file is copied into `storage_dir/user_images/<tab_key>.<ext>`.
     """
-
     def __init__(self, tab_key: str, friendly_name: str, config_file: str):
         super().__init__()
         self._tab_key = tab_key
@@ -205,7 +211,6 @@ class ImageAnnotationTab(QWidget):
         self._storage_dir = os.path.dirname(config_file) if config_file else os.getcwd()
         self._images_dir = os.path.join(self._storage_dir, "user_images")
         os.makedirs(self._images_dir, exist_ok=True)
-
         self._canvas = _ImageCanvas(self)
         self._image_rel_path: Optional[str] = None
         # per-point metadata
@@ -213,13 +218,10 @@ class ImageAnnotationTab(QWidget):
         self._point_temps: List[Optional[float]] = []
         self._rows: List[Dict[str, object]] = []  # UI row refs
         self._latest_by_id: Dict[int, float] = {}
-
         self._init_ui()
         self._load_state()
-
     def _init_ui(self):
         layout = QVBoxLayout(self)
-
         # Controls
         bar = QHBoxLayout()
         self.btn_load = QPushButton("Load Image")
@@ -232,18 +234,14 @@ class ImageAnnotationTab(QWidget):
         bar.addWidget(self.btn_undo)
         bar.addStretch(1)
         bar.addWidget(self.info_label)
-
         layout.addLayout(bar)
-
         # Main area: canvas + right-side IDs panel (scrollable)
         area = QHBoxLayout()
         area.addWidget(self._canvas, stretch=1)
-
         right = QVBoxLayout()
         self.ids_title = QLabel("Probe IDs")
         self.ids_title.setStyleSheet("color:#ddd; font-weight:bold;")
         right.addWidget(self.ids_title)
-
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.ids_panel = QWidget()
@@ -251,15 +249,12 @@ class ImageAnnotationTab(QWidget):
         self.ids_layout.addStretch(1)
         self.scroll.setWidget(self.ids_panel)
         right.addWidget(self.scroll, stretch=1)
-
         area.addLayout(right, stretch=0)
         layout.addLayout(area, stretch=1)
-
         self.btn_load.clicked.connect(self._on_load_image)
         self.btn_clear.clicked.connect(self._on_clear_points)
         self.btn_undo.clicked.connect(self._on_undo)
         self._canvas.points_changed.connect(self._on_points_changed)
-
     # ----- persistence -----
     def _read_config(self) -> dict:
         try:
@@ -269,14 +264,12 @@ class ImageAnnotationTab(QWidget):
         except Exception:
             pass
         return {}
-
     def _write_config(self, data: dict):
         try:
             with open(self._config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4)
         except Exception as e:
             QMessageBox.warning(self, self._friendly_name, f"Failed saving config: {e}")
-
     def _load_state(self):
         cfg = self._read_config()
         section = (cfg.get("image_annotations") or {}).get(self._tab_key)
@@ -310,7 +303,6 @@ class ImageAnnotationTab(QWidget):
         n = len(self._canvas.points())
         self._point_temps = [None] * n
         self._rebuild_id_rows()
-
     def _save_state(self):
         cfg = self._read_config()
         cfg.setdefault("image_annotations", {})
@@ -321,7 +313,6 @@ class ImageAnnotationTab(QWidget):
         }
         cfg["image_annotations"][self._tab_key] = entry
         self._write_config(cfg)
-
     # ----- actions -----
     def _on_load_image(self):
         file, _ = QFileDialog.getOpenFileName(
@@ -336,7 +327,6 @@ class ImageAnnotationTab(QWidget):
         if pm.isNull():
             QMessageBox.warning(self, self._friendly_name, "Could not load image.")
             return
-
         # Copy into storage dir for persistence
         ext = os.path.splitext(file)[1].lower() or ".png"
         dest_rel = os.path.join("user_images", f"{self._tab_key}{ext}")
@@ -347,13 +337,11 @@ class ImageAnnotationTab(QWidget):
         except Exception as e:
             QMessageBox.warning(self, self._friendly_name, f"Failed to save image copy: {e}")
             return
-
         self._image_rel_path = dest_rel
         self._canvas.set_pixmap(pm)
         # preserve points when changing image? start fresh seems safer
         self._canvas.clear_points()
         self._save_state()
-
     def _on_clear_points(self):
         self._canvas.clear_points()
         self._point_ids.clear()
@@ -361,7 +349,6 @@ class ImageAnnotationTab(QWidget):
         self._latest_by_id.clear()
         self._rebuild_id_rows()
         self._save_state()
-
     def _on_undo(self):
         self._canvas.undo_last()
         if self._point_ids:
@@ -370,11 +357,9 @@ class ImageAnnotationTab(QWidget):
             self._point_temps = self._point_temps[:len(self._canvas.points())]
         self._rebuild_id_rows()
         self._save_state()
-
     # allow external caller to force save (e.g., on app close)
     def save_state(self):
         self._save_state()
-
     # ----- internal: react to points changed -----
     def _on_points_changed(self):
         n = len(self._canvas.points())
@@ -386,7 +371,6 @@ class ImageAnnotationTab(QWidget):
         self._canvas.set_point_temps(self._point_temps)
         self._rebuild_id_rows()
         self._save_state()
-
     def _rebuild_id_rows(self):
         # clear
         for i in reversed(range(self.ids_layout.count())):
@@ -400,14 +384,13 @@ class ImageAnnotationTab(QWidget):
             row = QHBoxLayout()
             lab = QLabel(f"#{idx}")
             lab.setStyleSheet("color:#ccc;")
-            spin = QSpinBox()
+            spin = _NoWheelSpinBox()
             spin.setRange(0, 4095)
             # Set initial value; if None, leave at 0
             if idx < len(self._point_ids) and self._point_ids[idx] is not None:
                 spin.setValue(int(self._point_ids[idx]))
             temp = QLabel("")
             temp.setStyleSheet("color:#aaa; min-width:70px;")
-
             def make_handler(i):
                 def _on_change(v):
                     self._point_ids[i] = int(v)
@@ -415,22 +398,20 @@ class ImageAnnotationTab(QWidget):
                     self._save_state()
                 return _on_change
             spin.valueChanged.connect(make_handler(idx))
-
             row.addWidget(lab)
             row.addWidget(spin)
             row.addWidget(temp)
             row.addStretch(1)
-
             container = QFrame()
             container.setLayout(row)
             self.ids_layout.addWidget(container)
             self._rows.append({"spin": spin, "temp": temp})
         self.ids_layout.addStretch(1)
-
     # ----- telemetry integration -----
-    def update_probe_reading(self, probe_id: int, temperature: float):
+    def update_probe_reading(self, probe_id: int, temperature: float, timestamp: Optional[float] = None):
         """
         Update latest reading for a single probe ID and refresh visuals.
+        A timestamp can be provided for compatibility with upstream callers.
         """
         try:
             pid = int(probe_id)
@@ -440,7 +421,6 @@ class ImageAnnotationTab(QWidget):
             t = float(temperature)
         except Exception:
             return
-
         self._latest_by_id[pid] = t
         # propagate to any points assigned this id
         changed = False
@@ -455,7 +435,6 @@ class ImageAnnotationTab(QWidget):
                     lab = self._rows[i]["temp"]
                     if isinstance(lab, QLabel):
                         lab.setText(f"{t:.1f}")
-
         if changed:
             # determine hottest among assigned points with temps
             hottest_idx = None

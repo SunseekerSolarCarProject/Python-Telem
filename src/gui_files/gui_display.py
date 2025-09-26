@@ -496,10 +496,13 @@ class TelemetryGUI(QWidget):
             try:
                 pid_key = TelemetryKey.BP_TMX_ID.value[0]
                 t_key = TelemetryKey.BP_TMX_TEMPERATURE.value[0]
+                ts_key = TelemetryKey.TIMESTAMP.value[0]
+                dts_key = TelemetryKey.DEVICE_TIMESTAMP.value[0]
                 if hasattr(self, 'battery_image_tab') and pid_key in telemetry_data and t_key in telemetry_data:
                     pid_val = telemetry_data.get(pid_key)
                     temp_val = telemetry_data.get(t_key)
-                    self.battery_image_tab.update_probe_reading(pid_val, temp_val)
+                    ts_val = telemetry_data.get(ts_key) or telemetry_data.get(dts_key) or None
+                    self.battery_image_tab.update_probe_reading(pid_val, temp_val, ts_val)
             except Exception as e:
                 self.logger.error(f"Image tab update error: {e}")
         except Exception as e:

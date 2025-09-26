@@ -275,18 +275,18 @@ def generate_data_block(runtime):
     dc_swc_value1_hex = float_to_hex(dc_swc_float)
 
     # BP_VMX & BP_VMN: ID (0-50), Value (0-5) with 6 decimal places
-    bp_vmx_id = random.uniform(0, 50)
+    bp_vmx_id = int(random.uniform(0, 50))
     bp_vmx_value = random.uniform(0, 5)
     bp_vmx_hex1 = float_to_hex(bp_vmx_id)
     bp_vmx_hex2 = float_to_hex(bp_vmx_value)
 
-    bp_vmn_id = random.uniform(0, 50)
+    bp_vmn_id = int(random.uniform(0, 50))
     bp_vmn_value = random.uniform(0, 5)
     bp_vmn_hex1 = float_to_hex(bp_vmn_id)
     bp_vmn_hex2 = float_to_hex(bp_vmn_value)
 
     # BP_TMX: ID (0-50), Temperature (-40 to 180) with 8 decimal places
-    bp_tmx_id = random.uniform(0, 50)
+    bp_tmx_id = int(random.uniform(0, 50))
     bp_tmx_temp = random.uniform(-40, 180)
     bp_tmx_hex1 = float_to_hex(bp_tmx_id)
     bp_tmx_hex2 = float_to_hex(bp_tmx_temp)
