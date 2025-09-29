@@ -186,10 +186,15 @@ class UpdateChecker(QObject):
             # Find expected binary inside extracted contents
             binary_name = self.target_name
             candidate = None
+            support_files: list[str] = []
+            support_names = {"python312.dll", "python3.dll"} if os.name == "nt" else set()
             for root, _dirs, files in os.walk(extract_dir):
-                if binary_name in files:
+                if candidate is None and binary_name in files:
                     candidate = os.path.join(root, binary_name)
-                    break
+                if support_names:
+                    for fname in files:
+                        if fname.lower() in support_names:
+                            support_files.append(os.path.join(root, fname))
             if not candidate:
                 self.update_error.emit(f"Bundle did not contain expected binary '{binary_name}'.")
                 return False
@@ -205,6 +210,14 @@ class UpdateChecker(QObject):
             if not old_exe:
                 self.update_error.emit("No runnable binary path detected.")
                 return False
+
+            if support_files:
+                target_dir = os.path.dirname(old_exe)
+                for src_path in support_files:
+                    try:
+                        shutil.copy2(src_path, os.path.join(target_dir, os.path.basename(src_path)))
+                    except Exception:
+                        pass
 
             if os.name == "nt":
                 # Windows: write a tiny batch that waits for this PID to exit, then moves the new file into place and relaunches.

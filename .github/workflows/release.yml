@@ -88,12 +88,20 @@ jobs:
             args+=(--add-binary "${PY3_DLL}${{ matrix.sep }}.")
           fi
           pyinstaller "${args[@]}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "${pythonLocation}\\python312.dll" dist/python312.dll
+            cp "${pythonLocation}\\python3.dll" dist/python3.dll
+          fi
 
       - name: Rename artifact
         shell: bash
         run: |
           mkdir -p out
           cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp dist/python312.dll out/python312.dll
+            cp dist/python3.dll out/python3.dll
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -137,6 +145,8 @@ jobs:
 
           mkdir -p bundles/windows bundles/macos bundles/linux
           cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
+          if [ -f artifacts/python312.dll ]; then cp artifacts/python312.dll bundles/windows/python312.dll; fi
+          if [ -f artifacts/python3.dll ]; then cp artifacts/python3.dll bundles/windows/python3.dll; fi
           cp artifacts/telemetry-macos       bundles/macos/telemetry
           cp artifacts/telemetry-linux       bundles/linux/telemetry
       
