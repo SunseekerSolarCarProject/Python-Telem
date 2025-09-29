@@ -45,7 +45,7 @@ class ProgressFetcher(FetcherInterface):
         # download_file), provided for completeness.
         with requests.get(url, stream=True, timeout=self.timeout) as r:
             if r.status_code >= 400:
-                raise exceptions.DownloadHTTPError(r.status_code, f"HTTP {r.status_code} for {url}")
+                raise exceptions.DownloadHTTPError(f"HTTP {r.status_code} for {url}", r.status_code)
             for chunk in r.iter_content(chunk_size=self.chunk_size):
                 if chunk:
                     yield chunk
@@ -60,7 +60,7 @@ class ProgressFetcher(FetcherInterface):
         try:
             with requests.get(url, stream=True, timeout=self.timeout) as r:
                 if r.status_code >= 400:
-                    raise exceptions.DownloadHTTPError(r.status_code, f"HTTP {r.status_code} for {url}")
+                    raise exceptions.DownloadHTTPError(f"HTTP {r.status_code} for {url}", r.status_code)
 
                 # use server length if available; fall back to max_length
                 total: Optional[int]
