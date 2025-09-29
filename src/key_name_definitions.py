@@ -23,6 +23,9 @@ class TelemetryKey(Enum):
     MC1IVC_IQ_VECTOR = ("MC1IVC_IQ_Vector","A")
     MC1BEM_BEMFD_VECTOR = ("MC1BEM_BEMFD_Vector","V")
     MC1BEM_BEMFQ_VECTOR = ("MC1BEM_BEMFQ_Vector","V")
+    MC1_BUS_POWER_W = ("MC1_Bus_Power_W", "W")
+    MC1_MECHANICAL_POWER_W = ("MC1_Mechanical_Power_W", "W")
+    MC1_EFFICIENCY_PCT = ("MC1_Efficiency_Pct", "%")
 
     # Motor Information 2 
     MC2BUS_VOLTAGE = ("MC2BUS_Voltage", "V")
@@ -44,6 +47,12 @@ class TelemetryKey(Enum):
     MC2IVC_IQ_VECTOR = ("MC2IVC_IQ_Vector","A")
     MC2BEM_BEMFD_VECTOR = ("MC2BEM_BEMFD_Vector","V")
     MC2BEM_BEMFQ_VECTOR = ("MC2BEM_BEMFQ_Vector","V")
+    MC2_BUS_POWER_W = ("MC2_Bus_Power_W", "W")
+    MC2_MECHANICAL_POWER_W = ("MC2_Mechanical_Power_W", "W")
+    MC2_EFFICIENCY_PCT = ("MC2_Efficiency_Pct", "%")
+    MOTORS_TOTAL_BUS_POWER_W = ("Motors_Total_Bus_Power_W", "W")
+    MOTORS_TOTAL_MECHANICAL_POWER_W = ("Motors_Total_Mechanical_Power_W", "W")
+    MOTORS_AVERAGE_EFFICIENCY_PCT = ("Motors_Average_Efficiency_Pct", "%")
     
     # Driver Controls
     DC_DRV_MOTOR_VELOCITY_SETPOINT = ("DC_DRV_Motor_Velocity_Setpoint", " ")
@@ -63,6 +72,12 @@ class TelemetryKey(Enum):
     BP_PVS_MILLIAMP_S = ("BP_PVS_milliamp*s", "mA*s")
     BP_ISH_SOC = ("BP_ISH_SOC", "%")
     BP_ISH_AMPS = ("BP_ISH_Amps", "A")
+    BATTERY_STRING_IMBALANCE_V = ("Battery_String_Imbalance_V", "V")
+    BATTERY_STRING_IMBALANCE_PCT = ("Battery_String_Imbalance_Pct", "%")
+    BATTERY_PACK_POWER_W = ("Battery_Pack_Power_W", "W")
+    BATTERY_PACK_POWER_KW = ("Battery_Pack_Power_kW", "kW")
+    BATTERY_POWER_DIRECTION = ("Battery_Power_Direction", "")
+    BATTERY_C_RATE = ("Battery_C_Rate", "C")
 
     # MPPTs information
  

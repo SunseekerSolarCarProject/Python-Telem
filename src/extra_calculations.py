@@ -1,11 +1,34 @@
 # src/extra_calculations.py
 
 import logging
+import math
+import os
+from typing import Dict, Optional
 
 class ExtraCalculations:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.logger.info("ExtraCalculations initialized.")
+        self.motor_torque_constant_nm_per_amp = self._load_env_float("MOTOR_TORQUE_CONSTANT_NM_PER_A", 0.25)
+        self.motor_efficiency_min_power_w = self._load_env_float("MOTOR_EFFICIENCY_MIN_ELECTRICAL_W", 200.0)
+
+    def _load_env_float(self, env_name: str, default: float) -> float:
+        value = os.getenv(env_name)
+        if value is None:
+            return default
+        try:
+            parsed = float(value)
+            self.logger.info(f"Using {env_name}={parsed}")
+            return parsed
+        except Exception:
+            self.logger.warning(f"Invalid float for {env_name}: {value}. Using default {default}.")
+            return default
+
+    def safe_float(self, value) -> Optional[float]:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def convert_mps_to_mph(self, mps):
         mph = mps * 2.23694
@@ -283,3 +306,135 @@ class ExtraCalculations:
         except Exception as e:
             self.logger.error(f"Error calculating charge time: {e}")
             return float('inf')
+
+    def calculate_pack_power(self, voltage: Optional[float], current: Optional[float]) -> Optional[float]:
+        voltage = self.safe_float(voltage)
+        current = self.safe_float(current)
+        if voltage is None or current is None:
+            return None
+        try:
+            power = voltage * current
+            self.logger.debug(f"Calculated pack power: {power} W from V={voltage}, I={current}")
+            return power
+        except Exception as e:
+            self.logger.error(f"Error calculating pack power: {e}")
+            return None
+
+    def calculate_string_imbalance(self, vmax: Optional[float], vmin: Optional[float]) -> Optional[float]:
+        vmax = self.safe_float(vmax)
+        vmin = self.safe_float(vmin)
+        if vmax is None or vmin is None:
+            return None
+        try:
+            imbalance = abs(vmax - vmin)
+            self.logger.debug(f"Calculated string imbalance: {imbalance} V from vmax={vmax}, vmin={vmin}")
+            return imbalance
+        except Exception as e:
+            self.logger.error(f"Error calculating string imbalance: {e}")
+            return None
+
+    def calculate_motor_mechanical_power(self, rpm: Optional[float], iq_vector: Optional[float]) -> Optional[float]:
+        rpm = self.safe_float(rpm)
+        iq_vector = self.safe_float(iq_vector)
+        if rpm is None or iq_vector is None:
+            return None
+        try:
+            torque_nm = self.motor_torque_constant_nm_per_amp * iq_vector
+            omega = rpm * math.tau / 60.0
+            mechanical_power = torque_nm * omega
+            self.logger.debug(
+                f"Calculated mechanical power: {mechanical_power} W (torque={torque_nm} Nm, omega={omega} rad/s)"
+            )
+            return mechanical_power
+        except Exception as e:
+            self.logger.error(f"Error calculating mechanical power: {e}")
+            return None
+
+    def calculate_motor_efficiency(
+        self,
+        bus_voltage: Optional[float],
+        bus_current: Optional[float],
+        rpm: Optional[float],
+        iq_vector: Optional[float],
+    ) -> tuple[Optional[float], Optional[float], Optional[float]]:
+        electrical_power = self.calculate_pack_power(bus_voltage, bus_current)
+        mechanical_power = self.calculate_motor_mechanical_power(rpm, iq_vector)
+        if electrical_power is None or mechanical_power is None:
+            return None, electrical_power, mechanical_power
+        if electrical_power == 0 or abs(electrical_power) < self.motor_efficiency_min_power_w:
+            return None, electrical_power, mechanical_power
+        if electrical_power > 0 and mechanical_power <= 0:
+            return None, electrical_power, mechanical_power
+        if electrical_power < 0 and mechanical_power >= 0:
+            return None, electrical_power, mechanical_power
+        efficiency = max(0.0, min(100.0, abs(mechanical_power) / abs(electrical_power) * 100.0))
+        self.logger.debug(
+            f"Calculated motor efficiency: {efficiency}% (electrical={electrical_power} W, mechanical={mechanical_power} W)"
+        )
+        return efficiency, electrical_power, mechanical_power
+
+    def compute_battery_insights(self, data: Dict[str, object]) -> Dict[str, object]:
+        insights: Dict[str, object] = {}
+        pack_voltage = self.safe_float(data.get('BP_PVS_Voltage'))
+        pack_current = self.safe_float(data.get('BP_ISH_Amps'))
+        vmax = self.safe_float(data.get('BP_VMX_Voltage'))
+        vmin = self.safe_float(data.get('BP_VMN_Voltage'))
+        total_capacity_ah = self.safe_float(data.get('Total_Capacity_Ah'))
+
+        imbalance = self.calculate_string_imbalance(vmax, vmin)
+        if imbalance is not None:
+            insights['Battery_String_Imbalance_V'] = imbalance
+            base_voltage = pack_voltage if pack_voltage not in (None, 0) else vmax
+            if base_voltage not in (None, 0):
+                insights['Battery_String_Imbalance_Pct'] = (imbalance / abs(base_voltage)) * 100.0
+
+        pack_power = self.calculate_pack_power(pack_voltage, pack_current)
+        if pack_power is not None:
+            insights['Battery_Pack_Power_W'] = pack_power
+            insights['Battery_Pack_Power_kW'] = pack_power / 1000.0
+            if pack_current is not None:
+                if pack_current > 0:
+                    insights['Battery_Power_Direction'] = 'Discharging'
+                elif pack_current < 0:
+                    insights['Battery_Power_Direction'] = 'Charging'
+                else:
+                    insights['Battery_Power_Direction'] = 'Idle'
+
+        if total_capacity_ah not in (None, 0) and pack_current is not None:
+            insights['Battery_C_Rate'] = pack_current / total_capacity_ah
+
+        return insights
+
+    def compute_motor_insights(self, data: Dict[str, object]) -> Dict[str, object]:
+        insights: Dict[str, object] = {}
+        total_bus_power = 0.0
+        total_mechanical_power = 0.0
+        efficiencies = []
+        for prefix in ('MC1', 'MC2'):
+            bus_voltage = self.safe_float(data.get(f'{prefix}BUS_Voltage'))
+            bus_current = self.safe_float(data.get(f'{prefix}BUS_Current'))
+            rpm = self.safe_float(data.get(f'{prefix}VEL_RPM'))
+            iq_vector = self.safe_float(data.get(f'{prefix}IVC_IQ_Vector'))
+
+            efficiency, electrical_power, mechanical_power = self.calculate_motor_efficiency(
+                bus_voltage, bus_current, rpm, iq_vector
+            )
+
+            if electrical_power is not None:
+                insights[f'{prefix}_Bus_Power_W'] = electrical_power
+                total_bus_power += electrical_power
+            if mechanical_power is not None:
+                insights[f'{prefix}_Mechanical_Power_W'] = mechanical_power
+                total_mechanical_power += mechanical_power
+            if efficiency is not None:
+                insights[f'{prefix}_Efficiency_Pct'] = efficiency
+                efficiencies.append(efficiency)
+
+        if total_bus_power != 0:
+            insights['Motors_Total_Bus_Power_W'] = total_bus_power
+        if total_mechanical_power != 0:
+            insights['Motors_Total_Mechanical_Power_W'] = total_mechanical_power
+        if efficiencies:
+            insights['Motors_Average_Efficiency_Pct'] = sum(efficiencies) / len(efficiencies)
+
+        return insights

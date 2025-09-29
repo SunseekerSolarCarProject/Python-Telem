@@ -154,6 +154,13 @@ class BufferData:
         else:
             self.combined_data['Used_Ah_Exact_Time'] = 'N/A'
 
+        battery_insights = self.extra_calculations.compute_battery_insights(self.combined_data)
+        if battery_insights:
+            self.combined_data.update(battery_insights)
+        motor_insights = self.extra_calculations.compute_motor_insights(self.combined_data)
+        if motor_insights:
+            self.combined_data.update(motor_insights)
+
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
         # Append data to primary CSV
