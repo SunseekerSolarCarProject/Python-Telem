@@ -82,8 +82,8 @@ jobs:
             --hidden-import pyqtgraph
           )
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            PY_DLL=$(cygpath -u "${pythonLocation}/python312.dll")
-            PY3_DLL=$(cygpath -u "${pythonLocation}/python3.dll")
+            PY_DLL="${pythonLocation}\\python312.dll"
+            PY3_DLL="${pythonLocation}\\python3.dll"
             args+=(--add-binary "${PY_DLL}${{ matrix.sep }}.")
             args+=(--add-binary "${PY3_DLL}${{ matrix.sep }}.")
           fi
