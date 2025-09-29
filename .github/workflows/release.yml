@@ -51,34 +51,43 @@ jobs:
       - name: Build executable
         shell: bash
         run: |
-          pyinstaller src/main_app.py \
-            --noconfirm \
-            --onefile \
-            --distpath dist \
-            --name telemetry \
-            ${{ matrix.icon_arg }} \
-            --add-data "src/gui_files${{ matrix.sep }}gui_files/" \
-            --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/" \
-            --add-data "src/updater${{ matrix.sep }}updater/" \
-            --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/" \
-            --add-data "src/__init__.py${{ matrix.sep }}." \
-            --add-data "src/buffer_data.py${{ matrix.sep }}." \
-            --add-data "src/central_logger.py${{ matrix.sep }}." \
-            --add-data "src/csv_handler.py${{ matrix.sep }}." \
-            --add-data "src/data_display.py${{ matrix.sep }}." \
-            --add-data "src/data_processor.py${{ matrix.sep }}." \
-            --add-data "src/extra_calculations.py${{ matrix.sep }}." \
-            --add-data "src/key_name_definitions.py${{ matrix.sep }}." \
-            --add-data "src/serial_reader.py${{ matrix.sep }}." \
-            --add-data "src/telemetry_application.py${{ matrix.sep }}." \
-            --add-data "src/unit_conversion.py${{ matrix.sep }}." \
-            --add-data "src/Version.py${{ matrix.sep }}." \
-            --additional-hooks-dir src/hooks \
-            --hidden-import tufup.client \
-            --hidden-import tufup.utils \
-            --hidden-import sklearn.utils._typedefs \
-            --hidden-import sklearn.neighbors._partition_nodes \
+          args=(
+            src/main_app.py
+            --noconfirm
+            --onefile
+            --distpath dist
+            --name telemetry
+            ${{ matrix.icon_arg }}
+            --add-data "src/gui_files${{ matrix.sep }}gui_files/"
+            --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/"
+            --add-data "src/updater${{ matrix.sep }}updater/"
+            --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/"
+            --add-data "src/__init__.py${{ matrix.sep }}."
+            --add-data "src/buffer_data.py${{ matrix.sep }}."
+            --add-data "src/central_logger.py${{ matrix.sep }}."
+            --add-data "src/csv_handler.py${{ matrix.sep }}."
+            --add-data "src/data_display.py${{ matrix.sep }}."
+            --add-data "src/data_processor.py${{ matrix.sep }}."
+            --add-data "src/extra_calculations.py${{ matrix.sep }}."
+            --add-data "src/key_name_definitions.py${{ matrix.sep }}."
+            --add-data "src/serial_reader.py${{ matrix.sep }}."
+            --add-data "src/telemetry_application.py${{ matrix.sep }}."
+            --add-data "src/unit_conversion.py${{ matrix.sep }}."
+            --add-data "src/Version.py${{ matrix.sep }}."
+            --additional-hooks-dir src/hooks
+            --hidden-import tufup.client
+            --hidden-import tufup.utils
+            --hidden-import sklearn.utils._typedefs
+            --hidden-import sklearn.neighbors._partition_nodes
             --hidden-import pyqtgraph
+          )
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            PY_DLL=$(cygpath -u "${pythonLocation}/python312.dll")
+            PY3_DLL=$(cygpath -u "${pythonLocation}/python3.dll")
+            args+=(--add-binary "${PY_DLL}${{ matrix.sep }}.")
+            args+=(--add-binary "${PY3_DLL}${{ matrix.sep }}.")
+          fi
+          pyinstaller "${args[@]}"
 
       - name: Rename artifact
         shell: bash
