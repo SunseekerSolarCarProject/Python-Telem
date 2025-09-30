@@ -138,13 +138,15 @@ jobs:
           set -euo pipefail
           echo "Artifacts present:"
           ls -la artifacts
-          test -f artifacts/telemetry-windows.exe || { echo "Missing telemetry-windows.exe"; exit 1; }
+          if [ ! -e artifacts/telemetry-windows -a ! -f artifacts/telemetry-windows.exe ]; then
+            echo "Missing telemetry-windows artifact"; exit 1;
+          fi
           test -f artifacts/telemetry-macos       || { echo "Missing telemetry-macos"; exit 1; }
           test -f artifacts/telemetry-linux       || { echo "Missing telemetry-linux"; exit 1; }
 
           mkdir -p bundles/windows bundles/macos bundles/linux
           if [ -d artifacts/telemetry-windows ]; then
-            cp -R artifacts/telemetry-windows/* bundles/windows/
+            cp -R artifacts/telemetry-windows/. bundles/windows/
           else
             cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
           fi
