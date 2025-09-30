@@ -17,8 +17,8 @@ jobs:
             py: '3.12'
             sep: ';'
             icon_arg: '--icon src/assets/logo-icon.ico --windowed'
-            bin_path: dist/telemetry.exe
-            asset_name: telemetry-windows.exe
+            bin_path: dist/telemetry
+            asset_name: telemetry-windows
           - os: macos-latest
             py: '3.12'
             sep: ':'
@@ -54,7 +54,6 @@ jobs:
           args=(
             src/main_app.py
             --noconfirm
-            --onefile
             --distpath dist
             --name telemetry
             ${{ matrix.icon_arg }}
@@ -97,10 +96,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp dist/python312.dll out/python312.dll
-            cp dist/python3.dll out/python3.dll
+          if [ -d "${{ matrix.bin_path }}" ]; then
+            cp -R "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+          else
+            cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
           fi
 
       - name: Upload artifact
@@ -144,9 +143,11 @@ jobs:
           test -f artifacts/telemetry-linux       || { echo "Missing telemetry-linux"; exit 1; }
 
           mkdir -p bundles/windows bundles/macos bundles/linux
-          cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
-          if [ -f artifacts/python312.dll ]; then cp artifacts/python312.dll bundles/windows/python312.dll; fi
-          if [ -f artifacts/python3.dll ]; then cp artifacts/python3.dll bundles/windows/python3.dll; fi
+          if [ -d artifacts/telemetry-windows ]; then
+            cp -R artifacts/telemetry-windows/* bundles/windows/
+          else
+            cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
+          fi
           cp artifacts/telemetry-macos       bundles/macos/telemetry
           cp artifacts/telemetry-linux       bundles/linux/telemetry
       

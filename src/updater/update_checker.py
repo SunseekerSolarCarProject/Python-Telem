@@ -4,6 +4,7 @@ import sys
 import shutil
 import subprocess
 import hashlib
+import textwrap
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 from tuf.ngclient.updater import Updater  # TUF verification
@@ -186,53 +187,51 @@ class UpdateChecker(QObject):
             # Find expected binary inside extracted contents
             binary_name = self.target_name
             candidate = None
-            support_files: list[str] = []
-            support_names = {"python312.dll", "python3.dll"} if os.name == "nt" else set()
+            bundle_root = None
             for root, _dirs, files in os.walk(extract_dir):
                 if candidate is None and binary_name in files:
                     candidate = os.path.join(root, binary_name)
-                if support_names:
-                    for fname in files:
-                        if fname.lower() in support_names:
-                            support_files.append(os.path.join(root, fname))
-            if not candidate:
+                    bundle_root = root
+                if candidate and bundle_root:
+                    break
+            if not candidate or not bundle_root:
                 self.update_error.emit(f"Bundle did not contain expected binary '{binary_name}'.")
                 return False
 
-            new_exe_path = os.path.join(self.download_dir, binary_name)
+            staged_root = os.path.join(self.download_dir, "staged_bundle")
             try:
-                shutil.copy2(candidate, new_exe_path)
+                if os.path.exists(staged_root):
+                    shutil.rmtree(staged_root, ignore_errors=True)
+                shutil.copytree(bundle_root, staged_root, dirs_exist_ok=True)
             except Exception as e:
-                self.update_error.emit(f"Failed staging new binary: {e}")
+                self.update_error.emit(f"Failed staging new bundle: {e}")
                 return False
+
+            new_exe_path = os.path.join(staged_root, binary_name)
 
             old_exe = self._running_binary_path()
             if not old_exe:
                 self.update_error.emit("No runnable binary path detected.")
                 return False
 
-            if support_files:
-                target_dir = os.path.dirname(old_exe)
-                for src_path in support_files:
-                    try:
-                        shutil.copy2(src_path, os.path.join(target_dir, os.path.basename(src_path)))
-                    except Exception:
-                        pass
-
             if os.name == "nt":
-                # Windows: write a tiny batch that waits for this PID to exit, then moves the new file into place and relaunches.
                 bat_path = os.path.join(self.download_dir, "apply_update.bat")
+                app_dir = os.path.dirname(old_exe)
+                script = textwrap.dedent(f"""
+                @echo off
+                set NEW_DIR="{staged_root}"
+                set OLD_EXE="{old_exe}"
+                set APP_DIR="{app_dir}"
+                :wait
+                ping 127.0.0.1 -n 2 >nul
+                tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
+                robocopy %NEW_DIR% %APP_DIR% /MIR /NFL /NDL /NJH /NJS >nul
+                if errorlevel 8 echo Robocopy returned %errorlevel%
+                start "" %OLD_EXE%
+                """)
                 with open(bat_path, "w", encoding="utf-8") as f:
-                    f.write(f"""@echo off
-                    set NEW="{new_exe_path}"
-                    set OLD="{old_exe}"
-                    :wait
-                    ping 127.0.0.1 -n 2 >nul
-                    tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
-                    move /Y %NEW% %OLD%
-                    start "" %OLD%
-                    """)
-                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)  # CREATE_NO_WINDOW
+                    f.write(script)
+                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)
                 sys.exit(0)
             else:
                 backup = old_exe + ".bak"
@@ -331,23 +330,29 @@ class UpdateChecker(QObject):
                 self.update_error.emit(f"Failed to extract bundle: {e}")
                 return False
 
-            # Find expected binary name inside extracted contents
             binary_name = self.target_name
             candidate = None
+            bundle_root = None
             for root, _dirs, files in os.walk(extract_dir):
-                if binary_name in files:
+                if candidate is None and binary_name in files:
                     candidate = os.path.join(root, binary_name)
+                    bundle_root = root
+                if candidate and bundle_root:
                     break
-            if not candidate:
+            if not candidate or not bundle_root:
                 self.update_error.emit(f"Bundle did not contain expected binary '{binary_name}'.")
                 return False
 
-            new_exe_path = os.path.join(self.download_dir, binary_name)
+            staged_root = os.path.join(self.download_dir, "staged_bundle")
             try:
-                shutil.copy2(candidate, new_exe_path)
+                if os.path.exists(staged_root):
+                    shutil.rmtree(staged_root, ignore_errors=True)
+                shutil.copytree(bundle_root, staged_root, dirs_exist_ok=True)
             except Exception as e:
-                self.update_error.emit(f"Failed staging new binary: {e}")
+                self.update_error.emit(f"Failed staging new bundle: {e}")
                 return False
+
+            new_exe_path = os.path.join(staged_root, binary_name)
 
             old_exe = self._running_binary_path()
             if not old_exe:
@@ -356,16 +361,21 @@ class UpdateChecker(QObject):
 
             if os.name == "nt":
                 bat_path = os.path.join(self.download_dir, "apply_update.bat")
+                app_dir = os.path.dirname(old_exe)
+                script = textwrap.dedent(f"""
+                @echo off
+                set NEW_DIR="{staged_root}"
+                set OLD_EXE="{old_exe}"
+                set APP_DIR="{app_dir}"
+                :wait
+                ping 127.0.0.1 -n 2 >nul
+                tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
+                robocopy %NEW_DIR% %APP_DIR% /MIR /NFL /NDL /NJH /NJS >nul
+                if errorlevel 8 echo Robocopy returned %errorlevel%
+                start "" %OLD_EXE%
+                """)
                 with open(bat_path, "w", encoding="utf-8") as f:
-                    f.write(f"""@echo off
-                    set NEW="{new_exe_path}"
-                    set OLD="{old_exe}"
-                    :wait
-                    ping 127.0.0.1 -n 2 >nul
-                    tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
-                    move /Y %NEW% %OLD%
-                    start "" %OLD%
-                    """)
+                    f.write(script)
                 subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)
                 sys.exit(0)
             else:
