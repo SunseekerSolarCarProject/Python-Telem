@@ -2,8 +2,10 @@
 import sys
 import os
 import logging
+import json
 import requests
 import threading
+from pathlib import Path
 from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
@@ -21,13 +23,41 @@ from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 from Version import VERSION  # Import the version number
 from dotenv import load_dotenv
 
-load_dotenv()
 
-API_URL = "http://localhost:5000/ingest"
-API_KEY = os.getenv("TELEMETRY_INGESTION_API_KEY")
-SOLCAST_API_KEY = os.getenv("SOLCAST_API_KEY")
-SOLCAST_LATITUDE = os.getenv("SOLCAST_LATITUDE")
-SOLCAST_LONGITUDE = os.getenv("SOLCAST_LONGITUDE")
+def _load_env_file() -> Path | None:
+    candidates = []
+    try:
+        module_dir = Path(__file__).resolve().parent
+    except Exception:
+        module_dir = Path.cwd()
+    candidates.append(module_dir.parent / '.env')
+    candidates.append(module_dir / '.env')
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.insert(0, exe_dir / '.env')
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidates.insert(1, Path(meipass) / '.env')
+    candidates.append(Path.cwd() / '.env')
+
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                load_dotenv(candidate, override=False)
+                return candidate
+        except Exception:
+            continue
+    load_dotenv()
+    return None
+
+
+_ENV_PATH = _load_env_file()
+
+API_URL = os.getenv('TELEMETRY_INGESTION_API_URL', 'http://localhost:5000/ingest')
+API_KEY = os.getenv('TELEMETRY_INGESTION_API_KEY')
+SOLCAST_API_KEY = os.getenv('SOLCAST_API_KEY')
+SOLCAST_LATITUDE = os.getenv('SOLCAST_LATITUDE')
+SOLCAST_LONGITUDE = os.getenv('SOLCAST_LONGITUDE')
 
 class TelemetryApplication(QObject):
     update_data_signal = pyqtSignal(dict)  # Signal to update data in the GUI
@@ -48,6 +78,9 @@ class TelemetryApplication(QObject):
         self.selected_port = None
         self.endianness = 'little'  # Default endianness
         self.gui = None
+        self.solcast_key = SOLCAST_API_KEY
+        self.solcast_lat = SOLCAST_LATITUDE
+        self.solcast_lon = SOLCAST_LONGITUDE
         self.serial_reader_thread = None
         self.signals_connected = False
         self.used_Ah = 0
@@ -61,6 +94,13 @@ class TelemetryApplication(QObject):
         self.init_logger()
         self.init_units_and_keys()
         self.init_csv_handler()
+
+        existing_settings = self._load_app_settings()
+        if existing_settings:
+            self.solcast_key = existing_settings.get('solcast_api_key', self.solcast_key)
+            self.solcast_lat = existing_settings.get('solcast_latitude', self.solcast_lat)
+            self.solcast_lon = existing_settings.get('solcast_longitude', self.solcast_lon)
+
         self.init_buffer()
         self.init_data_processors()
         self.init_solcast()
@@ -201,15 +241,75 @@ class TelemetryApplication(QObject):
         self.extra_calculations = ExtraCalculations()
         self.Data_Display = DataDisplay(self.units)
 
+    def _get_config_file_path(self) -> str:
+        base = self.storage_folder or os.getcwd()
+        return os.path.join(base, "config.json")
+
+    def _load_app_settings(self) -> dict:
+        path = self._get_config_file_path()
+        try:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                return data.get('app_settings', {})
+        except Exception as exc:
+            self.logger.debug(f"Failed to load app settings: {exc}")
+        return {}
+
+    def _save_app_settings(self) -> None:
+        try:
+            path = self._get_config_file_path()
+            config = {}
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                except Exception:
+                    config = {}
+            settings = {
+                'battery_info': self.battery_info,
+                'selected_port': self.selected_port,
+                'logging_level': self.logging_level,
+                'baud_rate': self.baudrate,
+                'endianness': self.endianness,
+                'vehicle_year': self.vehicle_year,
+                'solcast_api_key': self.solcast_key,
+                'solcast_latitude': self.solcast_lat,
+                'solcast_longitude': self.solcast_lon,
+            }
+            config['app_settings'] = settings
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=4)
+        except Exception as exc:
+            self.logger.error(f"Failed to save app settings: {exc}")
+
+    def _apply_solcast_settings(self) -> None:
+        try:
+            self.init_solcast()
+        except Exception as exc:
+            self.logger.error(f"Failed to initialize Solcast integration: {exc}")
+
     def init_solcast(self):
-        self.solcast_key = os.getenv("SOLCAST_API_KEY")
-        self.lat = os.getenv("SOLCAST_LATITUDE")
-        self.lon = os.getenv("SOLCAST_LONGITUDE")
-        if not all((self.solcast_key, self.lat, self.lon)):
+        key = getattr(self, 'solcast_key', None) or os.getenv("SOLCAST_API_KEY")
+        lat = getattr(self, 'solcast_lat', None) or os.getenv("SOLCAST_LATITUDE")
+        lon = getattr(self, 'solcast_lon', None) or os.getenv("SOLCAST_LONGITUDE")
+
+        self.solcast_key = key
+        self.solcast_lat = lat
+        self.solcast_lon = lon
+
+        if not all((self.solcast_key, self.solcast_lat, self.solcast_lon)):
             self.logger.warning("Missing Solcast configuration; skipping solar data fetch.")
             return
 
-        # QTimer will fire every 5 minutes
+        if hasattr(self, 'solcast_timer') and self.solcast_timer is not None:
+            try:
+                self.solcast_timer.stop()
+            except Exception:
+                pass
+            self.solcast_timer.deleteLater()
+
         self.solcast_timer = QTimer(self)
         self.solcast_timer.timeout.connect(self.fetch_solcast_data)
         self.solcast_timer.start(5 * 60 * 1000)  # 5 min
@@ -277,7 +377,7 @@ class TelemetryApplication(QObject):
             # Live estimated actuals (last 7 days): get most recent point
             url_live = (
                 f"https://api.solcast.com.au/data/live/radiation_and_weather"
-                f"?latitude={self.lat}&longitude={self.lon}"
+                f"?latitude={self.solcast_lat}&longitude={self.solcast_lon}"
                 f"&hours=1&period=PT5M&output_parameters=ghi,dni,air_temp&format=json"
             )
             r_live = requests.get(url_live, headers=headers, timeout=10)
@@ -295,7 +395,7 @@ class TelemetryApplication(QObject):
             # Forecast (next 24 h): get the first forecast interval
             url_fc = (
                 f"https://api.solcast.com.au/data/forecast/radiation_and_weather"
-                f"?latitude={self.lat}&longitude={self.lon}"
+                f"?latitude={self.solcast_lat}&longitude={self.solcast_lon}"
                 f"&hours=24&period=PT30M"
                 f"&output_parameters=ghi,dni,air_temp&format=json"
             )
@@ -322,6 +422,17 @@ class TelemetryApplication(QObject):
         self.baudrate = config_data.get("baud_rate", 9600)
         self.endianness = config_data.get("endianness", "little")
         self.vehicle_year = config_data.get("vehicle_year", "")  # Capture vehicle year
+
+        solcast_key = config_data.get("solcast_api_key")
+        solcast_lat = config_data.get("solcast_latitude")
+        solcast_lon = config_data.get("solcast_longitude")
+        if solcast_key:
+            self.solcast_key = solcast_key
+        if solcast_lat:
+            self.solcast_lat = solcast_lat
+        if solcast_lon:
+            self.solcast_lon = solcast_lon
+
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")
         self.logger.info(f"Logging level: {self.logging_level}")
@@ -346,8 +457,13 @@ class TelemetryApplication(QObject):
             config_data_copy["baud_rate"] = self.baudrate
         if "endianness" not in config_data_copy:
             config_data_copy["endianness"] = self.endianness
+        config_data_copy.setdefault("solcast_api_key", self.solcast_key)
+        config_data_copy.setdefault("solcast_latitude", self.solcast_lat)
+        config_data_copy.setdefault("solcast_longitude", self.solcast_lon)
         self.config_data_copy = config_data_copy
 
+        self._save_app_settings()
+        self._apply_solcast_settings()
         self.update_logging_level(self.logging_level)
 
     def start(self):
@@ -361,12 +477,15 @@ class TelemetryApplication(QObject):
             else:
                 app_install_dir = os.path.dirname(os.path.abspath(__file__))
 
+            existing_settings = self._load_app_settings()
+
             config_dialog = ConfigDialog(
                 repo_owner="SunseekerSolarCarProject",
                 repo_name="Python-Telem",
                 version=VERSION,
                 app_install_dir=app_install_dir,
-                target_asset="telemetry.exe"   # must match your release asset name
+                target_asset="telemetry.exe",   # must match your release asset name
+                initial_config=existing_settings,
             )
             config_dialog.config_data_signal.connect(self.set_battery_info)
 

@@ -4,7 +4,8 @@ import sys
 import logging
 from PyQt6.QtWidgets import (
     QDialog, QFormLayout, QComboBox, QPushButton, QDialogButtonBox, QMessageBox, QInputDialog, QLabel,
-    QProgressBar
+    QProgressBar,
+    QLineEdit
 )
 from PyQt6.QtCore import pyqtSignal, QTimer
 from updater.update_checker import UpdateChecker
@@ -21,17 +22,23 @@ class ConfigDialog(QDialog):
         version: str = VERSION,
         app_install_dir: str | None = None,
         target_asset: str | None = None,
+        initial_config: dict | None = None,
         ):
         super().__init__(parent)
         self.setWindowTitle("Configuration")
         self.setModal(True)
         self.logger = logging.getLogger(__name__)
 
-        self.battery_info = None
-        self.selected_port = None
-        self.logging_level = "INFO"  # Default logging level
-        self.baud_rate = 9600  # Default baud rate
-        self.endianness = "little"  # Default endianness
+        self.initial_config = initial_config or {}
+
+        self.battery_info = self.initial_config.get("battery_info")
+        self.selected_port = self.initial_config.get("selected_port")
+        self.logging_level = self.initial_config.get("logging_level", "INFO")  # Default logging level
+        self.baud_rate = self.initial_config.get("baud_rate", 9600)  # Default baud rate
+        self.endianness = self.initial_config.get("endianness", "little")  # Default endianness
+        self.solcast_api_key = self.initial_config.get("solcast_api_key", "")
+        self.solcast_latitude = self.initial_config.get("solcast_latitude", "")
+        self.solcast_longitude = self.initial_config.get("solcast_longitude", "")
 
         # Resolve install dir
         if app_install_dir is None:
@@ -113,12 +120,28 @@ class ConfigDialog(QDialog):
         layout.addRow(self.vehicle_year_dropdown)
         # -------------------------------------
 
+        # Solcast credentials
+        self.solcast_key_edit = QLineEdit()
+        self.solcast_key_edit.setPlaceholderText("Enter your Solcast API key")
+        self.solcast_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addRow("Solcast API Key:", self.solcast_key_edit)
+
+        self.solcast_lat_edit = QLineEdit()
+        self.solcast_lat_edit.setPlaceholderText("e.g., 33.4484")
+        layout.addRow("Solcast Latitude:", self.solcast_lat_edit)
+
+        self.solcast_lon_edit = QLineEdit()
+        self.solcast_lon_edit.setPlaceholderText("e.g., -112.0740")
+        layout.addRow("Solcast Longitude:", self.solcast_lon_edit)
+
         # Progress bar for updater
         self.update_progress = QProgressBar()
         self.update_progress.setRange(0, 100)
         self.update_progress.setValue(0)
         self.update_progress.setVisible(False)
         layout.addRow("Updater:", self.update_progress)
+
+        self._apply_initial_settings()
 
         # Dialog Buttons
         buttons = QDialogButtonBox(
@@ -128,6 +151,57 @@ class ConfigDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+    def _apply_initial_settings(self):
+        try:
+            if self.battery_info is None:
+                self.battery_info = self.initial_config.get("battery_info")
+
+            if hasattr(self, "solcast_key_edit"):
+                self.solcast_key_edit.setText(self.solcast_api_key)
+            if hasattr(self, "solcast_lat_edit"):
+                self.solcast_lat_edit.setText(str(self.solcast_latitude))
+            if hasattr(self, "solcast_lon_edit"):
+                self.solcast_lon_edit.setText(str(self.solcast_longitude))
+
+            log_level = (self.logging_level or "INFO").upper()
+            idx = self.log_level_dropdown.findText(log_level)
+            if idx != -1:
+                self.log_level_dropdown.setCurrentIndex(idx)
+
+            baud_str = str(self.baud_rate)
+            idx = self.baud_rate_dropdown.findText(baud_str)
+            if idx != -1:
+                self.baud_rate_dropdown.setCurrentIndex(idx)
+            elif baud_str and baud_str not in {"", "0"}:
+                self.baud_rate_dropdown.addItem(baud_str)
+                self.baud_rate_dropdown.setCurrentIndex(self.baud_rate_dropdown.count() - 1)
+
+            endianness_str = 'Big Endian' if self.endianness == 'big' else 'Little Endian'
+            idx = self.endianness_dropdown.findText(endianness_str)
+            if idx != -1:
+                self.endianness_dropdown.setCurrentIndex(idx)
+
+            vehicle_year = self.initial_config.get("vehicle_year")
+            if vehicle_year:
+                idx = self.vehicle_year_dropdown.findText(vehicle_year)
+                if idx != -1:
+                    self.vehicle_year_dropdown.setCurrentIndex(idx)
+                else:
+                    insert_pos = max(0, self.vehicle_year_dropdown.count() - 1)
+                    self.vehicle_year_dropdown.insertItem(insert_pos, vehicle_year)
+                    self.vehicle_year_dropdown.setCurrentIndex(insert_pos)
+
+            selected_port = self.selected_port
+            if selected_port:
+                idx = self.port_dropdown.findText(selected_port)
+                if idx != -1:
+                    self.port_dropdown.setCurrentIndex(idx)
+                else:
+                    self.port_dropdown.addItem(selected_port)
+                    self.port_dropdown.setCurrentIndex(self.port_dropdown.count() - 1)
+        except Exception:
+            pass
 
     def _check_for_updates_safely(self):
         # Only checks in packaged builds; dev runs silently skip
@@ -209,16 +283,37 @@ class ConfigDialog(QDialog):
             self.logger.warning(f"Invalid baud rate selected: {baud_rate_str}")
             return
 
+        solcast_key = self.solcast_key_edit.text().strip() if hasattr(self, "solcast_key_edit") else ""
+        solcast_lat = self.solcast_lat_edit.text().strip() if hasattr(self, "solcast_lat_edit") else ""
+        solcast_lon = self.solcast_lon_edit.text().strip() if hasattr(self, "solcast_lon_edit") else ""
+
+        if not solcast_key or not solcast_lat or not solcast_lon:
+            QMessageBox.warning(self, "Incomplete Solcast Configuration", "Please enter your Solcast API key, latitude, and longitude.")
+            return
+
+        try:
+            float(solcast_lat)
+            float(solcast_lon)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Coordinates", "Latitude and longitude must be numeric values.")
+            return
+
         config_data = {
             "battery_info": self.battery_info,
             "selected_port": selected_port,
             "logging_level": log_level_str,
             "baud_rate": baud_rate,
             "endianness": endianness,
-            "vehicle_year": vehicle_year  # New field for vehicle year
+            "vehicle_year": vehicle_year,
+            "solcast_api_key": solcast_key,
+            "solcast_latitude": solcast_lat,
+            "solcast_longitude": solcast_lon,
         }
 
-        self.logger.debug(f"Emitting configuration data: {config_data}")
+        safe_log = config_data.copy()
+        if 'solcast_api_key' in safe_log:
+            safe_log['solcast_api_key'] = '***hidden***'
+        self.logger.debug(f"Emitting configuration data: {safe_log}")
         self.config_data_signal.emit(config_data)
 
     def load_battery_info_from_file(self, file_path):

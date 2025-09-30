@@ -380,6 +380,10 @@ class TelemetryGUI(QWidget):
             # Fail-safe: don't block the rest of UI if these fail
             self.logger.error(f"Failed to init image tabs: {e}")
 
+        # CSV Management Tab
+        self.csv_management_tab = CSVManagementTab(self.csv_handler)
+        self.tabs.addTab(self.csv_management_tab, "CSV Management")
+
         # Settings Tab
         self.settings_tab = SettingsTab(graph_groups, self.color_mapping)
         self.settings_tab.log_level_signal.connect(self.change_log_level_signal.emit)
@@ -398,10 +402,6 @@ class TelemetryGUI(QWidget):
             QTimer.singleShot(300, self.on_refresh_versions)
         except Exception:
             pass
-
-        # CSV Management Tab
-        self.csv_management_tab = CSVManagementTab(self.csv_handler)
-        self.tabs.addTab(self.csv_management_tab, "CSV Management")
 
     def apply_dark_mode(self):
         """
