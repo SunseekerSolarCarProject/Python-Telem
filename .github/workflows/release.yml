@@ -141,8 +141,12 @@ jobs:
           if [ ! -e artifacts/telemetry-windows -a ! -f artifacts/telemetry-windows.exe ]; then
             echo "Missing telemetry-windows artifact"; exit 1;
           fi
-          test -f artifacts/telemetry-macos       || { echo "Missing telemetry-macos"; exit 1; }
-          test -f artifacts/telemetry-linux       || { echo "Missing telemetry-linux"; exit 1; }
+          if [ ! -e artifacts/telemetry-macos ]; then
+            echo "Missing telemetry-macos artifact"; exit 1;
+          fi
+          if [ ! -e artifacts/telemetry-linux ]; then
+            echo "Missing telemetry-linux artifact"; exit 1;
+          fi
 
           mkdir -p bundles/windows bundles/macos bundles/linux
           if [ -d artifacts/telemetry-windows ]; then
@@ -150,8 +154,16 @@ jobs:
           else
             cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
           fi
-          cp artifacts/telemetry-macos       bundles/macos/telemetry
-          cp artifacts/telemetry-linux       bundles/linux/telemetry
+          if [ -d artifacts/telemetry-macos ]; then
+            cp -R artifacts/telemetry-macos/. bundles/macos/
+          else
+            cp artifacts/telemetry-macos bundles/macos/telemetry
+          fi
+          if [ -d artifacts/telemetry-linux ]; then
+            cp -R artifacts/telemetry-linux/. bundles/linux/
+          else
+            cp artifacts/telemetry-linux bundles/linux/telemetry
+          fi
       
       - name: Write signing keys (secrets or fallback)
         env:
