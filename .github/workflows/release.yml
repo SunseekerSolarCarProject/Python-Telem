@@ -51,6 +51,19 @@ jobs:
       - name: Build executable
         shell: bash
         run: |
+          set -euo pipefail
+
+          # Extra collects for sklearn/scipy/numpy
+          COLLECT_FLAGS=( 
+            --collect-all sklearn
+            --collect-binaries sklearn
+            --collect-binaries scipy
+            --collect-binaries numpy
+            --copy-metadata scikit-learn
+            --copy-metadata scipy
+            --copy-metadata numpy
+          )
+
           args=(
             src/main_app.py
             --noconfirm
@@ -75,52 +88,73 @@ jobs:
             --add-data "src/unit_conversion.py${{ matrix.sep }}."
             --add-data "src/Version.py${{ matrix.sep }}."
             --additional-hooks-dir src/hooks
-            --hidden-import tufup.client
-            --hidden-import tufup.utils
-            --hidden-import sklearn.utils._typedefs
-            --hidden-import sklearn.neighbors._partition_nodes
             --hidden-import pyqtgraph
+            "${COLLECT_FLAGS[@]}"
           )
+
+          # Add Python DLLs on Windows
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            PY_DLL="${pythonLocation}\\python312.dll"
-            PY3_DLL="${pythonLocation}\\python3.dll"
+            PY_DLL="${pythonLocation}/python312.dll"
+            PY3_DLL="${pythonLocation}/python3.dll"
             args+=(--add-binary "${PY_DLL}${{ matrix.sep }}.")
             args+=(--add-binary "${PY3_DLL}${{ matrix.sep }}.")
           fi
+
           pyinstaller "${args[@]}"
+
+          # --- FIXED RUNTIME DLL COPY FOR WINDOWS ---
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            RUNTIME_DLLS=(msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll python312.dll python3.dll)
+            RUNTIME_DLLS=(msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll)
+            DEST_APP="dist/telemetry"
+            DEST_SKL="${DEST_APP}/_internal/sklearn/.libs"
+
+            # Use forward slashes; search several places
+            SEARCH_DIRS=(
+              "/c/Windows/System32"
+              "${pythonLocation}"
+              "${pythonLocation}/DLLs"
+            )
+
+            mkdir -p "${DEST_APP}"
+            [ -d "${DEST_SKL}" ] || true
+
             for dll in "${RUNTIME_DLLS[@]}"; do
-              SRC="${pythonLocation}\$dll"
-              if [ ! -f "$SRC" ]; then
-                SRC="${pythonLocation}\DLLs\$dll"
-              fi
-              if [ -f "$SRC" ]; then
-                cp "$SRC" dist/telemetry/ || true
-                if [ -d dist/telemetry/_internal/sklearn/.libs ]; then
-                  cp "$SRC" dist/telemetry/_internal/sklearn/.libs/ || true
+              FOUND=""
+              for dir in "${SEARCH_DIRS[@]}"; do
+                if [ -f "${dir}/${dll}" ]; then
+                  FOUND="${dir}/${dll}"
+                  break
                 fi
+              done
+              if [ -n "${FOUND}" ]; then
+                cp "${FOUND}" "${DEST_APP}/" || true
+                if [ -d "${DEST_SKL}" ]; then
+                  cp "${FOUND}" "${DEST_SKL}/" || true
+                fi
+              else
+                echo "WARNING: ${dll} not found in ${SEARCH_DIRS[*]}"
               fi
             done
           fi
 
 
-      - name: Rename artifact
-        shell: bash
-        run: |
-          mkdir -p out
-          if [ -d "${{ matrix.bin_path }}" ]; then
-            cp -R "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
-          else
-            cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
-          fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-${{ matrix.os }}
-          path: out/*
-          if-no-files-found: error
+            - name: Rename artifact
+              shell: bash
+              run: |
+                mkdir -p out
+                if [ -d "${{ matrix.bin_path }}" ]; then
+                  cp -R "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+                else
+                  cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+                fi
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: built-${{ matrix.os }}
+                path: out/*
+                if-no-files-found: error
 
   tuf_release:
     name: Sign & Release (TUF + assets)
