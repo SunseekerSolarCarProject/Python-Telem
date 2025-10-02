@@ -53,15 +53,15 @@ jobs:
         run: |
           set -euo pipefail
 
-         
-          COLLECT_FLAGS=( 
-            --collect-all sklearn
+          COLLECT_FLAGS=(
             --collect-binaries sklearn
             --collect-binaries scipy
             --collect-binaries numpy
             --copy-metadata scikit-learn
             --copy-metadata scipy
             --copy-metadata numpy
+            --exclude-module sklearn.externals.array_api_compat.torch
+            --exclude-module pyqtgraph.opengl
           )
 
           args=(
@@ -70,7 +70,9 @@ jobs:
             --distpath dist
             --name telemetry
             ${{ matrix.icon_arg }}
-            --onedir
+            --onefile
+            --additional-hooks-dir src/hooks
+            --hidden-import pyqtgraph
             --add-data "src/gui_files${{ matrix.sep }}gui_files/"
             --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/"
             --add-data "src/updater${{ matrix.sep }}updater/"
@@ -87,55 +89,32 @@ jobs:
             --add-data "src/telemetry_application.py${{ matrix.sep }}."
             --add-data "src/unit_conversion.py${{ matrix.sep }}."
             --add-data "src/Version.py${{ matrix.sep }}."
-            --additional-hooks-dir src/hooks
-            --hidden-import pyqtgraph
             "${COLLECT_FLAGS[@]}"
           )
 
-          
+          # ---- Windows-only: co-locate VC runtime with sklearn/.libs ----
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            PY_DLL="${pythonLocation}/python312.dll"
-            PY3_DLL="${pythonLocation}/python3.dll"
-            args+=(--add-binary "${PY_DLL}${{ matrix.sep }}.")
-            args+=(--add-binary "${PY3_DLL}${{ matrix.sep }}.")
-          fi
+            VC_SEARCH=( "/c/Windows/System32" "${pythonLocation}" "${pythonLocation}/DLLs" )
+            VC_DLLS=( msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll )
 
-          pyinstaller "${args[@]}"
-
-         
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            RUNTIME_DLLS=(msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll)
-            DEST_APP="dist/telemetry"
-            DEST_SKL="${DEST_APP}/_internal/sklearn/.libs"
-
-            # Use forward slashes; search several places
-            SEARCH_DIRS=(
-              "/c/Windows/System32"
-              "${pythonLocation}"
-              "${pythonLocation}/DLLs"
-            )
-
-            mkdir -p "${DEST_APP}"
-            [ -d "${DEST_SKL}" ] || true
-
-            for dll in "${RUNTIME_DLLS[@]}"; do
-              FOUND=""
-              for dir in "${SEARCH_DIRS[@]}"; do
+            for dll in "${VC_DLLS[@]}"; do
+              found=""
+              for dir in "${VC_SEARCH[@]}"; do
                 if [ -f "${dir}/${dll}" ]; then
-                  FOUND="${dir}/${dll}"
+                  found="${dir}/${dll}"
                   break
                 fi
               done
-              if [ -n "${FOUND}" ]; then
-                cp "${FOUND}" "${DEST_APP}/" || true
-                if [ -d "${DEST_SKL}" ]; then
-                  cp "${FOUND}" "${DEST_SKL}/" || true
-                fi
+              if [ -n "$found" ]; then
+                # NOTE: DEST must be _internal/sklearn/.libs (where sklearn looks)
+                args+=( --add-binary "${found}${{ matrix.sep }}_internal/sklearn/.libs" )
               else
-                echo "WARNING: ${dll} not found in ${SEARCH_DIRS[*]}"
-                fi
-                done
-                fi
+                echo "WARNING: ${dll} not found in ${VC_SEARCH[*]}"
+              fi
+            done
+          fi
+
+          pyinstaller "${args[@]}"
 
       - name: Rename artifact
         shell: bash
