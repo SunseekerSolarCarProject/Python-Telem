@@ -53,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Extra collects for sklearn/scipy/numpy
+         
           COLLECT_FLAGS=( 
             --collect-all sklearn
             --collect-binaries sklearn
@@ -92,7 +92,7 @@ jobs:
             "${COLLECT_FLAGS[@]}"
           )
 
-          # Add Python DLLs on Windows
+          
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             PY_DLL="${pythonLocation}/python312.dll"
             PY3_DLL="${pythonLocation}/python3.dll"
@@ -102,7 +102,7 @@ jobs:
 
           pyinstaller "${args[@]}"
 
-          # --- FIXED RUNTIME DLL COPY FOR WINDOWS ---
+         
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             RUNTIME_DLLS=(msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll)
             DEST_APP="dist/telemetry"
