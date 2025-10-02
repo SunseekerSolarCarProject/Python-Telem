@@ -57,6 +57,7 @@ jobs:
             --distpath dist
             --name telemetry
             ${{ matrix.icon_arg }}
+            --onedir
             --add-data "src/gui_files${{ matrix.sep }}gui_files/"
             --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/"
             --add-data "src/updater${{ matrix.sep }}updater/"
