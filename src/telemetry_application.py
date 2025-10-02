@@ -335,6 +335,8 @@ class TelemetryApplication(QObject):
             self.update_data_signal.connect(self.gui.update_all_tabs)
             self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
             self.gui.machine_learning_retrain_signal_with_files.connect(self.handle_retrain_with_files)
+            if hasattr(self.gui.settings_tab, 'solcast_config_changed'):
+                self.gui.settings_tab.solcast_config_changed.connect(self.on_solcast_config_changed)
             self.signals_connected = True
             self.logger.debug("Connected GUI signals.")
 
@@ -465,6 +467,22 @@ class TelemetryApplication(QObject):
         self._save_app_settings()
         self._apply_solcast_settings()
         self.update_logging_level(self.logging_level)
+
+    def on_solcast_config_changed(self, api_key: str, latitude: str, longitude: str):
+        # Update Solcast configuration at runtime (empty strings disable)
+        self.solcast_key = api_key.strip()
+        self.solcast_lat = latitude.strip()
+        self.solcast_lon = longitude.strip()
+
+        if self.config_data_copy is None:
+            self.config_data_copy = {}
+        self.config_data_copy['solcast_api_key'] = self.solcast_key
+        self.config_data_copy['solcast_latitude'] = self.solcast_lat
+        self.config_data_copy['solcast_longitude'] = self.solcast_lon
+
+        self._save_app_settings()
+        self._apply_solcast_settings()
+        self.logger.info('Solcast configuration updated via Settings tab.')
 
     def start(self):
         return self.run_application()

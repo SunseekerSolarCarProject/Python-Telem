@@ -88,9 +88,21 @@ jobs:
           fi
           pyinstaller "${args[@]}"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp "${pythonLocation}\\python312.dll" dist/python312.dll
-            cp "${pythonLocation}\\python3.dll" dist/python3.dll
+            RUNTIME_DLLS=(msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll python312.dll python3.dll)
+            for dll in "${RUNTIME_DLLS[@]}"; do
+              SRC="${pythonLocation}\$dll"
+              if [ ! -f "$SRC" ]; then
+                SRC="${pythonLocation}\DLLs\$dll"
+              fi
+              if [ -f "$SRC" ]; then
+                cp "$SRC" dist/telemetry/ || true
+                if [ -d dist/telemetry/_internal/sklearn/.libs ]; then
+                  cp "$SRC" dist/telemetry/_internal/sklearn/.libs/ || true
+                fi
+              fi
+            done
           fi
+
 
       - name: Rename artifact
         shell: bash

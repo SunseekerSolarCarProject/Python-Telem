@@ -287,16 +287,20 @@ class ConfigDialog(QDialog):
         solcast_lat = self.solcast_lat_edit.text().strip() if hasattr(self, "solcast_lat_edit") else ""
         solcast_lon = self.solcast_lon_edit.text().strip() if hasattr(self, "solcast_lon_edit") else ""
 
-        if not solcast_key or not solcast_lat or not solcast_lon:
-            QMessageBox.warning(self, "Incomplete Solcast Configuration", "Please enter your Solcast API key, latitude, and longitude.")
-            return
-
-        try:
-            float(solcast_lat)
-            float(solcast_lon)
-        except ValueError:
-            QMessageBox.warning(self, "Invalid Coordinates", "Latitude and longitude must be numeric values.")
-            return
+        if solcast_key or solcast_lat or solcast_lon:
+            if not solcast_key or not solcast_lat or not solcast_lon:
+                QMessageBox.warning(self, "Incomplete Solcast Configuration", "Please provide API key, latitude, and longitude or leave all three blank.")
+                return
+            try:
+                float(solcast_lat)
+                float(solcast_lon)
+            except ValueError:
+                QMessageBox.warning(self, "Invalid Coordinates", "Latitude and longitude must be numeric values.")
+                return
+        else:
+            solcast_key = ""
+            solcast_lat = ""
+            solcast_lon = ""
 
         config_data = {
             "battery_info": self.battery_info,

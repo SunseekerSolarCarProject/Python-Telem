@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,
-    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog, QProgressBar
+    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog, QProgressBar, QLineEdit
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
@@ -16,6 +16,7 @@ class SettingsTab(QWidget):
     units_changed_signal = pyqtSignal(str)  # Signal for units system changes
     machine_learning_retrain_signal = pyqtSignal()  # Signal to retrain ML model (no args)
     additional_files_selected = pyqtSignal(list) #adding files to the ML model.
+    solcast_config_changed = pyqtSignal(str, str, str)
 
     # New signals for updater version management
     refresh_versions_requested = pyqtSignal()
@@ -124,6 +125,24 @@ class SettingsTab(QWidget):
         self.units_dropdown.setCurrentText('Metric (SI)')
         self.units_dropdown.setMinimumWidth(200)
         layout.addWidget(self.units_dropdown)
+
+        # Solcast credentials
+        solcast_label = QLabel("Solcast Settings:")
+        solcast_label.setMinimumWidth(200)
+        layout.addWidget(solcast_label)
+
+        self.solcast_key_edit = QLineEdit()
+        self.solcast_key_edit.setPlaceholderText("API key (optional)")
+        self.solcast_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.solcast_key_edit)
+
+        self.solcast_lat_edit = QLineEdit()
+        self.solcast_lat_edit.setPlaceholderText("Latitude (optional)")
+        layout.addWidget(self.solcast_lat_edit)
+
+        self.solcast_lon_edit = QLineEdit()
+        self.solcast_lon_edit.setPlaceholderText("Longitude (optional)")
+        layout.addWidget(self.solcast_lon_edit)
 
         # Machine Learning Retrain Button
         machine_learning_label = QLabel("Machine Learning:")
@@ -245,9 +264,31 @@ class SettingsTab(QWidget):
         self.log_level_signal.emit(selected_log_level)
         # Color changes are emitted individually on change
 
+        # Prepare Solcast values
+        solcast_key = self.solcast_key_edit.text().strip() if hasattr(self, 'solcast_key_edit') else ''
+        solcast_lat = self.solcast_lat_edit.text().strip() if hasattr(self, 'solcast_lat_edit') else ''
+        solcast_lon = self.solcast_lon_edit.text().strip() if hasattr(self, 'solcast_lon_edit') else ''
+
+        if solcast_key or solcast_lat or solcast_lon:
+            if not solcast_key or not solcast_lat or not solcast_lon:
+                QMessageBox.warning(self, "Incomplete Solcast Configuration", "Provide API key, latitude, and longitude or leave all three blank.")
+                return
+            try:
+                float(solcast_lat)
+                float(solcast_lon)
+            except ValueError:
+                QMessageBox.warning(self, "Invalid Coordinates", "Latitude and longitude must be numeric values.")
+                return
+        else:
+            solcast_key = ''
+            solcast_lat = ''
+            solcast_lon = ''
+
         # Emit signal for COM port, baud rate, log level, and endianness changes
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
-        self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}, Endianness={endianness}")
+        self.solcast_config_changed.emit(solcast_key, solcast_lat, solcast_lon)
+        status = 'set' if solcast_key else 'empty'
+        self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}, Endianness={endianness}, Solcast Key={status}")
 
     # ----- Updater helpers -----
     def set_versions(self, versions: list[str], current_version: str | None = None):
@@ -375,6 +416,14 @@ class SettingsTab(QWidget):
                 self.logger.debug(f"Set endianness to {endianness_str}")
             else:
                 self.logger.warning(f"Endianness {endianness_str} not found in dropdown. Using default.")
+
+            # Solcast settings
+            if hasattr(self, 'solcast_key_edit'):
+                self.solcast_key_edit.setText(config_data.get('solcast_api_key', ''))
+            if hasattr(self, 'solcast_lat_edit'):
+                self.solcast_lat_edit.setText(str(config_data.get('solcast_latitude', '')))
+            if hasattr(self, 'solcast_lon_edit'):
+                self.solcast_lon_edit.setText(str(config_data.get('solcast_longitude', '')))
 
         except Exception as e:
             self.logger.error(f"Failed to set initial settings: {e}")
