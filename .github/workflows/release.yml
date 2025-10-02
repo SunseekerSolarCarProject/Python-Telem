@@ -133,28 +133,26 @@ jobs:
                 fi
               else
                 echo "WARNING: ${dll} not found in ${SEARCH_DIRS[*]}"
-              fi
-            done
-          fi
-
-
-
-            - name: Rename artifact
-              shell: bash
-              run: |
-                mkdir -p out
-                if [ -d "${{ matrix.bin_path }}" ]; then
-                  cp -R "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
-                else
-                  cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+                fi
+                done
                 fi
 
-            - name: Upload artifact
-              uses: actions/upload-artifact@v4
-              with:
-                name: built-${{ matrix.os }}
-                path: out/*
-                if-no-files-found: error
+      - name: Rename artifact
+        shell: bash
+        run: |
+            mkdir -p out
+              if [ -d "${{ matrix.bin_path }}" ]; then
+                cp -R "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+              else
+                cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+              fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+              name: built-${{ matrix.os }}
+              path: out/*
+              if-no-files-found: error
 
   tuf_release:
     name: Sign & Release (TUF + assets)
