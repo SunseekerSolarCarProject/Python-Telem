@@ -53,6 +53,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Optional: quieter/safer scientific collection
           COLLECT_FLAGS=(
             --collect-binaries sklearn
             --collect-binaries scipy
@@ -64,6 +65,19 @@ jobs:
             --exclude-module pyqtgraph.opengl
           )
 
+          # Convert pythonLocation to forward-slash Windows path (C:/...)
+          PYLOC="$(python - <<'PY'
+          import os, sys
+          p = os.environ['pythonLocation'].replace('\\','/')
+          print(p)
+          PY
+          )"
+
+          # Where to look for VC++ runtime on the runner
+          VC_SEARCH=( "C:/Windows/System32" "$PYLOC" "$PYLOC/DLLs" )
+          VC_DLLS=( msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll )
+
+          # Build the pyinstaller arguments
           args=(
             src/main_app.py
             --noconfirm
@@ -92,30 +106,25 @@ jobs:
             "${COLLECT_FLAGS[@]}"
           )
 
-          # ---- Windows-only: co-locate VC runtime with sklearn/.libs ----
+          # Windows-only: place VC++ runtime next to sklearn\.libs INSIDE the onefile
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            VC_SEARCH=( "/c/Windows/System32" "${pythonLocation}" "${pythonLocation}/DLLs" )
-            VC_DLLS=( msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll )
-
             for dll in "${VC_DLLS[@]}"; do
               found=""
               for dir in "${VC_SEARCH[@]}"; do
-                if [ -f "${dir}/${dll}" ]; then
-                  found="${dir}/${dll}"
-                  break
+                if [ -f "$dir/$dll" ]; then
+                  found="$dir/$dll"; break
                 fi
               done
               if [ -n "$found" ]; then
-                # NOTE: DEST must be _internal/sklearn/.libs (where sklearn looks)
+                # Important: destination must be _internal/sklearn/.libs
                 args+=( --add-binary "${found}${{ matrix.sep }}_internal/sklearn/.libs" )
               else
-                echo "WARNING: ${dll} not found in ${VC_SEARCH[*]}"
+                echo "WARNING: $dll not found in: ${VC_SEARCH[*]}"
               fi
             done
           fi
 
           pyinstaller "${args[@]}"
-
       - name: Rename artifact
         shell: bash
         run: |
