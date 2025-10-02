@@ -7,9 +7,15 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QFileDialog,
     QMessageBox,
+    QLineEdit,
+    QGroupBox,
+    QGridLayout,
+    QHBoxLayout,
+    QSizePolicy,
 )
 import os
 import logging
+from PyQt6.QtCore import Qt
 
 class CSVManagementTab(QWidget):
     """
@@ -24,30 +30,52 @@ class CSVManagementTab(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(12)
 
-        # Labels for the two CSV paths
-        self.primary_csv_path_label = QLabel()
-        self.secondary_csv_path_label = QLabel()
-        layout.addWidget(self.primary_csv_path_label)
-        layout.addWidget(self.secondary_csv_path_label)
+        # -- Current locations --
+        paths_group = QGroupBox("Current CSV locations")
+        paths_layout = QGridLayout(paths_group)
+        paths_layout.setColumnStretch(1, 1)
 
-        # Buttons
-        save_primary_btn = QPushButton("Save Current Primary CSV")
+        self.primary_path_edit = QLineEdit()
+        self.primary_path_edit.setReadOnly(True)
+        self.primary_path_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.primary_path_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.secondary_path_edit = QLineEdit()
+        self.secondary_path_edit.setReadOnly(True)
+        self.secondary_path_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.secondary_path_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        paths_layout.addWidget(QLabel("Primary CSV:"), 0, 0)
+        paths_layout.addWidget(self.primary_path_edit, 0, 1)
+        paths_layout.addWidget(QLabel("Secondary CSV:"), 1, 0)
+        paths_layout.addWidget(self.secondary_path_edit, 1, 1)
+
+        layout.addWidget(paths_group)
+
+        # -- Actions --
+        actions_group = QGroupBox("Actions")
+        buttons_layout = QHBoxLayout(actions_group)
+        buttons_layout.setSpacing(10)
+
+        save_primary_btn = QPushButton("Save Primary CSV…")
         save_primary_btn.clicked.connect(self.save_primary_csv_data)
-        layout.addWidget(save_primary_btn)
+        buttons_layout.addWidget(save_primary_btn)
 
-        save_secondary_btn = QPushButton("Save Current Secondary CSV")
+        save_secondary_btn = QPushButton("Save Secondary CSV…")
         save_secondary_btn.clicked.connect(self.save_secondary_csv_data)
-        layout.addWidget(save_secondary_btn)
+        buttons_layout.addWidget(save_secondary_btn)
 
-        change_location_btn = QPushButton("Change CSV Save Location")
+        change_location_btn = QPushButton("Change Save Folder…")
         change_location_btn.clicked.connect(self.change_csv_save_location)
-        layout.addWidget(change_location_btn)
+        buttons_layout.addWidget(change_location_btn)
 
-        # Fill in the current paths
+        buttons_layout.addStretch(1)
+        layout.addWidget(actions_group)
+        layout.addStretch(1)
+
         self._refresh_labels()
-
-        self.setLayout(layout)
 
     def _refresh_labels(self):
         """Update the two path‐display labels from the handler."""
@@ -59,8 +87,10 @@ class CSVManagementTab(QWidget):
             primary = "<error>"
             secondary = "<error>"
 
-        self.primary_csv_path_label.setText(f"Primary CSV File: {primary}")
-        self.secondary_csv_path_label.setText(f"Secondary CSV File: {secondary}")
+        if hasattr(self, 'primary_path_edit'):
+            self.primary_path_edit.setText(primary)
+        if hasattr(self, 'secondary_path_edit'):
+            self.secondary_path_edit.setText(secondary)
 
     def save_primary_csv_data(self):
         """Ask user where to save a copy of the primary CSV."""
