@@ -109,7 +109,7 @@ jobs:
               if [ -n "$found" ]; then
                 # 1) for sklearn’s .libs
                 args+=( --add-binary "${found}${{ matrix.sep }}_internal/sklearn/.libs" )
-                # 2) for python312.dll at MEI root
+                # 2) for python313.1.dll at MEI root
                 args+=( --add-binary "${found}${{ matrix.sep }}." )
               else
                 echo "WARNING: $dll not found in: ${VC_SEARCH[*]}"
@@ -147,7 +147,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13.1'
 
       - name: Install tufup
         run: pip install tufup
