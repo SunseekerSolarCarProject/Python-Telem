@@ -212,17 +212,22 @@ class ConfigDialog(QDialog):
 
      # --- Updater slots ---
     def on_update_available(self, latest_version: str):
-        reply = QMessageBox.question(
-            self,
-            "Update Available",
-            f"A new version ({latest_version}) is available.\n"
-            f"You're currently on {VERSION}.\n\n"
-            "Download and install now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Update Available")
+        box.setText(
+            f"A new version ({latest_version}) is available."
+            f"You're currently on {VERSION}."
         )
-        if reply == QMessageBox.StandardButton.Yes:
+        install_btn = box.addButton("Install Update", QMessageBox.ButtonRole.YesRole)
+        skip_btn = box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(skip_btn)
+        box.exec()
+        if box.clickedButton() is install_btn:
             self.update_progress.setVisible(True)
             self.updater.download_and_apply_update()
+        else:
+            self.logger.info("User skipped update in configuration dialog.")
 
     def on_update_progress(self, percent: int):
         self.update_progress.setVisible(True)

@@ -225,7 +225,7 @@ class UpdateChecker(QObject):
                 :wait
                 ping 127.0.0.1 -n 2 >nul
                 tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
-                robocopy %NEW_DIR% %APP_DIR% /MIR /NFL /NDL /NJH /NJS >nul
+                robocopy %NEW_DIR% %APP_DIR% /E /COPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS >nul
                 if errorlevel 8 echo Robocopy returned %errorlevel%
                 start "" %OLD_EXE%
                 """)
@@ -370,7 +370,7 @@ class UpdateChecker(QObject):
                 :wait
                 ping 127.0.0.1 -n 2 >nul
                 tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
-                robocopy %NEW_DIR% %APP_DIR% /MIR /NFL /NDL /NJH /NJS >nul
+                robocopy %NEW_DIR% %APP_DIR% /E /COPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS >nul
                 if errorlevel 8 echo Robocopy returned %errorlevel%
                 start "" %OLD_EXE%
                 """)

@@ -420,21 +420,30 @@ class TelemetryGUI(QWidget):
             self.logger.error(f"Failed to apply dark mode stylesheet: {e}")
 
     def on_update_available(self, latest_version: str):
-        reply = QMessageBox.question(
-            self,
-            "Update Available",
+        box = QMessageBox(self)
+        box.setWindowTitle("Update Available")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(
             f"A new version ({latest_version}) is available.\n"
-            f"You’re currently on {VERSION}.\n\n"
-            "Download and install now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            f"You're currently on {VERSION}."
         )
-        if reply == QMessageBox.StandardButton.Yes:
+        install_btn = box.addButton("Install Update", QMessageBox.ButtonRole.YesRole)
+        skip_btn = box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(skip_btn)
+        box.exec()
+        if box.clickedButton() is install_btn:
             try:
                 self.settings_tab.set_update_status(f"Downloading v{latest_version}...")
                 self.settings_tab.set_update_progress(0)
             except Exception:
                 pass
             self.updater.download_and_apply_update()
+        else:
+            try:
+                self.settings_tab.set_update_status("Update skipped.", reset_progress=True)
+            except Exception:
+                pass
+            self.logger.info("User skipped update from main UI.")
 
     def on_update_progress(self, percent: int):
         # Forward to Settings tab progress bar
