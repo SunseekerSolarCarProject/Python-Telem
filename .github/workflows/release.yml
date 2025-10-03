@@ -14,19 +14,19 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            py: '3.13'
+            py: '3.13.1'
             sep: ';'
             icon_arg: '--icon src/assets/logo-icon.ico --windowed'
             bin_path: dist/telemetry
             asset_name: telemetry-windows
           - os: macos-latest
-            py: '3.13'
+            py: '3.13.1'
             sep: ':'
             icon_arg: '--windowed'  # or: --icon src/assets/app.icns --windowed
             bin_path: dist/telemetry
             asset_name: telemetry-macos
           - os: ubuntu-latest
-            py: '3.13'
+            py: '3.13.1'
             sep: ':'
             icon_arg: ''
             bin_path: dist/telemetry
