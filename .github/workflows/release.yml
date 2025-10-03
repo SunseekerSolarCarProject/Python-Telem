@@ -53,7 +53,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Optional: quieter/safer scientific collection
           COLLECT_FLAGS=(
             --collect-binaries sklearn
             --collect-binaries scipy
@@ -65,19 +64,14 @@ jobs:
             --exclude-module pyqtgraph.opengl
           )
 
-          # Convert pythonLocation to forward-slash Windows path (C:/...)
+          # Convert actions/setup-python path to C:/... form
           PYLOC="$(python - <<'PY'
-          import os, sys
-          p = os.environ['pythonLocation'].replace('\\','/')
-          print(p)
+          import os; print(os.environ['pythonLocation'].replace('\\','/'))
           PY
           )"
+              VC_SEARCH=( "C:/Windows/System32" "$PYLOC" "$PYLOC/DLLs" )
+              VC_DLLS=( msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll )
 
-          # Where to look for VC++ runtime on the runner
-          VC_SEARCH=( "C:/Windows/System32" "$PYLOC" "$PYLOC/DLLs" )
-          VC_DLLS=( msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll )
-
-          # Build the pyinstaller arguments
           args=(
             src/main_app.py
             --noconfirm
@@ -106,18 +100,17 @@ jobs:
             "${COLLECT_FLAGS[@]}"
           )
 
-          # Windows-only: place VC++ runtime next to sklearn\.libs INSIDE the onefile
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             for dll in "${VC_DLLS[@]}"; do
               found=""
               for dir in "${VC_SEARCH[@]}"; do
-                if [ -f "$dir/$dll" ]; then
-                  found="$dir/$dll"; break
-                fi
+                [ -f "$dir/$dll" ] && { found="$dir/$dll"; break; }
               done
               if [ -n "$found" ]; then
-                # Important: destination must be _internal/sklearn/.libs
+                # 1) for sklearn’s .libs
                 args+=( --add-binary "${found}${{ matrix.sep }}_internal/sklearn/.libs" )
+                # 2) for python312.dll at MEI root
+                args+=( --add-binary "${found}${{ matrix.sep }}." )
               else
                 echo "WARNING: $dll not found in: ${VC_SEARCH[*]}"
               fi
