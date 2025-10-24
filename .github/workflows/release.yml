@@ -3,7 +3,10 @@ name: Create Release (multi-platform)
 on:
   push:
     tags:
-      - 'v*'  # e.g. v1.7.0
+      - 'v*'   # e.g. v1.8.10
+
+permissions:
+  contents: write  # needed for gh-release upload
 
 jobs:
   build:
@@ -17,17 +20,17 @@ jobs:
             py: '3.12.10'
             sep: ';'
             icon_arg: '--icon src/assets/logo-icon.ico --windowed'
-            asset_name: telemetry-windows.zip
+            artifact: telemetry-windows.zip
           - os: macos-latest
             py: '3.12.10'
             sep: ':'
-            icon_arg: '--windowed'     # add --icon src/assets/app.icns if you have one
-            asset_name: telemetry-macos.zip
+            icon_arg: '--windowed' # or: --icon src/assets/app.icns --windowed
+            artifact: telemetry-macos.zip
           - os: ubuntu-latest
             py: '3.12.10'
             sep: ':'
             icon_arg: ''
-            asset_name: telemetry-linux.zip
+            artifact: telemetry-linux.zip
 
     steps:
       - name: Checkout
@@ -38,14 +41,15 @@ jobs:
         with:
           python-version: ${{ matrix.py }}
 
-      - name: Install deps
+      - name: Install dependencies
         shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install -r requirement.txt; fi
           pip install pyinstaller==6.16.0 tufup
 
-      - name: Build (PyInstaller --onedir)
+      - name: Build executable (PyInstaller --onedir)
         shell: bash
         run: |
           set -euo pipefail
@@ -87,19 +91,20 @@ jobs:
             --add-data "src/Version.py${{ matrix.sep }}." \
             "${COLLECT_FLAGS[@]}"
 
-      - name: Package (zip the onedir folder)
+      - name: Package onedir as zip
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
-          # dist/telemetry is a folder on all OSes with --onedir
+          # dist/telemetry/ exists on all OS with --onedir
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z a -tzip "out/${{ matrix.asset_name }}" "./dist/telemetry/*"
+            7z a -tzip "out/${{ matrix.artifact }}" "./dist/telemetry/*" >/dev/null
           else
-            (cd dist && zip -r "../out/${{ matrix.asset_name }}" telemetry)
+            (cd dist && zip -qr "../out/${{ matrix.artifact }}" telemetry)
           fi
+          ls -la out
 
-      - name: Upload artifact (zipped app)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: built-${{ matrix.os }}
@@ -112,7 +117,7 @@ jobs:
     needs: [build]
 
     steps:
-      - name: Checkout (keys, scripts)
+      - name: Checkout (keys, scripts, build_tuf_repo.py)
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -123,22 +128,36 @@ jobs:
       - name: Install tufup
         run: pip install tufup
 
-      - name: Download artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Verify expected files
+      - name: Prepare bundles for TUF (extract zips)
         shell: bash
         run: |
           set -euo pipefail
           ls -la artifacts
-          test -f artifacts/telemetry-windows.zip
-          test -f artifacts/telemetry-macos.zip
-          test -f artifacts/telemetry-linux.zip
+          mkdir -p bundles/windows bundles/macos bundles/linux
 
-      - name: Write signing keys (secrets or fallback)
+          extract () {
+            src="$1"; dst="$2"
+            case "$src" in
+              *.zip)  unzip -q "$src" -d "$dst" ;;
+              *.tar.gz|*.tgz) tar -xzf "$src" -C "$dst" ;;
+              *) echo "Unsupported archive: $src"; exit 2 ;;
+            esac
+          }
+
+          extract artifacts/telemetry-windows.zip bundles/windows
+          extract artifacts/telemetry-macos.zip   bundles/macos
+          extract artifacts/telemetry-linux.zip   bundles/linux
+
+          echo "Bundle contents:"
+          find bundles -maxdepth 2 -type f | sed 's/^/  /'
+
+      - name: Write signing keys (from secrets or fallback)
         env:
           TUF_KEY_TARGETS_JSON_B64:   ${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}
           TUF_KEY_SNAPSHOT_JSON_B64:  ${{ secrets.TUF_KEY_SNAPSHOT_JSON_B64 }}
@@ -159,19 +178,13 @@ jobs:
             src/updater/keys/snapshot \
             src/updater/keys/timestamp
 
-      - name: Stage TUF targets
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p release/targets
-          cp artifacts/telemetry-*.zip release/targets/
-
-      - name: Build TUF repo
+      - name: Build TUF repo (creates release/metadata + release/targets/*.tar.gz)
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}     # e.g., v1.7.0
+          TAG: ${{ github.ref_name }}      # e.g., v1.8.10
         run: |
           set -euo pipefail
+          echo "VERSION=${TAG#v}"
           python scripts/build_tuf_repo.py
 
       - name: Show release payload
@@ -180,7 +193,7 @@ jobs:
           echo "::group::Metadata"; ls -la release/metadata; echo "::endgroup::"
           echo "::group::Targets";  ls -la release/targets;  echo "::endgroup::"
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (TUF metadata + targets)
         uses: softprops/action-gh-release@v2
         with:
           files: |
