@@ -105,6 +105,9 @@ class TelemetryGUI(QWidget):
             "MC1IVC_IQ_Vector": "silver",
             "MC1BEM_BEMFD_Vector": "gold",
             "MC1BEM_BEMFQ_Vector": "coral",
+            "MC1_Bus_Power_W": "darkred",
+            "MC1_Mechanical_Power_W": "forestgreen",
+            "MC1_Efficiency_Pct": "goldenrod",
 
             # -----------------------------
             # Motor Controller 2
@@ -128,6 +131,12 @@ class TelemetryGUI(QWidget):
             "MC2IVC_IQ_Vector": "silver",
             "MC2BEM_BEMFD_Vector": "gold",
             "MC2BEM_BEMFQ_Vector": "coral",
+            "MC2_Bus_Power_W": "firebrick",
+            "MC2_Mechanical_Power_W": "seagreen",
+            "MC2_Efficiency_Pct": "mediumvioletred",
+            "Motors_Total_Bus_Power_W": "slateblue",
+            "Motors_Total_Mechanical_Power_W": "teal",
+            "Motors_Average_Efficiency_Pct": "darkorange",
 
             # -----------------------------
             # Battery Pack 1 & 2
@@ -141,6 +150,11 @@ class TelemetryGUI(QWidget):
             "BP_ISH_Amps": "red",
             "BP_PVS_Ah": "purple",
             "BP_PVS_milliamp/s": "magenta",
+            "Battery_String_Imbalance_V": "crimson",
+            "Battery_String_Imbalance_Pct": "darkmagenta",
+            "Battery_Pack_Power_W": "steelblue",
+            "Battery_Pack_Power_kW": "turquoise",
+            "Battery_C_Rate": "chocolate",
 
             # -----------------------------
             # Remaining Capacity
@@ -250,6 +264,13 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
                 TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
                 TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0]
+            ],
+            "Insights": [
+                TelemetryKey.MC1_BUS_POWER_W.value[0], TelemetryKey.MC1_MECHANICAL_POWER_W.value[0], TelemetryKey.MC1_EFFICIENCY_PCT.value[0],
+                TelemetryKey.MC2_BUS_POWER_W.value[0], TelemetryKey.MC2_MECHANICAL_POWER_W.value[0], TelemetryKey.MC2_EFFICIENCY_PCT.value[0],
+                TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0], TelemetryKey.MOTORS_TOTAL_MECHANICAL_POWER_W.value[0], TelemetryKey.MOTORS_AVERAGE_EFFICIENCY_PCT.value[0],
+                TelemetryKey.BATTERY_STRING_IMBALANCE_V.value[0], TelemetryKey.BATTERY_STRING_IMBALANCE_PCT.value[0],
+                TelemetryKey.BATTERY_PACK_POWER_W.value[0], TelemetryKey.BATTERY_PACK_POWER_KW.value[0], TelemetryKey.BATTERY_C_RATE.value[0]
             ]
         }
 
@@ -278,6 +299,11 @@ class TelemetryGUI(QWidget):
                                       graph_groups["Remaining Capacity"],
                                       self.units, self.color_mapping)
         self.tabs.addTab(self.remaining_tab, "Battery Remaining Capacity")
+
+        self.insights_tab = GraphTab("Insights",
+                                     graph_groups["Insights"],
+                                     self.units, self.color_mapping)
+        self.tabs.addTab(self.insights_tab, "Insights")
 
         # Data Table Tab
         data_table_groups = {
@@ -500,6 +526,7 @@ class TelemetryGUI(QWidget):
             self.pack1_tab.update_graphs(graph_data)
             self.pack2_tab.update_graphs(graph_data)
             self.remaining_tab.update_graphs(graph_data)
+            self.insights_tab.update_graphs(graph_data)
             self.data_table_tab.update_data(telemetry_data)
             self.data_display_tab.update_display(telemetry_data)
             self.custom_data_table_tab.update_data(telemetry_data)

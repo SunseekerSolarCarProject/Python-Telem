@@ -209,7 +209,13 @@ class TelemetryApplication(QObject):
             TelemetryKey.SOLCAST_FCST_GHI.value[0],
             TelemetryKey.SOLCAST_FCST_DNI.value[0],
             TelemetryKey.SOLCAST_FCST_TEMP.value[0],
-            TelemetryKey.SOLCAST_FCST_TIME.value[0]
+            TelemetryKey.SOLCAST_FCST_TIME.value[0],
+            TelemetryKey.MC1_BUS_POWER_W.value[0], TelemetryKey.MC1_MECHANICAL_POWER_W.value[0], TelemetryKey.MC1_EFFICIENCY_PCT.value[0],
+            TelemetryKey.MC2_BUS_POWER_W.value[0], TelemetryKey.MC2_MECHANICAL_POWER_W.value[0], TelemetryKey.MC2_EFFICIENCY_PCT.value[0],
+            TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0], TelemetryKey.MOTORS_TOTAL_MECHANICAL_POWER_W.value[0], TelemetryKey.MOTORS_AVERAGE_EFFICIENCY_PCT.value[0],
+            TelemetryKey.BATTERY_STRING_IMBALANCE_V.value[0], TelemetryKey.BATTERY_STRING_IMBALANCE_PCT.value[0],
+            TelemetryKey.BATTERY_PACK_POWER_W.value[0], TelemetryKey.BATTERY_PACK_POWER_KW.value[0],
+            TelemetryKey.BATTERY_C_RATE.value[0]
         ]
 
     def init_csv_handler(self):

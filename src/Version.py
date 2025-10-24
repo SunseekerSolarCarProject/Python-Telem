@@ -1,1 +1,1 @@
-VERSION = "1.9.1"  # Update this when releasing new versions
+VERSION = "1.9.2"  # Update this when releasing new versions
