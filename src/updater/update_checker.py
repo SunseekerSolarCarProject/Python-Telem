@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import hashlib
 import textwrap
+import tempfile
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 from tuf.ngclient.updater import Updater  # TUF verification
@@ -47,6 +48,19 @@ class UpdateChecker(QObject):
             target_base_url=base + "/",
             fetcher=self._fetcher,
         )
+
+    @staticmethod
+    def _extract_archive(archive_path: str, dest_dir: str) -> None:
+        """Extract .tar.* or .zip archives into dest_dir."""
+        lower = archive_path.lower()
+        if lower.endswith('.zip'):
+            from zipfile import ZipFile
+            with ZipFile(archive_path) as zf:
+                zf.extractall(dest_dir)
+        else:
+            import tarfile
+            with tarfile.open(archive_path, 'r:*') as tf:
+                tf.extractall(path=dest_dir)
 
     @staticmethod
     def _default_binary_name() -> str:
@@ -175,11 +189,9 @@ class UpdateChecker(QObject):
             self._fetcher.set_callback(None)
 
             # Extract bundle and locate the binary inside
-            import tarfile, tempfile
             extract_dir = tempfile.mkdtemp(prefix="tuf_bundle_")
             try:
-                with tarfile.open(bundle_path, "r:gz") as tf:
-                    tf.extractall(path=extract_dir)
+                self._extract_archive(bundle_path, extract_dir)
             except Exception as e:
                 self.update_error.emit(f"Failed to extract bundle: {e}")
                 return False
@@ -231,7 +243,8 @@ class UpdateChecker(QObject):
                 """)
                 with open(bat_path, "w", encoding="utf-8") as f:
                     f.write(script)
-                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)
+                env = os.environ.copy()
+                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000, env=env)
                 sys.exit(0)
             else:
                 backup = old_exe + ".bak"
@@ -240,7 +253,8 @@ class UpdateChecker(QObject):
                 except Exception:
                     pass
                 os.replace(new_exe_path, old_exe)
-                subprocess.Popen([old_exe] + sys.argv[1:])
+                env = os.environ.copy()
+                subprocess.Popen([old_exe] + sys.argv[1:], cwd=os.path.dirname(old_exe), env=env)
                 sys.exit(0)
 
         except Exception as e:
@@ -321,11 +335,9 @@ class UpdateChecker(QObject):
             self._fetcher.set_callback(None)
 
             # Extract and swap-in (reuse logic)
-            import tarfile, tempfile
             extract_dir = tempfile.mkdtemp(prefix="tuf_bundle_")
             try:
-                with tarfile.open(bundle_path, "r:gz") as tf:
-                    tf.extractall(path=extract_dir)
+                self._extract_archive(bundle_path, extract_dir)
             except Exception as e:
                 self.update_error.emit(f"Failed to extract bundle: {e}")
                 return False
@@ -376,7 +388,8 @@ class UpdateChecker(QObject):
                 """)
                 with open(bat_path, "w", encoding="utf-8") as f:
                     f.write(script)
-                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)
+                env = os.environ.copy()
+                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000, env=env)
                 sys.exit(0)
             else:
                 backup = old_exe + ".bak"
@@ -385,9 +398,22 @@ class UpdateChecker(QObject):
                 except Exception:
                     pass
                 os.replace(new_exe_path, old_exe)
-                subprocess.Popen([old_exe] + sys.argv[1:])
+                env = os.environ.copy()
+                subprocess.Popen([old_exe] + sys.argv[1:], cwd=os.path.dirname(old_exe), env=env)
                 sys.exit(0)
 
         except Exception as e:
             self.update_error.emit(str(e))
             return False
+
+    def _extract_archive(self, archive_path: str, dest_dir: str) -> None:
+        """Extract .tar(.gz/.bz2/.xz) or .zip into dest_dir."""
+        p = archive_path.lower()
+        if p.endswith(".zip"):
+            from zipfile import ZipFile
+            with ZipFile(archive_path) as z:
+                z.extractall(dest_dir)
+        else:
+            import tarfile
+            with tarfile.open(archive_path, "r:*") as tf:
+                tf.extractall(path=dest_dir)

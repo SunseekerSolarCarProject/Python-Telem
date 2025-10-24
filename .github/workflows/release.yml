@@ -3,7 +3,7 @@ name: Create Release (multi-platform)
 on:
   push:
     tags:
-      - 'v*'   # e.g. v1.7.0
+      - 'v*'  # e.g. v1.7.0
 
 jobs:
   build:
@@ -14,23 +14,20 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            py: '3.13.1'
+            py: '3.12.10'
             sep: ';'
             icon_arg: '--icon src/assets/logo-icon.ico --windowed'
-            bin_path: dist/telemetry
-            asset_name: telemetry-windows
+            asset_name: telemetry-windows.zip
           - os: macos-latest
-            py: '3.13.1'
+            py: '3.12.10'
             sep: ':'
-            icon_arg: '--windowed'  # or: --icon src/assets/app.icns --windowed
-            bin_path: dist/telemetry
-            asset_name: telemetry-macos
+            icon_arg: '--windowed'     # add --icon src/assets/app.icns if you have one
+            asset_name: telemetry-macos.zip
           - os: ubuntu-latest
-            py: '3.13.1'
+            py: '3.12.10'
             sep: ':'
             icon_arg: ''
-            bin_path: dist/telemetry
-            asset_name: telemetry-linux
+            asset_name: telemetry-linux.zip
 
     steps:
       - name: Checkout
@@ -41,14 +38,14 @@ jobs:
         with:
           python-version: ${{ matrix.py }}
 
-      - name: Install dependencies
+      - name: Install deps
         shell: bash
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install -r requirement.txt; fi
-          pip install pyinstaller tufup
+          pip install pyinstaller==6.16.0 tufup
 
-      - name: Build executable
+      - name: Build (PyInstaller --onedir)
         shell: bash
         run: |
           set -euo pipefail
@@ -64,76 +61,50 @@ jobs:
             --exclude-module pyqtgraph.opengl
           )
 
-          # Convert actions/setup-python path to C:/... form
-          PYLOC="$(python - <<'PY'
-          import os; print(os.environ['pythonLocation'].replace('\\','/'))
-          PY
-          )"
-              VC_SEARCH=( "C:/Windows/System32" "$PYLOC" "$PYLOC/DLLs" )
-              VC_DLLS=( msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll )
-
-          args=(
-            src/main_app.py
-            --noconfirm
-            --distpath dist
-            --name telemetry
-            ${{ matrix.icon_arg }}
-            --onefile
-            --additional-hooks-dir src/hooks
-            --hidden-import pyqtgraph
-            --add-data "src/gui_files${{ matrix.sep }}gui_files/"
-            --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/"
-            --add-data "src/updater${{ matrix.sep }}updater/"
-            --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/"
-            --add-data "src/__init__.py${{ matrix.sep }}."
-            --add-data "src/buffer_data.py${{ matrix.sep }}."
-            --add-data "src/central_logger.py${{ matrix.sep }}."
-            --add-data "src/csv_handler.py${{ matrix.sep }}."
-            --add-data "src/data_display.py${{ matrix.sep }}."
-            --add-data "src/data_processor.py${{ matrix.sep }}."
-            --add-data "src/extra_calculations.py${{ matrix.sep }}."
-            --add-data "src/key_name_definitions.py${{ matrix.sep }}."
-            --add-data "src/serial_reader.py${{ matrix.sep }}."
-            --add-data "src/telemetry_application.py${{ matrix.sep }}."
-            --add-data "src/unit_conversion.py${{ matrix.sep }}."
-            --add-data "src/Version.py${{ matrix.sep }}."
+          pyinstaller src/main_app.py \
+            --name telemetry \
+            --noconfirm \
+            --onedir --noupx \
+            --distpath dist \
+            ${{ matrix.icon_arg }} \
+            --additional-hooks-dir src/hooks \
+            --hidden-import pyqtgraph \
+            --add-data "src/gui_files${{ matrix.sep }}gui_files/" \
+            --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/" \
+            --add-data "src/updater${{ matrix.sep }}updater/" \
+            --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/" \
+            --add-data "src/__init__.py${{ matrix.sep }}." \
+            --add-data "src/buffer_data.py${{ matrix.sep }}." \
+            --add-data "src/central_logger.py${{ matrix.sep }}." \
+            --add-data "src/csv_handler.py${{ matrix.sep }}." \
+            --add-data "src/data_display.py${{ matrix.sep }}." \
+            --add-data "src/data_processor.py${{ matrix.sep }}." \
+            --add-data "src/extra_calculations.py${{ matrix.sep }}." \
+            --add-data "src/key_name_definitions.py${{ matrix.sep }}." \
+            --add-data "src/serial_reader.py${{ matrix.sep }}." \
+            --add-data "src/telemetry_application.py${{ matrix.sep }}." \
+            --add-data "src/unit_conversion.py${{ matrix.sep }}." \
+            --add-data "src/Version.py${{ matrix.sep }}." \
             "${COLLECT_FLAGS[@]}"
-          )
 
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            for dll in "${VC_DLLS[@]}"; do
-              found=""
-              for dir in "${VC_SEARCH[@]}"; do
-                [ -f "$dir/$dll" ] && { found="$dir/$dll"; break; }
-              done
-              if [ -n "$found" ]; then
-                # 1) for sklearn’s .libs
-                args+=( --add-binary "${found}${{ matrix.sep }}_internal/sklearn/.libs" )
-                # 2) for python313.1.dll at MEI root
-                args+=( --add-binary "${found}${{ matrix.sep }}." )
-              else
-                echo "WARNING: $dll not found in: ${VC_SEARCH[*]}"
-              fi
-            done
-          fi
-
-          pyinstaller "${args[@]}"
-      - name: Rename artifact
+      - name: Package (zip the onedir folder)
         shell: bash
         run: |
-            mkdir -p out
-              if [ -d "${{ matrix.bin_path }}" ]; then
-                cp -R "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
-              else
-                cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
-              fi
+          set -euo pipefail
+          mkdir -p out
+          # dist/telemetry is a folder on all OSes with --onedir
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a -tzip "out/${{ matrix.asset_name }}" "./dist/telemetry/*"
+          else
+            (cd dist && zip -r "../out/${{ matrix.asset_name }}" telemetry)
+          fi
 
-      - name: Upload artifact
+      - name: Upload artifact (zipped app)
         uses: actions/upload-artifact@v4
         with:
-              name: built-${{ matrix.os }}
-              path: out/*
-              if-no-files-found: error
+          name: built-${{ matrix.os }}
+          path: out/*
+          if-no-files-found: error
 
   tuf_release:
     name: Sign & Release (TUF + assets)
@@ -141,56 +112,32 @@ jobs:
     needs: [build]
 
     steps:
-      - name: Checkout (for root.json & keys and script)
+      - name: Checkout (keys, scripts)
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13.1'
+          python-version: '3.12.10'
 
       - name: Install tufup
         run: pip install tufup
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Stage bundles per platform
+      - name: Verify expected files
         shell: bash
         run: |
           set -euo pipefail
-          echo "Artifacts present:"
           ls -la artifacts
-          if [ ! -e artifacts/telemetry-windows -a ! -f artifacts/telemetry-windows.exe ]; then
-            echo "Missing telemetry-windows artifact"; exit 1;
-          fi
-          if [ ! -e artifacts/telemetry-macos ]; then
-            echo "Missing telemetry-macos artifact"; exit 1;
-          fi
-          if [ ! -e artifacts/telemetry-linux ]; then
-            echo "Missing telemetry-linux artifact"; exit 1;
-          fi
+          test -f artifacts/telemetry-windows.zip
+          test -f artifacts/telemetry-macos.zip
+          test -f artifacts/telemetry-linux.zip
 
-          mkdir -p bundles/windows bundles/macos bundles/linux
-          if [ -d artifacts/telemetry-windows ]; then
-            cp -R artifacts/telemetry-windows/. bundles/windows/
-          else
-            cp artifacts/telemetry-windows.exe bundles/windows/telemetry.exe
-          fi
-          if [ -d artifacts/telemetry-macos ]; then
-            cp -R artifacts/telemetry-macos/. bundles/macos/
-          else
-            cp artifacts/telemetry-macos bundles/macos/telemetry
-          fi
-          if [ -d artifacts/telemetry-linux ]; then
-            cp -R artifacts/telemetry-linux/. bundles/linux/
-          else
-            cp artifacts/telemetry-linux bundles/linux/telemetry
-          fi
-      
       - name: Write signing keys (secrets or fallback)
         env:
           TUF_KEY_TARGETS_JSON_B64:   ${{ secrets.TUF_KEY_TARGETS_JSON_B64 }}
@@ -203,16 +150,6 @@ jobs:
           set -euo pipefail
           python scripts/prepare_keys.py --from-dir scripts/exported_keys --keys-dir src/updater/keys
 
-      - name: Inspect key files (size only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for f in src/updater/keys/targets src/updater/keys/snapshot src/updater/keys/timestamp; do
-            printf "%s size=" "$f"; wc -c < "$f"
-            # Print first bytes in hex only (no secrets leaked)
-            head -c 16 "$f" | hexdump -C | sed -n '1p'
-          done
-
       - name: Validate key JSON
         shell: bash
         run: |
@@ -222,25 +159,26 @@ jobs:
             src/updater/keys/snapshot \
             src/updater/keys/timestamp
 
-      - name: Build TUF repo & add targets (repo script)
+      - name: Stage TUF targets
         shell: bash
-        env:
-          TAG: ${{ github.ref_name }}      # e.g. v1.7.0
         run: |
           set -euo pipefail
-          VERSION="${TAG#v}"
-          echo "VERSION=${VERSION}"
+          mkdir -p release/targets
+          cp artifacts/telemetry-*.zip release/targets/
+
+      - name: Build TUF repo
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}     # e.g., v1.7.0
+        run: |
+          set -euo pipefail
           python scripts/build_tuf_repo.py
 
       - name: Show release payload
         shell: bash
         run: |
-          echo "::group::Metadata"
-          ls -la release/metadata
-          echo "::endgroup::"
-          echo "::group::Targets"
-          ls -la release/targets
-          echo "::endgroup::"
+          echo "::group::Metadata"; ls -la release/metadata; echo "::endgroup::"
+          echo "::group::Targets";  ls -la release/targets;  echo "::endgroup::"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
