@@ -6,6 +6,7 @@ import subprocess
 import hashlib
 import textwrap
 import tempfile
+from packaging.version import Version as SemVer
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 from tuf.ngclient.updater import Updater  # TUF verification
@@ -49,6 +50,8 @@ class UpdateChecker(QObject):
             fetcher=self._fetcher,
         )
 
+        self.bundle_extensions = (".tar.gz", ".zip")
+
     @staticmethod
     def _extract_archive(archive_path: str, dest_dir: str) -> None:
         """Extract .tar.* or .zip archives into dest_dir."""
@@ -85,8 +88,25 @@ class UpdateChecker(QObject):
         else:
             return "telemetry-linux-"
 
-    @staticmethod
-    def _bundle_name_for(version: str) -> str:
+    def _bundle_base(self, version: str) -> str:
+        if sys.platform.startswith("win"):
+            app = "telemetry-windows"
+        elif sys.platform == "darwin":
+            app = "telemetry-macos"
+        else:
+            app = "telemetry-linux"
+        return f"{app}-{version}"
+
+    def _resolve_bundle(self, updater: Updater, version: str):
+        base = self._bundle_base(version)
+        for ext in self.bundle_extensions:
+            name = base + ext
+            ti = updater.get_targetinfo(name)
+            if ti is not None:
+                return name, ti
+        return None, None
+
+    def _bundle_name_for(self, version: str) -> str:
         """
         Compute the TUF target file name (tar.gz bundle) for the given
         version. This matches scripts/build_tuf_repo.py where we call
@@ -94,13 +114,7 @@ class UpdateChecker(QObject):
           telemetry-windows | telemetry-macos | telemetry-linux
         -> bundle names: telemetry-<platform>-<version>.tar.gz
         """
-        if sys.platform.startswith("win"):
-            app = "telemetry-windows"
-        elif sys.platform == "darwin":
-            app = "telemetry-macos"
-        else:
-            app = "telemetry-linux"
-        return f"{app}-{version}.tar.gz"
+        return self._bundle_base(version) + self.bundle_extensions[0]
 
     # ---------- helpers ----------
     def _latest_version_from_github(self) -> str | None:
@@ -127,139 +141,72 @@ class UpdateChecker(QObject):
 
     # ---------- public API ----------
     def check_for_updates(self) -> bool:
-        """
-        Returns True if a newer version than self.version is available.
-        Discovery via GitHub API; download/verify via TUF.
-        """
-        # Dev mode: skip
+        """Return True if a newer version is available and staged in TUF."""
         if not getattr(sys, "frozen", False):
             return False
 
         try:
-            latest = self._latest_version_from_github()
-            if not latest or latest == self.version:
-                return False  # up-to-date or unknown
-
-            # Verify the bundle for the latest version exists in TUF metadata
-            self.updater.refresh()
-            bundle_name = self._bundle_name_for(latest)
-            ti = self.updater.get_targetinfo(bundle_name)
-            if ti is None:
-                self.update_error.emit(
-                    f"TUF metadata does not contain bundle '{bundle_name}'. "
-                    f"Make sure your release assets include TUF metadata + {bundle_name}."
-                )
+            versions = self.list_available_versions(limit=10)
+            if not versions:
                 return False
 
-            self.update_available.emit(latest)
-            return True
+            current = SemVer(self.version)
+            for candidate in versions:
+                try:
+                    cand_ver = SemVer(candidate)
+                except Exception:
+                    continue
+                if cand_ver <= current:
+                    continue
+                if self._version_has_bundle(candidate):
+                    self.update_available.emit(candidate)
+                    return True
+            return False
         except Exception as e:
             self.update_error.emit(str(e))
             return False
 
+    def _version_has_bundle(self, version: str) -> bool:
+        try:
+            base = f"https://github.com/{self.repo_owner}/{self.repo_name}/releases/download/v{version}"
+            updater = Updater(
+                self.metadata_dir,
+                metadata_base_url=base + "/",
+                target_base_url=base + "/",
+                fetcher=self._fetcher,
+            )
+            updater.refresh()
+            name, ti = self._resolve_bundle(updater, version)
+            return ti is not None
+        except Exception:
+            return False
+
     def download_and_apply_update(self) -> bool:
-        """
-        Downloads {target_name} using TUF (verified), then atomically swaps it in.
-        Handles Windows by spawning a small .bat to replace after exit.
-        """
-        # Dev mode: skip
         if not getattr(sys, "frozen", False):
             self.update_error.emit("Updater only runs in a packaged build.")
             return False
 
-        try:
-            latest = self._latest_version_from_github() or self.version
-            bundle_name = self._bundle_name_for(latest)
-            ti = self.updater.get_targetinfo(bundle_name)
-            if ti is None:
-                self.update_error.emit(f"Bundle '{bundle_name}' not found in TUF metadata.")
-                return False
-
-            # Download the tar.gz bundle
-            bundle_path = os.path.join(self.download_dir, bundle_name)
-            # Use our progress fetcher to emit per-byte progress
-            def _emit(received: int, total: int | None, pct: int | None):
-                if pct is not None:
-                    try:
-                        self.update_progress.emit(int(pct))
-                    except Exception:
-                        pass
-            self._fetcher.set_callback(_emit)
-            self.updater.download_target(ti, filepath=bundle_path)
-            self._fetcher.set_callback(None)
-
-            # Extract bundle and locate the binary inside
-            extract_dir = tempfile.mkdtemp(prefix="tuf_bundle_")
-            try:
-                self._extract_archive(bundle_path, extract_dir)
-            except Exception as e:
-                self.update_error.emit(f"Failed to extract bundle: {e}")
-                return False
-
-            # Find expected binary inside extracted contents
-            binary_name = self.target_name
-            candidate = None
-            bundle_root = None
-            for root, _dirs, files in os.walk(extract_dir):
-                if candidate is None and binary_name in files:
-                    candidate = os.path.join(root, binary_name)
-                    bundle_root = root
-                if candidate and bundle_root:
-                    break
-            if not candidate or not bundle_root:
-                self.update_error.emit(f"Bundle did not contain expected binary '{binary_name}'.")
-                return False
-
-            staged_root = os.path.join(self.download_dir, "staged_bundle")
-            try:
-                if os.path.exists(staged_root):
-                    shutil.rmtree(staged_root, ignore_errors=True)
-                shutil.copytree(bundle_root, staged_root, dirs_exist_ok=True)
-            except Exception as e:
-                self.update_error.emit(f"Failed staging new bundle: {e}")
-                return False
-
-            new_exe_path = os.path.join(staged_root, binary_name)
-
-            old_exe = self._running_binary_path()
-            if not old_exe:
-                self.update_error.emit("No runnable binary path detected.")
-                return False
-
-            if os.name == "nt":
-                bat_path = os.path.join(self.download_dir, "apply_update.bat")
-                app_dir = os.path.dirname(old_exe)
-                script = textwrap.dedent(f"""
-                @echo off
-                set NEW_DIR="{staged_root}"
-                set OLD_EXE="{old_exe}"
-                set APP_DIR="{app_dir}"
-                :wait
-                ping 127.0.0.1 -n 2 >nul
-                tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
-                robocopy %NEW_DIR% %APP_DIR% /E /COPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS >nul
-                if errorlevel 8 echo Robocopy returned %errorlevel%
-                start "" %OLD_EXE%
-                """)
-                with open(bat_path, "w", encoding="utf-8") as f:
-                    f.write(script)
-                env = os.environ.copy()
-                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000, env=env)
-                sys.exit(0)
-            else:
-                backup = old_exe + ".bak"
-                try:
-                    os.replace(old_exe, backup)
-                except Exception:
-                    pass
-                os.replace(new_exe_path, old_exe)
-                env = os.environ.copy()
-                subprocess.Popen([old_exe] + sys.argv[1:], cwd=os.path.dirname(old_exe), env=env)
-                sys.exit(0)
-
-        except Exception as e:
-            self.update_error.emit(str(e))
+        versions = self.list_available_versions(limit=10)
+        if not versions:
+            self.update_error.emit("No releases found.")
             return False
+
+        current = SemVer(self.version)
+        target = None
+        for candidate in versions:
+            try:
+                cand_ver = SemVer(candidate)
+            except Exception:
+                continue
+            if cand_ver > current and self._version_has_bundle(candidate):
+                target = candidate
+                break
+
+        if not target:
+            self.update_error.emit("Already running latest version.")
+            return False
+
+        return self.download_and_apply_version(target)
 
     # ---------- multi-version support ----------
     def list_available_versions(self, limit: int = 15) -> list[str]:
@@ -282,7 +229,7 @@ class UpdateChecker(QObject):
                     tag = tag[1:]
                 # Ensure matching asset exists
                 assets = rel.get('assets') or []
-                found = any((a.get('name') or '').startswith(pref) and (a.get('name') or '').endswith('.tar.gz') for a in assets)
+                found = any((a.get('name') or '').startswith(pref) and (a.get('name') or '').endswith(tuple(self.bundle_extensions)) for a in assets)
                 if found and tag:
                     versions.append(tag)
             # Deduplicate while preserving order
