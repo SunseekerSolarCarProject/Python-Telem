@@ -24,7 +24,7 @@ class MovingAverage(TransformerMixin, BaseEstimator):
     """
     Rolling‐average smoother over `window` rows for specified columns.
     """
-    def __init__(self, window: int = 30, cols: list = None):
+    def __init__(self, window: int = 50, cols: list = None):
         self.window = window
         self.cols = cols or []
 
