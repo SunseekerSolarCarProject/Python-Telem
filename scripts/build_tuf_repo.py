@@ -42,9 +42,22 @@ if not root_src.exists():
 (meta_dir / "root.json").write_bytes(root_src.read_bytes())
 
 
+EXPIRATION_DAYS = {
+    "root": 365,
+    "targets": 60,
+    "snapshot": 60,
+    "timestamp": 60,
+}
+
+
 def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
     # app_name must match what clients expect (telemetry-windows/macos/linux)
-    repo = Repository(app_name=app_name, repo_dir=repo_dir, keys_dir=repo_dir / "keystore")
+    repo = Repository(
+        app_name=app_name,
+        repo_dir=repo_dir,
+        keys_dir=repo_dir / "keystore",
+        expiration_days=EXPIRATION_DAYS,
+    )
     repo.save_config()  # writes repo/config.json if needed
     # Manually perform a non-interactive init compatible with older tufup:
     # - ensure dirs exist
@@ -79,4 +92,3 @@ add_platform("telemetry-windows", "bundles/windows", "windows")
 add_platform("telemetry-macos", "bundles/macos", "macos")
 add_platform("telemetry-linux", "bundles/linux", "linux")
 print("TUF repo built. Metadata and targets in ./release")
-
