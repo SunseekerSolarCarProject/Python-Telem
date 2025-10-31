@@ -4,6 +4,7 @@ from tufup.repo import Repository
 import os
 import re
 import sys
+from packaging.version import Version as SemVer
 
 
 def _extract_version(raw: str) -> str | None:
@@ -50,6 +51,29 @@ EXPIRATION_DAYS = {
 }
 
 
+def _version_counter(ver: str) -> int:
+    """
+    Convert SemanticVersion to a monotonically increasing integer so metadata
+    versions strictly increase across releases. Uses major/minor/micro along
+    with pre/dev tags to maintain ordering.
+    """
+    v = SemVer(ver)
+    # Multiply major/minor/micro into separate buckets to avoid collisions.
+    counter = (v.major * 10**8) + (v.minor * 10**4) + v.micro
+    # Incorporate pre/dev/post segments so beta/rc sort before final release.
+    if v.pre:
+        label, number = v.pre
+        offset = {"a": 1, "alpha": 1, "b": 2, "beta": 2, "rc": 3}.get(label, 0)
+        counter = counter * 10 + offset
+        counter = counter * 10 + (number or 0)
+    elif v.dev:
+        counter = counter * 10 + 4
+        counter = counter * 10 + (v.dev or 0)
+    else:
+        counter = counter * 100
+    return counter
+
+
 def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
     # app_name must match what clients expect (telemetry-windows/macos/linux)
     repo = Repository(
@@ -84,6 +108,12 @@ def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
         skip_patch=True,
         custom_metadata={"platform": platform_tag},
     )
+    version_counter = _version_counter(version)
+    repo.roles.targets.signed.version = version_counter
+    repo.roles.snapshot.signed.version = version_counter
+    repo.roles.timestamp.signed.version = version_counter
+    repo.roles.snapshot.signed.meta["targets.json"].version = version_counter
+    repo.roles.timestamp.signed.snapshot_meta.version = version_counter
     # Sign targets/snapshot/timestamp with your keys, write metadata
     repo.publish_changes([keys_dir])
 

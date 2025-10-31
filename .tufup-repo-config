@@ -1,14 +1,9 @@
 {
-    "app_name": "Python-Telem",
+    "app_name": "telemetry-linux",
     "app_version_attr": null,
-    "encrypted_keys": [
-        "root",
-        "targets",
-        "snapshot",
-        "timestamp"
-    ],
+    "encrypted_keys": [],
     "expiration_days": {
-        "root": 60,
+        "root": 365,
         "snapshot": 60,
         "targets": 60,
         "timestamp": 60
@@ -27,8 +22,8 @@
             "timestamp"
         ]
     },
-    "keys_dir": "src/updater/keys",
-    "repo_dir": "src/updater/metadata",
+    "keys_dir": "release/keystore",
+    "repo_dir": "release",
     "thresholds": {
         "root": 1,
         "snapshot": 1,
