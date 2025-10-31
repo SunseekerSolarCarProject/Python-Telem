@@ -264,10 +264,11 @@ class UpdateChecker(QObject):
             )
             updater.refresh()
 
-            bundle_name = self._bundle_name_for(version)
-            ti = updater.get_targetinfo(bundle_name)
-            if ti is None:
-                self.update_error.emit(f"Bundle '{bundle_name}' not found in TUF metadata for v{version}.")
+            bundle_name, ti = self._resolve_bundle(updater, version)
+            if ti is None or not bundle_name:
+                self.update_error.emit(
+                    f"No bundle matching '{self._bundle_base(version)}(*.tar.gz|*.zip)' found in TUF metadata for v{version}."
+                )
                 return False
 
             bundle_path = os.path.join(self.download_dir, bundle_name)
