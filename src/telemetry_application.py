@@ -18,7 +18,7 @@ from extra_calculations import ExtraCalculations
 from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Adjusted import
 from csv_handler import CSVHandler
 from learning_datasets.machine_learning import MachineLearningModel
-from quality_diagnostics import QualityDiagnostics
+from learning_datasets.quality_diagnostics import QualityDiagnostics
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 from Version import VERSION  # Import the version number
