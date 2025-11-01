@@ -118,8 +118,13 @@ class DataDisplay:
             TelemetryKey.SHUNT_REMAINING_AH, TelemetryKey.USED_AH_REMAINING_AH,
             TelemetryKey.SHUNT_REMAINING_WH, TelemetryKey.USED_AH_REMAINING_WH, 
             TelemetryKey.SHUNT_REMAINING_TIME, TelemetryKey.USED_AH_REMAINING_TIME,
-            TelemetryKey.USED_AH_EXACT_TIME,TelemetryKey.PREDICTED_REMAINING_TIME,
+            TelemetryKey.USED_AH_EXACT_TIME, TelemetryKey.PREDICTED_REMAINING_TIME,
+            TelemetryKey.PREDICTED_REMAINING_TIME_UNCERTAINTY,
             TelemetryKey.PREDICTED_EXACT_TIME,
+            TelemetryKey.PREDICTED_BREAK_EVEN_SPEED,
+            TelemetryKey.PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY,
+            TelemetryKey.PREDICTION_DATA_AGE_S,
+            TelemetryKey.PREDICTION_QUALITY_FLAGS,
             TelemetryKey.DEVICE_TIMESTAMP, TelemetryKey.TIMESTAMP
         ]
 

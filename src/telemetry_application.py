@@ -18,6 +18,7 @@ from extra_calculations import ExtraCalculations
 from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Adjusted import
 from csv_handler import CSVHandler
 from learning_datasets.machine_learning import MachineLearningModel
+from quality_diagnostics import QualityDiagnostics
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 from Version import VERSION  # Import the version number
@@ -105,6 +106,7 @@ class TelemetryApplication(QObject):
         self.init_data_processors()
         self.init_solcast()
         self.init_machine_learning()
+        self.quality_diagnostics = QualityDiagnostics()
 
     def init_logger(self):
         self.logger = logging.getLogger(__name__)
@@ -215,7 +217,14 @@ class TelemetryApplication(QObject):
             TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0], TelemetryKey.MOTORS_TOTAL_MECHANICAL_POWER_W.value[0], TelemetryKey.MOTORS_AVERAGE_EFFICIENCY_PCT.value[0],
             TelemetryKey.BATTERY_STRING_IMBALANCE_V.value[0], TelemetryKey.BATTERY_STRING_IMBALANCE_PCT.value[0],
             TelemetryKey.BATTERY_PACK_POWER_W.value[0], TelemetryKey.BATTERY_PACK_POWER_KW.value[0],
-            TelemetryKey.BATTERY_C_RATE.value[0]
+            TelemetryKey.BATTERY_C_RATE.value[0],
+            TelemetryKey.PREDICTED_REMAINING_TIME.value[0],
+            TelemetryKey.PREDICTED_REMAINING_TIME_UNCERTAINTY.value[0],
+            TelemetryKey.PREDICTED_EXACT_TIME.value[0],
+            TelemetryKey.PREDICTED_BREAK_EVEN_SPEED.value[0],
+            TelemetryKey.PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY.value[0],
+            TelemetryKey.PREDICTION_DATA_AGE_S.value[0],
+            TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0]
         ]
 
     def init_csv_handler(self):
@@ -711,23 +720,44 @@ class TelemetryApplication(QObject):
                         'BP_PVS_Voltage':    feat_batt['BP_PVS_Voltage'],
                     }
 
-                    # --- battery-life prediction ---
-                    pred_time = self.ml_model.predict_battery_life(feat_batt)
+                    # --- battery-life prediction + diagnostics ---
+                    batt_details = self.ml_model.predict_battery_life_details(feat_batt)
+                    pred_time = batt_details.get("prediction")
                     if pred_time is None:
-                        combined_data['Predicted_Remaining_Time'] = 'Prediction failed'
-                        combined_data['Predicted_Exact_Time']     = 'N/A'
+                        combined_data['Predicted_Remaining_Time'] = 'Prediction unavailable'
+                        combined_data['Predicted_Exact_Time'] = 'N/A'
                     else:
                         combined_data['Predicted_Remaining_Time'] = pred_time
-                        combined_data['Predicted_Exact_Time']     = (
-                            self.extra_calculations.calculate_exact_time(pred_time)
+                        combined_data['Predicted_Exact_Time'] = self.extra_calculations.calculate_exact_time(pred_time)
+                    batt_uncertainty = batt_details.get("uncertainty")
+                    combined_data['Predicted_Remaining_Time_Uncertainty'] = (
+                        batt_uncertainty if batt_uncertainty is not None else 'N/A'
                     )
 
-                    # --- break-even prediction ---
-                    pred_be = self.ml_model.predict_break_even_speed(feat_be)
+                    # --- break-even prediction + diagnostics ---
+                    be_details = self.ml_model.predict_break_even_speed_details(feat_be)
+                    pred_be = be_details.get("prediction")
                     if pred_be is None:
-                        combined_data['Predicted_BreakEven_Speed'] = 'Prediction failed'
+                        combined_data['Predicted_BreakEven_Speed'] = 'Prediction unavailable'
                     else:
                         combined_data['Predicted_BreakEven_Speed'] = pred_be
+                    be_uncertainty = be_details.get("uncertainty")
+                    combined_data['Predicted_BreakEven_Speed_Uncertainty'] = (
+                        be_uncertainty if be_uncertainty is not None else 'N/A'
+                    )
+
+                    # --- aggregate quality diagnostics ---
+                    diagnostics = self.quality_diagnostics.evaluate(
+                        combined_data.get('timestamp'),
+                        batt_details,
+                        be_details,
+                    )
+                    age_seconds = diagnostics.get("age_seconds")
+                    combined_data['Prediction_Data_Age_s'] = (
+                        age_seconds if age_seconds is not None else 'N/A'
+                    )
+                    flags = diagnostics.get("flags") or []
+                    combined_data['Prediction_Quality_Flags'] = '; '.join(flags) if flags else 'OK'
 
                     # --- tack on static battery_info if present ---
                     if self.battery_info:

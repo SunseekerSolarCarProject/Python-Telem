@@ -346,8 +346,12 @@ class TelemetryGUI(QWidget):
             ],
             "Predictions": [
                 TelemetryKey.PREDICTED_REMAINING_TIME.value[0],
+                TelemetryKey.PREDICTED_REMAINING_TIME_UNCERTAINTY.value[0],
                 TelemetryKey.PREDICTED_EXACT_TIME.value[0],
                 TelemetryKey.PREDICTED_BREAK_EVEN_SPEED.value[0],
+                TelemetryKey.PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY.value[0],
+                TelemetryKey.PREDICTION_DATA_AGE_S.value[0],
+                TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0],
             ],
             "DC Controls": [
                 TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0],

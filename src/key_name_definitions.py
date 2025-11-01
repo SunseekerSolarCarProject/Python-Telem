@@ -137,6 +137,10 @@ class TelemetryKey(Enum):
     PREDICTED_REMAINING_TIME = ("Predicted_Remaining_Time", "hours")
     PREDICTED_EXACT_TIME = ("Predicted_Exact_Time", "hh:mm:ss")
     PREDICTED_BREAK_EVEN_SPEED = ("Predicted_BreakEven_Speed", "mph")
+    PREDICTED_REMAINING_TIME_UNCERTAINTY = ("Predicted_Remaining_Time_Uncertainty", "hours")
+    PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY = ("Predicted_BreakEven_Speed_Uncertainty", "mph")
+    PREDICTION_DATA_AGE_S = ("Prediction_Data_Age_s", "s")
+    PREDICTION_QUALITY_FLAGS = ("Prediction_Quality_Flags", "")
     
 # Create a dictionary mapping key names to units
 KEY_UNITS = {

@@ -12,6 +12,7 @@ import logging
 import joblib
 import pandas as pd
 import numpy as np
+from datetime import datetime
 
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
@@ -64,22 +65,43 @@ class MachineLearningModel:
         self._build_battery_pipeline()
         self._build_break_even_pipeline()
 
+        # --- Metadata holders for diagnostics ---
+        self.batt_meta: dict = {}
+        self.be_meta: dict = {}
+
         # --- Load or train on startup ---
-        self._load_or_train(self.batt_pipe, self.batt_path, self.train_battery_life_model)
-        self._load_or_train(self.be_pipe,   self.be_path,   self.train_break_even_model)
+        self._load_or_train(self.batt_pipe, self.batt_path, self.train_battery_life_model, self.batt_meta)
+        self._load_or_train(self.be_pipe,   self.be_path,   self.train_break_even_model,   self.be_meta)
 
 
-    def _load_or_train(self, pipe: Pipeline, path: str, train_fn):
+    def _load_model_bundle(self, obj):
+        """
+        Normalize joblib payloads so we can support legacy pipeline-only dumps
+        as well as newer {pipeline, meta} bundles.
+        """
+        meta: dict = {}
+        pipeline = obj
+        if isinstance(obj, dict):
+            pipeline = obj.get('pipeline') or obj.get('model') or obj.get('pipeline_') or obj
+            meta = obj.get('meta') or {}
+        return pipeline, meta
+
+
+    def _load_or_train(self, pipe: Pipeline, path: str, train_fn, meta_target: dict):
         """
         If a fitted model exists at `path`, load it.
         Otherwise, retrain by calling `train_fn(...)` on training_data.csv.
         """
         if os.path.exists(path):
             try:
-                m = joblib.load(path)
-                check_is_fitted(m)
+                loaded = joblib.load(path)
+                pipeline, meta = self._load_model_bundle(loaded)
+                check_is_fitted(pipeline)
                 # replace pipeline steps in place
-                pipe.steps[:] = m.steps
+                pipe.steps[:] = pipeline.steps
+                meta_target.clear()
+                if isinstance(meta, dict):
+                    meta_target.update(meta)
                 self.log.info(f"Loaded fitted model from {path}")
                 return
             except Exception:
@@ -123,6 +145,26 @@ class MachineLearningModel:
         ])
 
 
+    def _collect_feature_ranges(self, df: pd.DataFrame, feats: list[str]) -> dict:
+        ranges: dict[str, tuple[float, float]] = {}
+        for col in feats:
+            series = df[col]
+            if series.empty:
+                continue
+            ranges[col] = (float(series.min()), float(series.max()))
+        return ranges
+
+
+    def _target_stats(self, y: pd.Series) -> dict:
+        if y.empty:
+            return {"mean": 0.0, "std": 0.0}
+        std = float(y.std(ddof=0)) if len(y) > 1 else 0.0
+        return {
+            "mean": float(y.mean()),
+            "std": std,
+        }
+
+
     def train_battery_life_model(self, csv_path: str):
         """
         Train battery-life model:
@@ -143,33 +185,84 @@ class MachineLearningModel:
         y = df[target]
 
         self.batt_pipe.fit(X, y)
-        joblib.dump(self.batt_pipe, self.batt_path)
+        meta = {
+            "feature_ranges": self._collect_feature_ranges(X, feats),
+            "target_stats": self._target_stats(y),
+            "trained_at": datetime.utcnow().isoformat(timespec='seconds') + "Z",
+        }
+        joblib.dump({"pipeline": self.batt_pipe, "meta": meta}, self.batt_path)
+        self.batt_meta.clear()
+        self.batt_meta.update(meta)
         self.log.info(f"Trained battery-life model -> {self.batt_path}")
 
 
-    def predict_battery_life(self, data: dict) -> float:
+    def predict_battery_life_details(self, data: dict) -> dict:
         """
         Predict remaining time (hours) given:
           data['BP_PVS_milliamp*s'],
           data['BP_PVS_Ah'],
           data['BP_PVS_Voltage']
         """
-        from sklearn.exceptions import NotFittedError
-
         feats = ['BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
-        if any(k not in data for k in feats):
-            self.log.error(f"Missing features for battery-life: {feats}")
-            return None
+        details = {
+            "prediction": None,
+            "uncertainty": None,
+            "sigma": None,
+            "missing_features": [],
+            "invalid_features": [],
+            "out_of_range": {},
+        }
 
-        row = pd.DataFrame([[data[k] for k in feats]], columns=feats)
+        missing = [k for k in feats if k not in data]
+        if missing:
+            self.log.error(f"Missing features for battery-life: {missing}")
+            details["missing_features"] = missing
+            return details
+
+        values = []
+        invalid = []
+        for k in feats:
+            try:
+                values.append(float(data[k]))
+            except (TypeError, ValueError):
+                invalid.append(k)
+        if invalid:
+            self.log.error(f"Invalid (non-numeric) features for battery-life: {invalid}")
+            details["invalid_features"] = invalid
+            return details
+
+        row = pd.DataFrame([values], columns=feats)
         try:
-            return float(self.batt_pipe.predict(row)[0])
+            pred, sigma = self._predict_with_uncertainty(self.batt_pipe, row)
         except NotFittedError:
             self.log.warning("Battery-life model not fitted yet, skipping prediction.")
-            return None
+            details["not_fitted"] = True
+            return details
         except Exception as e:
             self.log.error(f"Error predicting battery-life: {e}")
-            return None
+            details["error"] = str(e)
+            return details
+
+        details["prediction"] = pred
+        details["sigma"] = sigma
+        details["uncertainty"] = 1.96 * sigma if sigma is not None else None
+
+        ranges = self.batt_meta.get("feature_ranges", {}) if isinstance(self.batt_meta, dict) else {}
+        outliers = {}
+        for col, value in row.iloc[0].items():
+            rng = ranges.get(col)
+            if rng:
+                mn, mx = rng
+                if value < mn or value > mx:
+                    outliers[col] = {"value": float(value), "min": mn, "max": mx}
+        if outliers:
+            details["out_of_range"] = outliers
+
+        return details
+
+    def predict_battery_life(self, data: dict) -> float | None:
+        details = self.predict_battery_life_details(data)
+        return details.get("prediction")
 
 
     # -------------------------------------------------------------------------
@@ -215,31 +308,110 @@ class MachineLearningModel:
         y = df[target]
 
         self.be_pipe.fit(X, y)
-        joblib.dump(self.be_pipe, self.be_path)
-        self.log.info(f"Trained break-even model → {self.be_path}")
+        meta = {
+            "feature_ranges": self._collect_feature_ranges(X, feats),
+            "target_stats": self._target_stats(y),
+            "trained_at": datetime.utcnow().isoformat(timespec='seconds') + "Z",
+        }
+        joblib.dump({"pipeline": self.be_pipe, "meta": meta}, self.be_path)
+        self.be_meta.clear()
+        self.be_meta.update(meta)
+        self.log.info(f"Trained break-even model -> {self.be_path}")
 
 
-    def predict_break_even_speed(self, data: dict) -> float:
+    def predict_break_even_speed_details(self, data: dict) -> dict:
         """
         Predict break-even speed (mph) given:
           data['BP_PVS_milliamp*s'], data['BP_PVS_Voltage']
         """
-        from sklearn.exceptions import NotFittedError
-
         feats = ['BP_PVS_milliamp*s', 'BP_PVS_Voltage']
-        if any(k not in data for k in feats):
-            self.log.error(f"Missing features for break-even: {feats}")
-            return None
+        details = {
+            "prediction": None,
+            "uncertainty": None,
+            "sigma": None,
+            "missing_features": [],
+            "invalid_features": [],
+            "out_of_range": {},
+        }
 
-        row = pd.DataFrame([[data[k] for k in feats]], columns=feats)
+        missing = [k for k in feats if k not in data]
+        if missing:
+            self.log.error(f"Missing features for break-even: {missing}")
+            details["missing_features"] = missing
+            return details
+
+        values = []
+        invalid = []
+        for k in feats:
+            try:
+                values.append(float(data[k]))
+            except (TypeError, ValueError):
+                invalid.append(k)
+        if invalid:
+            self.log.error(f"Invalid (non-numeric) features for break-even: {invalid}")
+            details["invalid_features"] = invalid
+            return details
+
+        row = pd.DataFrame([values], columns=feats)
         try:
-            return float(self.be_pipe.predict(row)[0])
+            pred, sigma = self._predict_with_uncertainty(self.be_pipe, row)
         except NotFittedError:
             self.log.warning("Break-even model not fitted yet, skipping prediction.")
-            return None
+            details["not_fitted"] = True
+            return details
         except Exception as e:
             self.log.error(f"Error predicting break-even speed: {e}")
-            return None
+            details["error"] = str(e)
+            return details
+
+        details["prediction"] = pred
+        details["sigma"] = sigma
+        details["uncertainty"] = 1.96 * sigma if sigma is not None else None
+
+        ranges = self.be_meta.get("feature_ranges", {}) if isinstance(self.be_meta, dict) else {}
+        outliers = {}
+        for col, value in row.iloc[0].items():
+            rng = ranges.get(col)
+            if rng:
+                mn, mx = rng
+                if value < mn or value > mx:
+                    outliers[col] = {"value": float(value), "min": mn, "max": mx}
+        if outliers:
+            details["out_of_range"] = outliers
+
+        return details
+
+    def predict_break_even_speed(self, data: dict) -> float | None:
+        details = self.predict_break_even_speed_details(data)
+        return details.get("prediction")
+
+
+    def _predict_with_uncertainty(self, pipeline: Pipeline, X: pd.DataFrame) -> tuple[float, float]:
+        """
+        Run the pipeline while also deriving ensemble variance (1-sigma).
+        """
+        transformed = X
+        for name, step in pipeline.steps[:-1]:
+            transformed = step.transform(transformed)
+
+        model = pipeline.steps[-1][1]
+        # Preserve DataFrame for the forest itself (keeps feature names) but feed numpy
+        # arrays to individual estimators to avoid "feature names" warnings.
+        if hasattr(transformed, "to_numpy"):
+            arr = transformed.to_numpy()
+        else:
+            arr = np.asarray(transformed)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+
+        if not hasattr(model, "estimators_") or not getattr(model, "estimators_", None):
+            pred = float(model.predict(transformed)[0])
+            return pred, 0.0
+
+        preds = np.array([estimator.predict(arr)[0] for estimator in model.estimators_], dtype=float)
+        mean = float(model.predict(transformed)[0])
+        std = float(preds.std(ddof=1)) if preds.size > 1 else 0.0
+        return mean, std
 
 
     # -------------------------------------------------------------------------
