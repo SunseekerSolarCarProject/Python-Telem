@@ -105,7 +105,7 @@ class BufferData:
         self.raw_data_buffer.clear()
         self.logger.debug("Raw data buffer cleared after flushing.")
 
-    def flush_buffer(self, filename, battery_info, used_ah):
+    def flush_buffer(self, filename, battery_info, used_ah, write_to_csv=True):
         """
         Flush the combined data to the primary CSV file.
 
@@ -163,10 +163,9 @@ class BufferData:
 
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
-        # Append data to primary CSV
-        self.csv_handler.append_to_csv(filename, self.combined_data)
-        # Save straining data
-        self.save_training_data()
+        if write_to_csv:
+            self.csv_handler.append_to_csv(filename, self.combined_data)
+            self.save_training_data()
         self.data_buffer.clear()
         self.last_flush_time = time.time()
         self.logger.debug("Data buffer cleared and last_flush_time reset.")

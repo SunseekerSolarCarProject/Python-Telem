@@ -1,4 +1,4 @@
-#src/telemetry_application.py
+﻿#src/telemetry_application.py
 import sys
 import os
 import logging
@@ -19,6 +19,7 @@ from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Adjusted import
 from csv_handler import CSVHandler
 from learning_datasets.machine_learning import MachineLearningModel
 from learning_datasets.quality_diagnostics import QualityDiagnostics
+from simulation import TelemetrySimulator
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 from Version import VERSION  # Import the version number
@@ -65,7 +66,7 @@ class TelemetryApplication(QObject):
     training_complete_signal = pyqtSignal(object)  # Signal to pass any error object
 
     def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20,
-                 log_level=logging.INFO, app=None, storage_folder=None):
+                 log_level=logging.INFO, app=None, storage_folder=None, log_file_path=None):
         """
         Initializes the TelemetryApplication.
         """
@@ -87,6 +88,7 @@ class TelemetryApplication(QObject):
         self.used_Ah = 0
         self.config_data_copy = None  # Initialize to store config data
         self.storage_folder = storage_folder
+        self.log_file_path = log_file_path or (os.path.join(self.storage_folder, "telemetry_application.log") if self.storage_folder else None)
         self.vehicle_year = ""  # New: store the vehicle year
 
         # Connect the training complete signal to the handler
@@ -107,6 +109,14 @@ class TelemetryApplication(QObject):
         self.init_solcast()
         self.init_machine_learning()
         self.quality_diagnostics = QualityDiagnostics()
+
+        self.simulator = TelemetrySimulator()
+        self.simulator.data_ready.connect(self.process_data)
+        self.simulator.error.connect(self.on_simulation_error)
+        self.simulator.finished.connect(self.on_simulation_finished)
+        self.simulator.started.connect(self.on_simulation_started)
+        self._resume_serial_after_sim = False
+        self._simulation_mode = None
 
     def init_logger(self):
         self.logger = logging.getLogger(__name__)
@@ -333,7 +343,7 @@ class TelemetryApplication(QObject):
     def init_machine_learning(self):
         """
         Create the ML model object but DO NOT train yet.
-        Training will only occur when the user clicks “Retrain…”.
+        Training will only occur when the user clicks â€œRetrainâ€¦â€.
         """
         # ensure there is a "models" subfolder under application_data
         models_folder = os.path.join(self.csv_handler.root_directory, 'models')
@@ -350,6 +360,12 @@ class TelemetryApplication(QObject):
             self.update_data_signal.connect(self.gui.update_all_tabs)
             self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
             self.gui.machine_learning_retrain_signal_with_files.connect(self.handle_retrain_with_files)
+            self.gui.export_bundle_requested.connect(self.handle_export_bundle)
+            self.gui.import_bundle_requested.connect(self.handle_import_bundle)
+            if hasattr(self.gui, 'simulation_tab'):
+                self.gui.start_simulation_replay_requested.connect(self.start_simulation_replay)
+                self.gui.start_simulation_scenario_requested.connect(self.start_simulation_scenario)
+                self.gui.stop_simulation_requested.connect(self.stop_simulation)
             if hasattr(self.gui.settings_tab, 'solcast_config_changed'):
                 self.gui.settings_tab.solcast_config_changed.connect(self.on_solcast_config_changed)
             self.signals_connected = True
@@ -566,12 +582,19 @@ class TelemetryApplication(QObject):
         self.serial_reader_thread.start()
         self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
 
+    def stop_serial_reader(self):
+        if self.serial_reader_thread and self.serial_reader_thread.isRunning():
+            self.logger.info("Stopping serial reader thread")
+            self.serial_reader_thread.stop()
+            self.serial_reader_thread.wait()
+        self.serial_reader_thread = None
+
     def handle_retrain_model(self):
         """
-        Called when the user clicks “Retrain…”
+        Called when the user clicks â€œRetrainâ€¦â€
         Disables the button and kicks off one training run.
         """
-        """Called when the user clicks “Retrain…” — disable the button and run one training pass."""
+        """Called when the user clicks â€œRetrainâ€¦â€ â€” disable the button and run one training pass."""
         self.logger.info("Retraining machine learning model...")
         self.gui.settings_tab.set_retrain_button_enabled(False)
         self.train_machine_learning_model()
@@ -634,6 +657,128 @@ class TelemetryApplication(QObject):
             # still re-enable so user can try again
             self.gui.settings_tab.set_retrain_button_enabled(True)
 
+    def handle_export_bundle(self, destination, notes):
+        try:
+            extra_files = []
+            if self.log_file_path and os.path.exists(self.log_file_path):
+                extra_files.append(self.log_file_path)
+
+            metadata = {
+                "app_version": VERSION,
+                "bundle_type": "telemetry",
+            }
+            self.csv_handler.create_telemetry_bundle(
+                destination,
+                notes=notes,
+                extra_files=extra_files,
+                metadata=metadata,
+            )
+            QMessageBox.information(
+                self.gui,
+                "Telemetry Bundle Export",
+                f"Telemetry bundle exported to:\n{destination}"
+            )
+            self.logger.info(f"Telemetry bundle exported to {destination}")
+        except Exception as exc:
+            self.logger.error(f"Failed to export telemetry bundle: {exc}")
+            QMessageBox.critical(
+                self.gui,
+                "Telemetry Bundle Export",
+                f"Failed to export telemetry bundle:\n{exc}"
+            )
+
+    def handle_import_bundle(self, bundle_path, activate):
+        try:
+            info = self.csv_handler.import_telemetry_bundle(bundle_path, activate=activate)
+            if activate:
+                self.csv_file = self.csv_handler.get_csv_file_path()
+                self.secondary_csv_file = self.csv_handler.get_secondary_csv_file_path()
+                if hasattr(self.gui, 'csv_management_tab'):
+                    self.gui.csv_management_tab.refresh_paths()
+
+            message_lines = [f"Bundle imported to:\n{info.get('destination')}"]
+            notes = info.get('notes')
+            if notes:
+                message_lines.append("\nNotes:\n" + notes)
+            QMessageBox.information(
+                self.gui,
+                "Telemetry Bundle Import",
+                "\n".join(message_lines)
+            )
+            self.logger.info(
+                f"Telemetry bundle imported from {bundle_path} to {info.get('destination')}"
+            )
+        except Exception as exc:
+            self.logger.error(f"Failed to import telemetry bundle: {exc}")
+            QMessageBox.critical(
+                self.gui,
+                "Telemetry Bundle Import",
+                f"Failed to import telemetry bundle:\n{exc}"
+            )
+
+    def start_simulation_replay(self, file_path, speed):
+        if not file_path:
+            QMessageBox.warning(self.gui, "Simulation", "Please choose a CSV file to replay.")
+            return
+        if not os.path.exists(file_path):
+            QMessageBox.critical(self.gui, "Simulation", f"Replay file not found:\n{file_path}")
+            return
+
+        self._resume_serial_after_sim = bool(self.serial_reader_thread and self.serial_reader_thread.isRunning())
+        if self._resume_serial_after_sim:
+            self.stop_serial_reader()
+        self._simulation_mode = f"Replay ({os.path.basename(file_path)})"
+        self.simulator.start_replay(file_path, speed)
+
+    def start_simulation_scenario(self, scenario, speed):
+        if not scenario:
+            QMessageBox.warning(self.gui, "Simulation", "Select a scenario to simulate.")
+            return
+
+        self._resume_serial_after_sim = bool(self.serial_reader_thread and self.serial_reader_thread.isRunning())
+        if self._resume_serial_after_sim:
+            self.stop_serial_reader()
+        self._simulation_mode = f"Scenario ({scenario})"
+        self.simulator.start_synthetic(scenario, speed)
+
+    def stop_simulation(self):
+        self.simulator.stop()
+        if hasattr(self.gui, 'simulation_tab'):
+            self.gui.simulation_tab.set_status("Stopping simulation...")
+
+    def on_simulation_started(self, mode):
+        if hasattr(self.gui, 'simulation_tab'):
+            self.gui.simulation_tab.set_running(True)
+            self.gui.simulation_tab.set_status(f"Running {mode}")
+        self.logger.info(f"Simulation started: {mode}")
+
+    def on_simulation_finished(self):
+        if self._simulation_mode is None:
+            return
+        self._handle_simulation_complete("Simulation finished.")
+
+    def on_simulation_error(self, message):
+        self.logger.error(f"Simulation error: {message}")
+        QMessageBox.critical(self.gui, "Simulation", message)
+        self._handle_simulation_complete("Simulation error.", resume=True)
+
+    def _handle_simulation_complete(self, status, resume=True):
+        if hasattr(self.gui, 'simulation_tab'):
+            self.gui.simulation_tab.set_running(False)
+            self.gui.simulation_tab.set_status(status)
+        if resume and self._resume_serial_after_sim and self.selected_port:
+            try:
+                self.start_serial_reader(self.selected_port, self.baudrate)
+            except Exception as exc:
+                self.logger.error(f"Failed to resume serial reader: {exc}")
+                QMessageBox.warning(
+                    self.gui,
+                    "Simulation",
+                    f"Simulation ended but serial connection could not be restarted:\n{exc}"
+                )
+        self._resume_serial_after_sim = False
+        self._simulation_mode = None
+
     def handle_settings_applied(self, port, baudrate, log_level, endianness):
         self.logger.info(f"Applying new settings: COM Port={port}, Baud Rate={baudrate}, Log Level={log_level}, Endianness={endianness}")
         self.update_logging_level(log_level)
@@ -682,7 +827,10 @@ class TelemetryApplication(QObject):
     def process_data(self, data):
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            processed_data = self.data_processor.parse_data(data)
+            if isinstance(data, dict):
+                processed_data = dict(data)
+            else:
+                processed_data = self.data_processor.parse_data(data)
             self.logger.debug(f"Processed data: {processed_data}")
 
             if processed_data:
@@ -692,10 +840,11 @@ class TelemetryApplication(QObject):
 
                 if self.buffer.is_ready_to_flush():
                     combined_data = self.buffer.flush_buffer(
-                       filename=self.csv_handler.get_csv_file_path(),
-                       battery_info=self.battery_info,
-                       used_ah=self.used_Ah
-                        )
+                        filename=self.csv_handler.get_csv_file_path(),
+                        battery_info=self.battery_info,
+                        used_ah=self.used_Ah,
+                        write_to_csv=not bool(self._simulation_mode)
+                    )
 
                     if not isinstance(combined_data, dict):
                         self.logger.error(f"Combined data is not a dict: {combined_data!r}")
@@ -765,12 +914,15 @@ class TelemetryApplication(QObject):
 
                     # --- emit to GUI & server ---
                     self.update_data_signal.emit(combined_data)
-                    self.send_telemetry_data_to_server_async(combined_data, device_tag="device1")
+                    if not self._simulation_mode:
+                        self.send_telemetry_data_to_server_async(combined_data, device_tag="device1")
                     self.logger.debug(f"Emitted combined_data: {combined_data}")
         except Exception as e:
             self.logger.error(f"Error processing data: {data}, Exception: {e}")
 
     def process_raw_data(self, raw_data):
+        if self._simulation_mode:
+            return
         try:
             self.buffer.add_raw_data(raw_data, self.csv_handler.get_secondary_csv_file_path())
         except Exception as e:

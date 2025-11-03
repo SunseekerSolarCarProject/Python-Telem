@@ -1,4 +1,4 @@
-# -------------------------
+﻿# -------------------------
 # src/gui_files/telemetry_gui.py
 # -------------------------
 import sys
@@ -28,6 +28,7 @@ from gui_files.gui_image_annotation_tab import ImageAnnotationTab
 from gui_files.gui_settings_tab import SettingsTab
 from gui_files.gui_csv_management import CSVManagementTab
 from gui_files.gui_config_dialog import ConfigDialog
+from gui_files.gui_simulation_tab import SimulationTab
 
 from unit_conversion import build_metric_units_dict, build_imperial_units_dict, convert_value
 
@@ -37,6 +38,11 @@ class TelemetryGUI(QWidget):
     settings_applied_signal = pyqtSignal(str, int, str, str)  
     machine_learning_retrain_signal = pyqtSignal()  # Retrain button for ML model
     machine_learning_retrain_signal_with_files = pyqtSignal(list)
+    export_bundle_requested = pyqtSignal(str, str)
+    import_bundle_requested = pyqtSignal(str, bool)
+    start_simulation_replay_requested = pyqtSignal(str, float)
+    start_simulation_scenario_requested = pyqtSignal(str, float)
+    stop_simulation_requested = pyqtSignal()
 
     def __init__(self, data_keys, units, csv_handler, config_file='config.json'):
         super().__init__()
@@ -412,7 +418,15 @@ class TelemetryGUI(QWidget):
 
         # CSV Management Tab
         self.csv_management_tab = CSVManagementTab(self.csv_handler)
+        self.csv_management_tab.export_bundle_requested.connect(self.export_bundle_requested.emit)
+        self.csv_management_tab.import_bundle_requested.connect(self.import_bundle_requested.emit)
         self.tabs.addTab(self.csv_management_tab, "CSV Management")
+
+        self.simulation_tab = SimulationTab()
+        self.simulation_tab.start_replay.connect(self.start_simulation_replay_requested.emit)
+        self.simulation_tab.start_scenario.connect(self.start_simulation_scenario_requested.emit)
+        self.simulation_tab.stop_requested.connect(self.stop_simulation_requested.emit)
+        self.tabs.addTab(self.simulation_tab, "Simulation")
 
         # Settings Tab
         self.settings_tab = SettingsTab(graph_groups, self.color_mapping)

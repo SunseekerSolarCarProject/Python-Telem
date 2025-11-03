@@ -1,10 +1,11 @@
-# src/gui_files/gui_csv_management.py
+﻿# src/gui_files/gui_csv_management.py
 
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QLabel,
     QPushButton,
+    QInputDialog,
     QFileDialog,
     QMessageBox,
     QLineEdit,
@@ -15,13 +16,16 @@ from PyQt6.QtWidgets import (
 )
 import os
 import logging
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 class CSVManagementTab(QWidget):
     """
     Tab for managing CSV files: viewing current file paths,
     saving them to other locations, and changing the save directory.
     """
+    export_bundle_requested = pyqtSignal(str, str)
+    import_bundle_requested = pyqtSignal(str, bool)
+
     def __init__(self, csv_handler, parent=None):
         super().__init__(parent)
         self.csv_handler = csv_handler
@@ -59,17 +63,26 @@ class CSVManagementTab(QWidget):
         buttons_layout = QHBoxLayout(actions_group)
         buttons_layout.setSpacing(10)
 
-        save_primary_btn = QPushButton("Save Primary CSV…")
+        save_primary_btn = QPushButton("Save Primary CSVâ€¦")
         save_primary_btn.clicked.connect(self.save_primary_csv_data)
         buttons_layout.addWidget(save_primary_btn)
 
-        save_secondary_btn = QPushButton("Save Secondary CSV…")
+        save_secondary_btn = QPushButton("Save Secondary CSVâ€¦")
         save_secondary_btn.clicked.connect(self.save_secondary_csv_data)
         buttons_layout.addWidget(save_secondary_btn)
 
-        change_location_btn = QPushButton("Change Save Folder…")
+        change_location_btn = QPushButton("Change Save Folderâ€¦")
         change_location_btn.clicked.connect(self.change_csv_save_location)
         buttons_layout.addWidget(change_location_btn)
+
+        export_bundle_btn = QPushButton("Export Telemetry Bundle…")
+        export_bundle_btn.clicked.connect(self.request_bundle_export)
+        buttons_layout.addWidget(export_bundle_btn)
+
+        import_bundle_btn = QPushButton("Import Telemetry Bundle…")
+        import_bundle_btn.clicked.connect(self.request_bundle_import)
+        buttons_layout.addWidget(import_bundle_btn)
+
 
         buttons_layout.addStretch(1)
         layout.addWidget(actions_group)
@@ -78,7 +91,7 @@ class CSVManagementTab(QWidget):
         self._refresh_labels()
 
     def _refresh_labels(self):
-        """Update the two path‐display labels from the handler."""
+        """Update the two pathâ€display labels from the handler."""
         try:
             primary = self.csv_handler.get_csv_file_path()
             secondary = self.csv_handler.get_secondary_csv_file_path()
@@ -185,3 +198,60 @@ class CSVManagementTab(QWidget):
         except Exception as e:
             self.logger.error(f"Error changing CSV save directory: {e}")
             QMessageBox.critical(self, "Error", f"Failed to change directory:\n{e}")
+
+    def request_bundle_export(self):
+        """Prompt user for export destination and optional notes, then emit signal."""
+        default_path = os.path.join(
+            os.path.dirname(self.csv_handler.get_csv_file_path()),
+            "telemetry_bundle.zip"
+        )
+        options = QFileDialog.Option.DontUseNativeDialog
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Telemetry Bundle",
+            default_path,
+            "Telemetry Bundle (*.zip);;All Files (*)",
+            options=options
+        )
+        if not dest:
+            return
+        if not dest.lower().endswith(".zip"):
+            dest += ".zip"
+
+        notes, ok = QInputDialog.getMultiLineText(
+            self,
+            "Bundle Notes (optional)",
+            "Enter notes to include with this bundle:",
+            ""
+        )
+        if not ok:
+            return
+
+        self.export_bundle_requested.emit(dest, notes)
+
+    def request_bundle_import(self):
+        """Prompt the user for a telemetry bundle to import and emit the request."""
+        options = QFileDialog.Option.DontUseNativeDialog
+        bundle_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Telemetry Bundle",
+            "",
+            "Telemetry Bundle (*.zip);;All Files (*)",
+            options=options
+        )
+        if not bundle_path:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Activate Bundle",
+            "Import completed bundle as the active dataset? (Yes switches CSV storage to the imported run)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        activate = reply == QMessageBox.StandardButton.Yes
+        self.import_bundle_requested.emit(bundle_path, activate)
+
+    def refresh_paths(self):
+        """Public helper to refresh path labels from handler."""
+        self._refresh_labels()

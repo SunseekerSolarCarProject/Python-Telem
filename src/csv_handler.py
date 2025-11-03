@@ -5,6 +5,10 @@ import os
 import threading
 import logging
 import shutil  # Import shutil for file operations
+import json
+import zipfile
+import tempfile
+from datetime import datetime
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Import TelemetryKey enum and KEY_UNITS
 
 class CSVHandler:
@@ -171,13 +175,21 @@ class CSVHandler:
 
         :param directory: New directory path.
         """
-        # 1) Make sure the dir exists…
         self.ensure_directory_exists(directory)
-        # 2) Switch our root to the new directory
         self.root_directory = os.path.abspath(directory)
-        # 3) Re-create both CSVs in the new location
-        self.change_csv_file_name("telemetry_data.csv", is_primary=True)
-        self.change_csv_file_name("raw_hex_data.csv", is_primary=False)
+
+        self.primary_csv_file = os.path.join(self.root_directory, "telemetry_data.csv")
+        self.secondary_csv_file = os.path.join(self.root_directory, "raw_hex_data.csv")
+        self.training_data_csv = os.path.join(self.root_directory, "training_data.csv")
+
+        if not os.path.exists(self.primary_csv_file):
+            self.setup_csv(self.primary_csv_file, self.primary_headers)
+        if not os.path.exists(self.secondary_csv_file):
+            self.setup_csv(self.secondary_csv_file, self.secondary_headers)
+        if not os.path.exists(self.training_data_csv):
+            self.setup_csv(self.training_data_csv, self.training_data_headers)
+
+        self.logger.info(f"CSV save directory set to {self.root_directory}")
 
     def change_csv_file_name(self, new_filename, is_primary):
         """
@@ -251,4 +263,143 @@ class CSVHandler:
         except Exception as e:
             self.logger.error(f"Validation failed for CSV file {csv_file}: {e}")
             return False
-        
+    
+    def create_telemetry_bundle(self, destination_zip, notes="", extra_files=None, metadata=None):
+        """
+        Create a portable telemetry archive containing the primary/secondary/training CSV files
+        plus optional notes and extra files.
+
+        :param destination_zip: Path where the bundle (.zip) should be written.
+        :param notes: Optional notes text to embed in the bundle.
+        :param extra_files: Iterable of extra file paths to include under 'extras/'.
+        :param metadata: Optional dictionary to merge into metadata.json.
+        :return: Absolute path to the created zip file.
+        """
+        extra_files = extra_files or []
+        metadata = metadata.copy() if metadata else {}
+
+        destination_zip = os.path.abspath(destination_zip)
+        if not destination_zip.lower().endswith(".zip"):
+            destination_zip += ".zip"
+
+        bundle_tmp = tempfile.mkdtemp(prefix="telemetry_bundle_")
+        data_dir = os.path.join(bundle_tmp, "data")
+        meta_dir = os.path.join(bundle_tmp, "meta")
+        extras_dir = os.path.join(bundle_tmp, "extras")
+        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(meta_dir, exist_ok=True)
+        if extra_files:
+            os.makedirs(extras_dir, exist_ok=True)
+
+        copied_files = []
+        try:
+            candidates = [
+                (self.primary_csv_file, "telemetry_data.csv"),
+                (self.secondary_csv_file, "raw_hex_data.csv"),
+                (self.training_data_csv, "training_data.csv"),
+            ]
+            for src, name in candidates:
+                if src and os.path.exists(src) and os.path.getsize(src) > 0:
+                    shutil.copy2(src, os.path.join(data_dir, name))
+                    copied_files.append(name)
+
+            if notes is not None:
+                notes_path = os.path.join(meta_dir, "notes.txt")
+                with open(notes_path, "w", encoding="utf-8") as fh:
+                    fh.write(notes.strip() + "\n" if notes else "")
+
+            if extra_files:
+                for extra in extra_files:
+                    if not extra or not os.path.exists(extra):
+                        continue
+                    dest = os.path.join(extras_dir, os.path.basename(extra))
+                    shutil.copy2(extra, dest)
+
+            metadata.setdefault("created_at", datetime.utcnow().isoformat(timespec="seconds") + "Z")
+            metadata.setdefault("copied_files", copied_files)
+            metadata_path = os.path.join(meta_dir, "metadata.json")
+            with open(metadata_path, "w", encoding="utf-8") as fh:
+                json.dump(metadata, fh, indent=2)
+
+            with zipfile.ZipFile(destination_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for root, _dirs, files in os.walk(bundle_tmp):
+                    for filename in files:
+                        abs_path = os.path.join(root, filename)
+                        rel_path = os.path.relpath(abs_path, bundle_tmp)
+                        zf.write(abs_path, rel_path.replace("\\", "/"))
+
+            self.logger.info(f"Telemetry bundle created at {destination_zip}")
+            return destination_zip
+        finally:
+            shutil.rmtree(bundle_tmp, ignore_errors=True)
+
+    def import_telemetry_bundle(self, bundle_path, target_directory=None, activate=False):
+        """
+        Import a telemetry bundle created via create_telemetry_bundle.
+
+        :param bundle_path: Path to the .zip bundle.
+        :param target_directory: Optional directory to extract into. Defaults to root/imports/<bundle>.
+        :param activate: If True, switch current CSV directory to the imported bundle.
+        :return: Dict with destination path, metadata, and notes.
+        """
+        bundle_path = os.path.abspath(bundle_path)
+        if not os.path.exists(bundle_path) or not zipfile.is_zipfile(bundle_path):
+            raise FileNotFoundError(f"{bundle_path} is not a valid telemetry bundle")
+
+        label = os.path.splitext(os.path.basename(bundle_path))[0]
+        if not target_directory:
+            imports_root = os.path.join(self.root_directory, "imports")
+            self.ensure_directory_exists(imports_root)
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            target_directory = os.path.join(imports_root, f"{label}_{timestamp}")
+        self.ensure_directory_exists(target_directory)
+
+        temp_dir = tempfile.mkdtemp(prefix="telemetry_import_")
+        metadata = {}
+        notes_text = ""
+        try:
+            with zipfile.ZipFile(bundle_path, "r") as zf:
+                zf.extractall(temp_dir)
+
+            data_dir = os.path.join(temp_dir, "data")
+            meta_dir = os.path.join(temp_dir, "meta")
+            extras_dir = os.path.join(temp_dir, "extras")
+
+            def _copy_if_exists(src_name, dest_name):
+                src_path = os.path.join(data_dir, src_name)
+                if os.path.exists(src_path):
+                    shutil.copy2(src_path, os.path.join(target_directory, dest_name))
+
+            _copy_if_exists("telemetry_data.csv", "telemetry_data.csv")
+            _copy_if_exists("raw_hex_data.csv", "raw_hex_data.csv")
+            _copy_if_exists("training_data.csv", "training_data.csv")
+
+            metadata_path = os.path.join(meta_dir, "metadata.json")
+            if os.path.exists(metadata_path):
+                with open(metadata_path, "r", encoding="utf-8") as fh:
+                    metadata = json.load(fh)
+
+            notes_path = os.path.join(meta_dir, "notes.txt")
+            if os.path.exists(notes_path):
+                dest_notes = os.path.join(target_directory, "notes.txt")
+                shutil.copy2(notes_path, dest_notes)
+                with open(notes_path, "r", encoding="utf-8") as fh:
+                    notes_text = fh.read().strip()
+
+            if os.path.isdir(extras_dir):
+                dest_extras = os.path.join(target_directory, "extras")
+                os.makedirs(dest_extras, exist_ok=True)
+                for filename in os.listdir(extras_dir):
+                    src = os.path.join(extras_dir, filename)
+                    shutil.copy2(src, os.path.join(dest_extras, filename))
+
+            if activate:
+                self.set_csv_save_directory(target_directory)
+
+            return {
+                "destination": target_directory,
+                "metadata": metadata,
+                "notes": notes_text,
+            }
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)

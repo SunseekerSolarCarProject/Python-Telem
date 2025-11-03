@@ -1,4 +1,4 @@
-# src/main_app.py
+﻿# src/main_app.py
 
 # imports for making the application to work when using the auto-py-to-exe tool
 import sys
@@ -64,6 +64,7 @@ def main():
     telemetry_app = TelemetryApplication(
         app=app,
         storage_folder=storage_folder,  # Pass along to handle CSV files
+        log_file_path=log_file_path,
     )
     startup_success = telemetry_app.start()
 

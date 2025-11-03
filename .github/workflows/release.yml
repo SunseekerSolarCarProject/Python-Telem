@@ -89,6 +89,7 @@ jobs:
             --add-data "src/telemetry_application.py${{ matrix.sep }}." \
             --add-data "src/unit_conversion.py${{ matrix.sep }}." \
             --add-data "src/Version.py${{ matrix.sep }}." \
+            --add-data "src/simulation.py${{ matrix.sep }}." \
             "${COLLECT_FLAGS[@]}"
 
       - name: Package onedir as zip
