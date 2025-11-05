@@ -1,42 +1,95 @@
-<h1 align="center"> Telemetry Application </h1>
-This is the newer telemetry that I have rebuilt up in python and meant for many students wanting to update the software reading it much easeir than before.
-I Improved the usability of the the software a bit more and made the process of deciphering the data over serial a bit easier in the gui. The Software represents most cases of the serial data collection.
-The tabs within the software reflect on what is being represented on the car.
+# Telemetry Application
 
-<h2 align="left"> Location and starting the Application</h2>
+A cross-platform telemetry dashboard built for the Sunseeker Solar Car team. The app ingests live CAN/serial traffic from the vehicle, converts it into human-friendly metrics, and visualises everything through an extensible PyQt interface. It bundles a machine-learning layer for energy predictions, supports portable data exports, and now includes a simulation mode so engineers can rehearse race-day scenarios without the car.
 
-### Windows
-The files for the executable for windows is within the release version of github where you can download the exe file. There is also two text files that would be necessary to download. These text files have the information of the battery pack configuration. In order to get the txt to show up just put a folder name "config_files" in the same directory of the exe file. Then within the config dialog you can select those files. There are files that show up when the software starts there is two csv files and 1 log file in the beginning. The log files do expand 5 times as backup when each file reaches 20MB as the limit for the file.
+---
 
-### Macs
-To run on Mac download the zip folder and unzip it where every you want. Then just follow the steps below.
-1. The first step is download the entire project to your mac from github.
-2. This is to open your terminal within that folder
-3. then enter this line of code 'Python3 main_app.py' in the terminal where the the "main_app.py" is to start.
-This should start the application for the code to run on your mac.
+## Platform Setup & Launch
 
-<h2 align="left"> adding new battery configurations to the software </h2>
-If wanting to add new battery configs to the software dropdown follow these steps:
+### Windows (packaged executable)
+1. Download the latest release from GitHub (the `.exe` file plus the two battery configuration `.txt` files).  
+2. Place the executable and the two config files in the same directory, keeping the config files under a folder named `config_files`.  
+3. Run the executable. On first launch the app creates two CSVs and one rotating log file inside `application_data/`. Logs rotate up to five times at 20 MB each so you always have fresh diagnostics.
 
-1. create a txt file and name the battery config file.
-2. make sure the battery config files has these names in them:
-    - Battery cell capacity amps hours, A value 
-    - Battery cell nominal voltage, A value
-    - Amount of battery cells, A value
-    - Number of battery series, A value
-3. save that file and put it in the configs file folder where the "main_app.exe" is located.
-4. now it shows up in the drop down config for the battery to load.
+### macOS / Linux (source)
+1. Clone or download the repository.  
+2. Open a terminal in the project root.  
+3. Create/activate a Python environment (`python3 -m venv .venv && source .venv/bin/activate`).  
+4. Install requirements (`pip install -r requirements.txt`).  
+5. Launch with `python src/main_app.py`.
 
-### Devs
-Devs that want to create a new executable for the telemetry software on windows side follow the instructions ahead. Make sure auto-py-to-exe is installed with this command 'pip install auto-py-to-exe'. then once it is installed run this command either 'auto-py-to-exe' if you are dealing in another program editor. If entering into VSCode then use this command 'python -m auto_py_to_exe' as this makes it work because the VSCode thinks that there is multiple versions of python in VSCode.
+---
 
-There is a entire debug feature that is implemented into this program for developers that want to see what is happening within the code if some new features break the program and can't figure out where the data is going to. The data logs are backup 5 times at each size of 20MB.
+## Key Tabs & Features
 
-<h2 align="left"> Battery/Array Image Tabs </h2>
-Two new tabs let you overlay probe points on images:
+### Data Display & Data Tables
+Real-time telemetry values grouped by subsystem (motor controllers, battery packs, solar data, etc.). Predictions such as remaining time and break-even speed are annotated with uncertainty bands, timestamps, and quality flags.
 
-- Battery Image: load a battery pack image and left‑click to drop probe dots.
-- Array Image: load a solar array image and left‑click to drop probe dots.
+### Graph Tabs
+PyQtGraph-powered plots for motor controllers, battery packs, remaining capacity, and the “Insights” panel (efficiency, power, imbalance metrics). Colours can be customised and persisted through the settings tab.
 
-Images and points persist across sessions and are stored under `src/application_data/user_images/` with coordinates saved in `src/application_data/config.json`. Use the Clear/Undo buttons in each tab to adjust points.
+### Image Annotation Tabs
+Battery and array image tabs let you overlay probe points on reference drawings. Points and images persist between sessions (`src/application_data/user_images/` and `config.json`). Use Clear/Undo to refine placements.
 
+### CSV Management
+Quick access to current CSV locations, shortcuts to export copies, and controls to change the capture directory. From this tab you can now create “Telemetry Bundles” (zip archives with data, notes, metadata, and logs) and import previous runs for offline analysis.
+
+### Simulation
+Replay recorded telemetry CSVs or generate synthetic scenarios (Nominal Cruise, High Load, Charging Spike). Simulation data streams through the UI but is intentionally **not** written back to CSVs or sent to the telemetry server, so your historical data stays clean.
+
+### Settings
+Configure COM port, baud rate, log level, Solcast credentials, unit system, and colour themes. Includes machine-learning retrain controls, Solcast key management, and an integrated updater to install tagged releases.
+
+---
+
+## Battery Configuration Files
+
+To add new battery pack presets to the configuration dialog:
+1. Create a `.txt` file with the following lines and numeric values:
+   - `Battery cell capacity amps hours`
+   - `Battery cell nominal voltage`
+   - `Amount of battery cells`
+   - `Number of battery series`
+2. Save the file inside the `config_files` folder next to the executable (or project root when running from source).
+3. The entry appears in the configuration dropdown the next time the app starts.
+
+---
+
+## Developer Notes
+
+### Code Map
+- `main_app.py` – entry point; wires logging and launches `TelemetryApplication`.
+- `telemetry_application.py` – central coordinator: GUI creation, serial reader lifecycle, buffering, ML predictions, telemetry server upload, and simulation handling.
+- `buffer_data.py` / `csv_handler.py` – ingest buffering, CSV/training persistence, and bundle import/export helpers.
+- `learning_datasets/` – machine-learning pipelines and quality diagnostics.
+- `gui_files/` – modular PyQt tabs (data display, graphs, images, simulation, settings, CSV management).
+- `simulation.py` – worker threads for replaying recorded telemetry and generating synthetic scenarios.
+
+### Building & Releases
+1. Run unit/system smoke tests locally (e.g., simulation replay, bundle export/import).  
+2. Update `Version.py` and changelog.  
+3. Tag the release (`git tag vX.Y.Z`) and push; the GitHub Actions workflow builds Windows/macOS/Linux artifacts via PyInstaller, runs `scripts/build_tuf_repo.py`, and publishes signed assets plus TUF metadata.  
+4. Verify telemetry bundles and updater metadata before announcing.
+
+### Updating the Updater
+The application uses TUF for signed updates. When publishing new artifacts, ensure you upload the freshly generated `release/metadata/*.json` and `release/targets/*.tar.gz`. Timestamp validity defaults to 60 days; rerun the pipeline for each release.
+
+### Simulation & Data Integrity
+Simulated data never touches the on-disk CSVs or training corpus and is not forwarded to the remote ingestion endpoint. The core buffer pipeline still runs so derived metrics and predictions remain accurate during dry runs. When the simulation finishes, the app automatically resumes the serial reader if it was running before.
+
+### Troubleshooting
+- Logs live under `application_data/telemetry_application.log` with rotation to `*.1` … `*.5` at 20 MB each.  
+- Use the Simulation tab to reproduce edge cases without hardware.  
+- Enable higher log levels via the settings tab (`DEBUG`) for verbose packet tracing.  
+- The machine-learning layer relies on `training_data.csv`; ensure it has valid numeric entries before retraining.
+
+---
+
+## Contributing
+1. Fork the repository and create a feature branch.  
+2. Keep changes modular (GUI tabs, CSV handler, ML pipelines, simulation).  
+3. Update the README or docs if you modify user-facing flows.  
+4. Run `python -m compileall src` (already part of CI) and any project-specific tests.  
+5. Submit a pull request with a concise summary plus validation steps.
+
+Thanks for keeping the telemetry stack thriving for future Sunseeker crews!
