@@ -60,39 +60,6 @@ class CentralLogger:
             # If console output fails, log it to file but continue
             file_handler.warning(f"Could not initialize console logging: {e}")
 
-    def set_level(self, level_str):
-        """
-        Sets the logging level for all handlers based on a string input.
-
-        :param level_str: String representing the desired logging level.
-        """
-        try:
-            self.logger.debug(f"Attempting to set logging level to: {level_str}")
-            # Validate logging level
-            if not hasattr(logging, level_str.upper()):
-                raise AttributeError(f"Invalid logging level: {level_str}")
-
-            level = getattr(logging, level_str.upper(), logging.INFO)
-            self.level = level
-            self.logger.setLevel(self.level)
-            for handler in self.logger.handlers:
-                handler.setLevel(self.level)
-            
-            # Log the level change
-            original_levels = [handler.level for handler in self.logger.handlers]
-            for handler in self.logger.handlers:
-                handler.setLevel(logging.DEBUG)
-            self.logger.info(f"Logging level set to {logging.getLevelName(self.level)}.")
-            for handler, orig_level in zip(self.logger.handlers, original_levels):
-                handler.setLevel(orig_level)
-            self.logger.debug(f"Successfully set logging level to {logging.getLevelName(self.level)}.")
-        except AttributeError as e:
-            self.logger.error(f"Invalid logging level: {level_str}. Exception: {e}")
-            QMessageBox.critical(None, "Logging Level Error", f"Invalid logging level: {level_str}. Please select a valid level.")
-        except Exception as e:
-            self.logger.error(f"Error setting logging level to {level_str}: {e}")
-            QMessageBox.critical(None, "Logging Configuration Error", f"An error occurred while setting the logging level: {e}")
-
     def get_logger(self, name=None):
         """
         Retrieves a logger with the specified name.
@@ -101,26 +68,3 @@ class CentralLogger:
         :return: A logger instance.
         """
         return logging.getLogger(name)
-
-    def add_handler(self, handler):
-        """
-        Adds an additional handler to the logger.
-
-        :param handler: A logging.Handler instance.
-        """
-        handler.setLevel(self.level)
-        formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-        )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.info(f"Added new handler: {handler}")
-
-    def remove_handler(self, handler):
-        """
-        Removes a handler from the logger.
-
-        :param handler: The handler to remove.
-        """
-        self.logger.removeHandler(handler)
-        self.logger.info(f"Removed handler: {handler}")

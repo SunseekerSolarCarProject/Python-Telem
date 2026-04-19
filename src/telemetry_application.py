@@ -3,6 +3,8 @@ import sys
 import os
 import logging
 import json
+import re
+import math
 import requests
 import threading
 from pathlib import Path
@@ -20,6 +22,7 @@ from csv_handler import CSVHandler
 from learning_datasets.machine_learning import MachineLearningModel
 from learning_datasets.quality_diagnostics import QualityDiagnostics
 from simulation import TelemetrySimulator
+from db_writer import TelemetryDBWriter, DBConfig
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
 from Version import VERSION  # Import the version number
@@ -57,6 +60,11 @@ _ENV_PATH = _load_env_file()
 
 API_URL = os.getenv('TELEMETRY_INGESTION_API_URL', 'http://localhost:5000/ingest')
 API_KEY = os.getenv('TELEMETRY_INGESTION_API_KEY')
+API_AUTH_SCHEME = (os.getenv('TELEMETRY_INGESTION_AUTH_SCHEME') or 'auto').strip().lower()
+API_PAYLOAD_FORMAT = (os.getenv('TELEMETRY_INGESTION_PAYLOAD_FORMAT') or 'legacy').strip().lower()
+API_SESSION_ID = (os.getenv('TELEMETRY_INGESTION_SESSION_ID') or 'live-session').strip()
+API_VEHICLE = (os.getenv('TELEMETRY_INGESTION_VEHICLE') or '').strip()
+API_EXPECT_JSON = (os.getenv('TELEMETRY_INGESTION_EXPECT_JSON') or 'true').strip().lower() in ('1', 'true', 'yes', 'on')
 SOLCAST_API_KEY = os.getenv('SOLCAST_API_KEY')
 SOLCAST_LATITUDE = os.getenv('SOLCAST_LATITUDE')
 SOLCAST_LONGITUDE = os.getenv('SOLCAST_LONGITUDE')
@@ -95,6 +103,7 @@ class TelemetryApplication(QObject):
         self.training_complete_signal.connect(self.on_training_complete)
 
         self.init_logger()
+        self.init_storage_backend()
         self.init_units_and_keys()
         self.init_csv_handler()
 
@@ -128,6 +137,61 @@ class TelemetryApplication(QObject):
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             ch.setFormatter(formatter)
             logging.getLogger().addHandler(ch)
+
+    def _parse_int(self, value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _load_db_config(self) -> DBConfig | None:
+        host = os.getenv("TELEMETRY_DB_HOST")
+        user = os.getenv("TELEMETRY_DB_USER")
+        password = os.getenv("TELEMETRY_DB_PASSWORD")
+        database = os.getenv("TELEMETRY_DB_NAME")
+        if not all((host, user, password, database)):
+            return None
+        port = self._parse_int(os.getenv("TELEMETRY_DB_PORT"), 3306)
+        table = os.getenv("TELEMETRY_DB_TABLE", "telemetry_events")
+        if not re.match(r"^[A-Za-z0-9_]+$", table or ""):
+            self.logger.warning("Invalid TELEMETRY_DB_TABLE value; using telemetry_events.")
+            table = "telemetry_events"
+        timeout = self._parse_int(os.getenv("TELEMETRY_DB_CONNECT_TIMEOUT"), 5)
+        ssl_ca = os.getenv("TELEMETRY_DB_SSL_CA") or None
+        ssl_cert = os.getenv("TELEMETRY_DB_SSL_CERT") or None
+        ssl_key = os.getenv("TELEMETRY_DB_SSL_KEY") or None
+        return DBConfig(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            table=table,
+            connect_timeout=timeout,
+            ssl_ca=ssl_ca,
+            ssl_cert=ssl_cert,
+            ssl_key=ssl_key,
+        )
+
+    def init_storage_backend(self):
+        self.storage_mode = (os.getenv("TELEMETRY_STORAGE_MODE") or "http").strip().lower()
+        self.db_writer = None
+        if self.storage_mode in ("db", "database", "mariadb", "mysql", "both"):
+            config = self._load_db_config()
+            if config:
+                self.db_writer = TelemetryDBWriter(config, self.logger)
+                self.logger.info(
+                    "Telemetry DB storage enabled (%s:%s/%s).",
+                    config.host,
+                    config.port,
+                    config.database,
+                )
+            else:
+                self.logger.warning(
+                    "Database storage requested but TELEMETRY_DB_* is incomplete; falling back to HTTP."
+                )
+                if self.storage_mode != "both":
+                    self.storage_mode = "http"
 
     def init_units_and_keys(self):
         """
@@ -376,6 +440,119 @@ class TelemetryApplication(QObject):
         thread.daemon = True  # Daemonize thread so it won't block program exit
         thread.start()
 
+    def _build_http_headers(self) -> dict:
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if not API_KEY:
+            return headers
+
+        # Keep backward compatibility and support common API auth styles.
+        if API_AUTH_SCHEME in ("auto", "bearer"):
+            headers["Authorization"] = f"Bearer {API_KEY}"
+        if API_AUTH_SCHEME in ("auto", "x-api-token"):
+            headers["X-API-Token"] = API_KEY
+        if API_AUTH_SCHEME in ("auto", "x-api-key"):
+            headers["X-API-KEY"] = API_KEY
+        return headers
+
+    def _build_http_payload(self, payload: dict, data: dict, device_tag: str) -> dict:
+        if API_PAYLOAD_FORMAT == "ionos":
+            vehicle = self.vehicle_year or API_VEHICLE or device_tag
+            return {
+                "session_id": API_SESSION_ID,
+                "vehicle": vehicle,
+                "data": data,
+                "timestamp": payload.get("timestamp")
+            }
+        if API_PAYLOAD_FORMAT == "dual":
+            vehicle = self.vehicle_year or API_VEHICLE or device_tag
+            merged = dict(payload)
+            merged.update({
+                "session_id": API_SESSION_ID,
+                "vehicle": vehicle,
+                "data": data,
+            })
+            return merged
+        return payload
+
+    def _sanitize_json_payload(self, payload: dict) -> tuple[dict, dict]:
+        stats = {
+            "non_finite": 0,
+            "coerced": 0,
+        }
+
+        def convert(value):
+            if isinstance(value, dict):
+                return {str(k): convert(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple, set)):
+                return [convert(v) for v in value]
+            if value is None or isinstance(value, (str, bool, int)):
+                return value
+            if isinstance(value, float):
+                if math.isfinite(value):
+                    return value
+                stats["non_finite"] += 1
+                return None
+
+            # numpy scalars and similar objects
+            try:
+                if hasattr(value, "item"):
+                    stats["coerced"] += 1
+                    return convert(value.item())
+            except Exception:
+                pass
+
+            try:
+                f_val = float(value)
+                if not math.isfinite(f_val):
+                    stats["non_finite"] += 1
+                    return None
+                stats["coerced"] += 1
+                if f_val.is_integer():
+                    return int(f_val)
+                return f_val
+            except Exception:
+                stats["coerced"] += 1
+                return str(value)
+
+        sanitized = convert(payload)
+        return sanitized, stats
+
+
+    def _post_payload_http(self, payload: dict) -> bool:
+        headers = self._build_http_headers()
+        safe_payload, stats = self._sanitize_json_payload(payload)
+        if stats["non_finite"] > 0:
+            self.logger.warning(
+                "Sanitized %d non-finite telemetry value(s) before HTTP send.",
+                stats["non_finite"],
+            )
+        try:
+            response = requests.post(API_URL, json=safe_payload, headers=headers, timeout=5)
+            response.raise_for_status()
+            ctype = (response.headers.get("Content-Type") or "").lower()
+            body_prefix = (response.text or "")[:160].strip().lower()
+            looks_like_html = "<html" in body_prefix or "<!doctype html" in body_prefix
+
+            if API_EXPECT_JSON and "json" not in ctype:
+                raise requests.exceptions.RequestException(
+                    f"Unexpected content type '{ctype or 'unknown'}' from ingest endpoint. "
+                    "This usually means the URL points to the website frontend, not the API."
+                )
+
+            if looks_like_html:
+                raise requests.exceptions.RequestException(
+                    "Ingest endpoint returned HTML content instead of API response. "
+                    "Check TELEMETRY_INGESTION_API_URL and web routing."
+                )
+
+            self.logger.info("Telemetry data sent successfully (HTTP %s).", response.status_code)
+            return True
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Failed to send telemetry data: {e}")
+            return False
+
     def send_telemetry_data_to_server(self, data, device_tag="device1"):
         """
         Sends telemetry data to the Flask server's /ingest endpoint.
@@ -390,17 +567,20 @@ class TelemetryApplication(QObject):
             "timestamp": datetime.utcnow().isoformat()
         }
         self.logger.debug(f"Sending payload: {payload}")
-        headers = {
-            "X-API-KEY": API_KEY,
-            "Content-Type": "application/json"
-        }
-    
-        try:
-            response = requests.post(API_URL, json=payload, headers=headers, timeout=5)
-            response.raise_for_status()
-            self.logger.info("Telemetry data sent successfully.")
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to send telemetry data: {e}")
+        sent = False
+        if self.storage_mode in ("db", "database", "mariadb", "mysql", "both") and self.db_writer:
+            try:
+                self.db_writer.insert_payload(payload)
+                sent = True
+                self.logger.debug("Telemetry data stored in database.")
+            except Exception as e:
+                self.logger.error(f"Failed to write telemetry data to database: {e}")
+        if self.storage_mode in ("http", "api", "both"):
+            http_payload = self._build_http_payload(payload, data, device_tag)
+            http_ok = self._post_payload_http(http_payload)
+            sent = sent or http_ok
+        if not sent:
+            self.logger.debug("No telemetry storage backend configured; skipping send.")
 
     def fetch_solcast_data(self):
         """Fetch both live and forecast irradiance & emit into the GUI."""
@@ -730,7 +910,7 @@ class TelemetryApplication(QObject):
         self._simulation_mode = f"Replay ({os.path.basename(file_path)})"
         self.simulator.start_replay(file_path, speed)
 
-    def start_simulation_scenario(self, scenario, speed):
+    def start_simulation_scenario(self, scenario, speed, profile=None):
         if not scenario:
             QMessageBox.warning(self.gui, "Simulation", "Select a scenario to simulate.")
             return
@@ -739,7 +919,7 @@ class TelemetryApplication(QObject):
         if self._resume_serial_after_sim:
             self.stop_serial_reader()
         self._simulation_mode = f"Scenario ({scenario})"
-        self.simulator.start_synthetic(scenario, speed)
+        self.simulator.start_synthetic(scenario, speed, profile=profile or {})
 
     def stop_simulation(self):
         self.simulator.stop()
@@ -935,7 +1115,7 @@ class TelemetryApplication(QObject):
             if custom_filename:
                 if not custom_filename.endswith('.csv'):
                     custom_filename += '.csv'
-                self.csv_handler.finalize_csv(self.csv_file, custom_filename)
+                self.csv_handler.finalize_csv(self.csv_handler.get_csv_file_path(), custom_filename)
                 self.logger.info(f"CSV saved as {custom_filename}.")
                 QMessageBox.information(None, "Success", f"CSV saved as {custom_filename}.")
         except Exception as e:

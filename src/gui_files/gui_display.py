@@ -41,7 +41,7 @@ class TelemetryGUI(QWidget):
     export_bundle_requested = pyqtSignal(str, str)
     import_bundle_requested = pyqtSignal(str, bool)
     start_simulation_replay_requested = pyqtSignal(str, float)
-    start_simulation_scenario_requested = pyqtSignal(str, float)
+    start_simulation_scenario_requested = pyqtSignal(str, float, dict)
     stop_simulation_requested = pyqtSignal()
 
     def __init__(self, data_keys, units, csv_handler, config_file='config.json'):
@@ -606,6 +606,8 @@ class TelemetryGUI(QWidget):
         else:
             self.units_mode = 'metric'
             self.units      = self.metric_map
+        if hasattr(self, 'simulation_tab'):
+            self.simulation_tab.set_units_mode(self.units_mode)
 
         # inside on_units_changed
         for tab in (self.data_table_tab,

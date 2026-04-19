@@ -9,3 +9,4 @@ numpy>=2.3.2
 pyserial>=3.5
 pyqtgraph>=0.13.7
 Pyqt6>=6.9.1
+pymysql>=1.1.1

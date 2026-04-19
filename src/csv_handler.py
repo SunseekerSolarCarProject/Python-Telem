@@ -1,44 +1,45 @@
 # src/csv_handler.py
 
 import csv
-import os
-import threading
-import logging
-import shutil  # Import shutil for file operations
 import json
-import zipfile
+import logging
+import os
+import shutil
 import tempfile
+import threading
+import zipfile
 from datetime import datetime
-from key_name_definitions import TelemetryKey, KEY_UNITS  # Import TelemetryKey enum and KEY_UNITS
+
+from key_name_definitions import TelemetryKey
+
 
 class CSVHandler:
     def __init__(self, root_directory='.'):
         """
         Initializes the CSVHandler with a root directory for default files.
         """
-        # Initialize logger
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logs
+        self.logger.setLevel(logging.DEBUG)
 
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.root_directory = os.path.abspath(root_directory)
         self.ensure_directory_exists(self.root_directory)
-        
-        # Define CSV file paths
-        self.primary_csv_file = os.path.join(self.root_directory, "telemetry_data.csv")
-        self.secondary_csv_file = os.path.join(self.root_directory, "raw_hex_data.csv")
-        self.training_data_csv = os.path.join(self.root_directory, "training_data.csv")
 
-        # Define headers using TelemetryKey enum
+        self.default_primary_filename = "telemetry_data.csv"
+        self.default_secondary_filename = "raw_hex_data.csv"
+        self.default_training_filename = "training_data.csv"
+
+        self.primary_csv_file = os.path.join(self.root_directory, self.default_primary_filename)
+        self.secondary_csv_file = os.path.join(self.root_directory, self.default_secondary_filename)
+        self.training_data_csv = os.path.join(self.root_directory, self.default_training_filename)
+
         self.primary_headers = self.generate_primary_headers()
         self.secondary_headers = self.generate_secondary_headers()
         self.training_data_headers = self.generate_training_headers()
 
-        # Ensure the default CSV files exist with correct headers
         self.setup_csv(self.primary_csv_file, self.primary_headers)
         self.setup_csv(self.secondary_csv_file, self.secondary_headers)
         self.setup_csv(self.training_data_csv, self.training_data_headers)
-
 
     def ensure_directory_exists(self, directory):
         """
@@ -54,7 +55,6 @@ class CSVHandler:
 
         :return: List of primary CSV headers.
         """
-        # Define the desired order of telemetry keys
         ordered_keys = [
             TelemetryKey.TIMESTAMP.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
             TelemetryKey.MC1BUS_VOLTAGE.value[0], TelemetryKey.MC1BUS_CURRENT.value[0],
@@ -118,7 +118,7 @@ class CSVHandler:
 
         :return: List of training CSV headers.
         """
-        return ['BP_PVS_milliamp*s','BP_PVS_Ah','BP_PVS_Voltage','Used_Ah_Remaining_Time','BreakEvenSpeed']
+        return ['BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage', 'Used_Ah_Remaining_Time', 'BreakEvenSpeed']
 
     def setup_csv(self, csv_file, headers):
         """
@@ -134,8 +134,25 @@ class CSVHandler:
                         writer = csv.DictWriter(file, fieldnames=headers)
                         writer.writeheader()
                     self.logger.info(f"CSV file created: {csv_file}")
-                except Exception as e:
-                    self.logger.error(f"Error setting up CSV file {csv_file}: {e}")
+                except Exception as exc:
+                    self.logger.error(f"Error setting up CSV file {csv_file}: {exc}")
+
+    def _get_csv_config(self, csv_kind):
+        config = {
+            "primary": ("primary_csv_file", self.primary_headers, self.default_primary_filename),
+            "secondary": ("secondary_csv_file", self.secondary_headers, self.default_secondary_filename),
+            "training": ("training_data_csv", self.training_data_headers, self.default_training_filename),
+        }
+        if csv_kind not in config:
+            raise ValueError(f"Unknown CSV kind '{csv_kind}'.")
+        return config[csv_kind]
+
+    def _get_current_csv_filename(self, csv_kind):
+        attr_name, _headers, default_name = self._get_csv_config(csv_kind)
+        current_path = getattr(self, attr_name, "")
+        if current_path:
+            return os.path.basename(current_path)
+        return default_name
 
     def append_to_csv(self, csv_file, data):
         """
@@ -149,12 +166,12 @@ class CSVHandler:
                 headers = self.primary_headers
             elif csv_file == self.secondary_csv_file:
                 headers = self.secondary_headers
+            elif csv_file == self.training_data_csv:
+                headers = self.training_data_headers
             else:
-                # If unknown CSV file, infer headers from data keys
                 headers = list(data.keys())
                 self.setup_csv(csv_file, headers)
 
-            # Sanitize the data dictionary
             sanitized_data = {key: data.get(key, "N/A") for key in headers}
 
             with self.lock:
@@ -166,46 +183,58 @@ class CSVHandler:
                     writer = csv.DictWriter(file, fieldnames=headers)
                     writer.writerow(sanitized_data)
                 self.logger.debug(f"Appended data to {csv_file}: {sanitized_data}")
-        except Exception as e:
-            self.logger.error(f"Error appending to CSV {csv_file}: {e}")
+        except Exception as exc:
+            self.logger.error(f"Error appending to CSV {csv_file}: {exc}")
 
-    def set_csv_save_directory(self, directory):
+    def set_csv_save_directory(self, directory, preserve_filenames=False, move_existing_files=False):
         """
         Sets a new directory for saving CSV files.
 
         :param directory: New directory path.
+        :param preserve_filenames: Keep the active CSV basenames when switching folders.
+        :param move_existing_files: Move the current active CSV files into the new folder.
         """
-        self.ensure_directory_exists(directory)
-        self.root_directory = os.path.abspath(directory)
+        target_directory = os.path.abspath(directory)
+        self.ensure_directory_exists(target_directory)
 
-        self.primary_csv_file = os.path.join(self.root_directory, "telemetry_data.csv")
-        self.secondary_csv_file = os.path.join(self.root_directory, "raw_hex_data.csv")
-        self.training_data_csv = os.path.join(self.root_directory, "training_data.csv")
+        primary_name = self.default_primary_filename
+        secondary_name = self.default_secondary_filename
+        training_name = self.default_training_filename
 
-        if not os.path.exists(self.primary_csv_file):
-            self.setup_csv(self.primary_csv_file, self.primary_headers)
-        if not os.path.exists(self.secondary_csv_file):
-            self.setup_csv(self.secondary_csv_file, self.secondary_headers)
-        if not os.path.exists(self.training_data_csv):
-            self.setup_csv(self.training_data_csv, self.training_data_headers)
+        if preserve_filenames:
+            primary_name = self._get_current_csv_filename("primary")
+            secondary_name = self._get_current_csv_filename("secondary")
+            training_name = self._get_current_csv_filename("training")
+
+        targets = {
+            "primary": (self.primary_csv_file, os.path.join(target_directory, primary_name), self.primary_headers),
+            "secondary": (self.secondary_csv_file, os.path.join(target_directory, secondary_name), self.secondary_headers),
+            "training": (self.training_data_csv, os.path.join(target_directory, training_name), self.training_data_headers),
+        }
+
+        with self.lock:
+            if move_existing_files:
+                for _csv_kind, (current_path, new_path, _headers) in targets.items():
+                    if not current_path or not os.path.exists(current_path):
+                        continue
+                    if os.path.abspath(current_path) == os.path.abspath(new_path):
+                        continue
+                    if os.path.exists(new_path):
+                        raise FileExistsError(f"Destination file {new_path} already exists.")
+
+            self.root_directory = target_directory
+            self.primary_csv_file = targets["primary"][1]
+            self.secondary_csv_file = targets["secondary"][1]
+            self.training_data_csv = targets["training"][1]
+
+            for _csv_kind, (current_path, new_path, headers) in targets.items():
+                if move_existing_files and current_path and os.path.exists(current_path):
+                    if os.path.abspath(current_path) != os.path.abspath(new_path):
+                        shutil.move(current_path, new_path)
+                elif not os.path.exists(new_path):
+                    self.setup_csv(new_path, headers)
 
         self.logger.info(f"CSV save directory set to {self.root_directory}")
-
-    def change_csv_file_name(self, new_filename, is_primary):
-        """
-        Changes the CSV file name and updates the corresponding path.
-
-        :param new_filename: New filename for the CSV.
-        :param is_primary: Boolean indicating if it's the primary CSV.
-        """
-        file_path = os.path.join(self.root_directory, new_filename)
-        headers = self.primary_headers if is_primary else self.secondary_headers
-        self.setup_csv(file_path, headers)
-        if is_primary:
-            self.primary_csv_file = file_path
-        else:
-            self.secondary_csv_file = file_path
-        self.logger.info(f"CSV file path updated: {file_path}")
 
     def get_csv_file_path(self):
         """
@@ -218,7 +247,7 @@ class CSVHandler:
         Returns the current secondary CSV file path.
         """
         return self.secondary_csv_file
-    
+
     def get_training_data_csv_path(self):
         """
         Returns the current training data CSV file path.
@@ -234,36 +263,17 @@ class CSVHandler:
         """
         try:
             if os.path.exists(new_csv_path):
-                # Since CSVHandler doesn't have access to GUI, raise an exception
                 raise FileExistsError(f"Destination file {new_csv_path} already exists.")
-            
-            shutil.copy2(original_csv, new_csv_path)  # Copies metadata as well
+
+            shutil.copy2(original_csv, new_csv_path)
             self.logger.info(f"CSV file copied to: {new_csv_path}")
-        except FileExistsError as fe:
-            self.logger.error(fe)
-            raise  # Re-raise to let the GUI handle the prompt
-        except Exception as e:
-            self.logger.error(f"Error finalizing CSV file from {original_csv} to {new_csv_path}: {e}")
-            raise  # Re-raise to let the GUI handle the error
+        except FileExistsError as exc:
+            self.logger.error(exc)
+            raise
+        except Exception as exc:
+            self.logger.error(f"Error finalizing CSV file from {original_csv} to {new_csv_path}: {exc}")
+            raise
 
-    def validate_csv(self, csv_file):
-        """
-        Validates the CSV file to ensure it is not corrupted.
-
-        :param csv_file: Path to the CSV file.
-        :return: Boolean indicating if the CSV is valid.
-        """
-        try:
-            with open(csv_file, 'r', newline='') as file:
-                reader = csv.reader(file)
-                for _ in reader:
-                    pass  # Simply iterating to check for read errors
-            self.logger.debug(f"CSV file {csv_file} is valid.")
-            return True
-        except Exception as e:
-            self.logger.error(f"Validation failed for CSV file {csv_file}: {e}")
-            return False
-    
     def create_telemetry_bundle(self, destination_zip, notes="", extra_files=None, metadata=None):
         """
         Create a portable telemetry archive containing the primary/secondary/training CSV files
@@ -403,3 +413,41 @@ class CSVHandler:
             }
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def change_csv_file_name(self, csv_kind, new_filename):
+        """
+        Rename the active CSV file inside the current root directory and update the active path.
+
+        :param csv_kind: One of 'primary', 'secondary', or 'training'.
+        :param new_filename: New filename for the CSV.
+        :return: Absolute path to the active CSV after the rename.
+        """
+        attr_name, headers, _default_name = self._get_csv_config(csv_kind)
+
+        clean_name = (new_filename or "").strip()
+        if not clean_name:
+            raise ValueError("CSV file name cannot be empty.")
+        if os.path.basename(clean_name) != clean_name:
+            raise ValueError("Enter a file name only, not a full path.")
+        if not clean_name.lower().endswith(".csv"):
+            clean_name += ".csv"
+
+        current_path = getattr(self, attr_name)
+        new_path = os.path.join(self.root_directory, clean_name)
+
+        if os.path.abspath(current_path) == os.path.abspath(new_path):
+            return new_path
+
+        with self.lock:
+            if os.path.exists(new_path):
+                raise FileExistsError(f"Destination file {new_path} already exists.")
+
+            if current_path and os.path.exists(current_path):
+                shutil.move(current_path, new_path)
+            else:
+                self.setup_csv(new_path, headers)
+
+            setattr(self, attr_name, new_path)
+
+        self.logger.info(f"{csv_kind.title()} CSV file path updated: {new_path}")
+        return new_path

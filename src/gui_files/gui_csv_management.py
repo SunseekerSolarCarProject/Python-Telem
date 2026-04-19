@@ -1,28 +1,31 @@
-﻿# src/gui_files/gui_csv_management.py
+# src/gui_files/gui_csv_management.py
 
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QLabel,
-    QPushButton,
-    QInputDialog,
-    QFileDialog,
-    QMessageBox,
-    QLineEdit,
-    QGroupBox,
-    QGridLayout,
-    QHBoxLayout,
-    QSizePolicy,
-)
-import os
 import logging
+import os
+
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import (
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
 
 class CSVManagementTab(QWidget):
     """
-    Tab for managing CSV files: viewing current file paths,
-    saving them to other locations, and changing the save directory.
+    Tab for managing CSV files: viewing current file paths, saving them elsewhere, changing the save directory,
+    renaming the active files, and importing/exporting telemetry bundles.
     """
+
     export_bundle_requested = pyqtSignal(str, str)
     import_bundle_requested = pyqtSignal(str, bool)
 
@@ -34,55 +37,64 @@ class CSVManagementTab(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        # -- Current locations --
         paths_group = QGroupBox("Current CSV locations")
         paths_layout = QGridLayout(paths_group)
         paths_layout.setColumnStretch(1, 1)
+        paths_layout.setHorizontalSpacing(10)
+        paths_layout.setVerticalSpacing(6)
 
-        self.primary_path_edit = QLineEdit()
-        self.primary_path_edit.setReadOnly(True)
-        self.primary_path_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.primary_path_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.primary_path_edit = self._create_path_edit()
+        self.secondary_path_edit = self._create_path_edit()
+        self.training_path_edit = self._create_path_edit()
 
-        self.secondary_path_edit = QLineEdit()
-        self.secondary_path_edit.setReadOnly(True)
-        self.secondary_path_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.secondary_path_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        primary_label = QLabel("Primary CSV:")
+        secondary_label = QLabel("Secondary CSV:")
+        training_label = QLabel("Training CSV:")
+        for label in (primary_label, secondary_label, training_label):
+            label.setStyleSheet("font-weight: bold;")
 
-        paths_layout.addWidget(QLabel("Primary CSV:"), 0, 0)
+        primary_rename_btn = QPushButton("Rename...")
+        primary_rename_btn.clicked.connect(lambda: self.rename_csv_file("primary", "Primary CSV"))
+
+        secondary_rename_btn = QPushButton("Rename...")
+        secondary_rename_btn.clicked.connect(lambda: self.rename_csv_file("secondary", "Secondary CSV"))
+
+        training_rename_btn = QPushButton("Rename...")
+        training_rename_btn.clicked.connect(lambda: self.rename_csv_file("training", "Training CSV"))
+
+        paths_layout.addWidget(primary_label, 0, 0)
         paths_layout.addWidget(self.primary_path_edit, 0, 1)
-        paths_layout.addWidget(QLabel("Secondary CSV:"), 1, 0)
+        paths_layout.addWidget(primary_rename_btn, 0, 2)
+
+        paths_layout.addWidget(secondary_label, 1, 0)
         paths_layout.addWidget(self.secondary_path_edit, 1, 1)
+        paths_layout.addWidget(secondary_rename_btn, 1, 2)
+
+        paths_layout.addWidget(training_label, 2, 0)
+        paths_layout.addWidget(self.training_path_edit, 2, 1)
+        paths_layout.addWidget(training_rename_btn, 2, 2)
 
         layout.addWidget(paths_group)
 
-        # -- Actions --
         actions_group = QGroupBox("Actions")
         buttons_layout = QHBoxLayout(actions_group)
-        buttons_layout.setSpacing(10)
+        buttons_layout.setSpacing(8)
+        buttons_layout.setContentsMargins(8, 8, 8, 8)
 
-        save_primary_btn = QPushButton("Save Primary CSVâ€¦")
-        save_primary_btn.clicked.connect(self.save_primary_csv_data)
-        buttons_layout.addWidget(save_primary_btn)
+        def _btn(text, slot):
+            btn = QPushButton(text)
+            btn.setMinimumWidth(150)
+            btn.clicked.connect(slot)
+            return btn
 
-        save_secondary_btn = QPushButton("Save Secondary CSVâ€¦")
-        save_secondary_btn.clicked.connect(self.save_secondary_csv_data)
-        buttons_layout.addWidget(save_secondary_btn)
-
-        change_location_btn = QPushButton("Change Save Folderâ€¦")
-        change_location_btn.clicked.connect(self.change_csv_save_location)
-        buttons_layout.addWidget(change_location_btn)
-
-        export_bundle_btn = QPushButton("Export Telemetry Bundle…")
-        export_bundle_btn.clicked.connect(self.request_bundle_export)
-        buttons_layout.addWidget(export_bundle_btn)
-
-        import_bundle_btn = QPushButton("Import Telemetry Bundle…")
-        import_bundle_btn.clicked.connect(self.request_bundle_import)
-        buttons_layout.addWidget(import_bundle_btn)
-
+        buttons_layout.addWidget(_btn("Save Primary CSV...", self.save_primary_csv_data))
+        buttons_layout.addWidget(_btn("Save Secondary CSV...", self.save_secondary_csv_data))
+        buttons_layout.addWidget(_btn("Change Save Folder...", self.change_csv_save_location))
+        buttons_layout.addWidget(_btn("Export Telemetry Bundle...", self.request_bundle_export))
+        buttons_layout.addWidget(_btn("Import Telemetry Bundle...", self.request_bundle_import))
 
         buttons_layout.addStretch(1)
         layout.addWidget(actions_group)
@@ -90,20 +102,28 @@ class CSVManagementTab(QWidget):
 
         self._refresh_labels()
 
+    def _create_path_edit(self):
+        path_edit = QLineEdit()
+        path_edit.setReadOnly(True)
+        path_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        path_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return path_edit
+
     def _refresh_labels(self):
-        """Update the two pathâ€display labels from the handler."""
+        """Update the active path displays from the handler."""
         try:
             primary = self.csv_handler.get_csv_file_path()
             secondary = self.csv_handler.get_secondary_csv_file_path()
-        except Exception as e:
-            self.logger.error(f"Error fetching CSV paths: {e}")
+            training = self.csv_handler.get_training_data_csv_path()
+        except Exception as exc:
+            self.logger.error(f"Error fetching CSV paths: {exc}")
             primary = "<error>"
             secondary = "<error>"
+            training = "<error>"
 
-        if hasattr(self, 'primary_path_edit'):
-            self.primary_path_edit.setText(primary)
-        if hasattr(self, 'secondary_path_edit'):
-            self.secondary_path_edit.setText(secondary)
+        self.primary_path_edit.setText(primary)
+        self.secondary_path_edit.setText(secondary)
+        self.training_path_edit.setText(training)
 
     def save_primary_csv_data(self):
         """Ask user where to save a copy of the primary CSV."""
@@ -118,10 +138,8 @@ class CSVManagementTab(QWidget):
         )
         if not dest:
             return
-
         if not dest.lower().endswith(".csv"):
             dest += ".csv"
-
         if os.path.exists(dest):
             reply = QMessageBox.question(
                 self,
@@ -132,14 +150,13 @@ class CSVManagementTab(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-
         try:
             self.csv_handler.finalize_csv(src, dest)
             QMessageBox.information(self, "Success", f"Primary CSV saved to:\n{dest}")
             self.logger.info(f"Primary CSV saved to {dest}")
-        except Exception as e:
-            self.logger.error(f"Error saving primary CSV: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to save primary CSV:\n{e}")
+        except Exception as exc:
+            self.logger.error(f"Error saving primary CSV: {exc}")
+            QMessageBox.critical(self, "Error", f"Failed to save primary CSV:\n{exc}")
 
     def save_secondary_csv_data(self):
         """Ask user where to save a copy of the secondary CSV."""
@@ -154,10 +171,8 @@ class CSVManagementTab(QWidget):
         )
         if not dest:
             return
-
         if not dest.lower().endswith(".csv"):
             dest += ".csv"
-
         if os.path.exists(dest):
             reply = QMessageBox.question(
                 self,
@@ -168,26 +183,25 @@ class CSVManagementTab(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-
         try:
             self.csv_handler.finalize_csv(src, dest)
             QMessageBox.information(self, "Success", f"Secondary CSV saved to:\n{dest}")
             self.logger.info(f"Secondary CSV saved to {dest}")
-        except Exception as e:
-            self.logger.error(f"Error saving secondary CSV: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to save secondary CSV:\n{e}")
+        except Exception as exc:
+            self.logger.error(f"Error saving secondary CSV: {exc}")
+            QMessageBox.critical(self, "Error", f"Failed to save secondary CSV:\n{exc}")
 
     def change_csv_save_location(self):
         """Let the user pick a new folder; update CSVHandler and labels."""
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select CSV Save Directory"
-        )
+        directory = QFileDialog.getExistingDirectory(self, "Select CSV Save Directory")
         if not directory:
             return
-
         try:
-            self.csv_handler.set_csv_save_directory(directory)
+            self.csv_handler.set_csv_save_directory(
+                directory,
+                preserve_filenames=True,
+                move_existing_files=True,
+            )
             self._refresh_labels()
             QMessageBox.information(
                 self,
@@ -195,9 +209,9 @@ class CSVManagementTab(QWidget):
                 f"CSV save directory changed to:\n{directory}"
             )
             self.logger.info(f"CSV save directory set to {directory}")
-        except Exception as e:
-            self.logger.error(f"Error changing CSV save directory: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to change directory:\n{e}")
+        except Exception as exc:
+            self.logger.error(f"Error changing CSV save directory: {exc}")
+            QMessageBox.critical(self, "Error", f"Failed to change directory:\n{exc}")
 
     def request_bundle_export(self):
         """Prompt user for export destination and optional notes, then emit signal."""
@@ -251,6 +265,32 @@ class CSVManagementTab(QWidget):
         )
         activate = reply == QMessageBox.StandardButton.Yes
         self.import_bundle_requested.emit(bundle_path, activate)
+
+    def rename_csv_file(self, csv_kind, label):
+        """Rename the active CSV file and refresh the displayed paths."""
+        path_getters = {
+            "primary": self.csv_handler.get_csv_file_path,
+            "secondary": self.csv_handler.get_secondary_csv_file_path,
+            "training": self.csv_handler.get_training_data_csv_path,
+        }
+        current_name = os.path.basename(path_getters[csv_kind]())
+        new_name, ok = QInputDialog.getText(
+            self,
+            f"Rename {label}",
+            "New file name:",
+            text=current_name,
+        )
+        if not ok:
+            return
+
+        try:
+            new_path = self.csv_handler.change_csv_file_name(csv_kind, new_name)
+            self._refresh_labels()
+            QMessageBox.information(self, "File Renamed", f"{label} now points to:\n{new_path}")
+            self.logger.info(f"{label} renamed to {new_path}")
+        except Exception as exc:
+            self.logger.error(f"Error renaming {label}: {exc}")
+            QMessageBox.critical(self, "Rename Failed", f"Failed to rename {label}:\n{exc}")
 
     def refresh_paths(self):
         """Public helper to refresh path labels from handler."""

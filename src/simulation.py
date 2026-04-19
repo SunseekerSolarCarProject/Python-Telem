@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import os
 import random
 import threading
@@ -58,12 +58,14 @@ class _SyntheticWorker(QObject):
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, scenario: str, interval: float, stop_event: threading.Event):
+    def __init__(self, scenario: str, interval: float, stop_event: threading.Event, profile: dict):
         super().__init__()
         self.scenario = scenario
         self.interval = max(0.05, interval)
         self.stop_event = stop_event
-        self.steps = 240
+        self.profile = profile or {}
+        duration_s = max(1.0, float(self.profile.get("duration_s", 240.0)))
+        self.steps = max(1, int(duration_s / self.interval))
 
     def run(self):
         try:
@@ -81,20 +83,21 @@ class _SyntheticWorker(QObject):
     def _generate_sample(self, step: int) -> dict:
         timestamp = datetime.utcnow().isoformat(timespec="seconds")
         phase = step / max(1, self.steps - 1)
-        base_voltage = 120.0
-        base_current = 30.0
-        if self.scenario == "High Load":
-            base_voltage -= 5.0 * phase
-            base_current += 15.0 * phase
-        elif self.scenario == "Charging Spike":
-            base_voltage += 10.0 * (1 - phase)
-            base_current -= 20.0 * (1 - phase)
+        base_voltage = float(self.profile.get("base_voltage", 120.0))
+        base_current = float(self.profile.get("base_current", 30.0))
+        voltage_delta = float(self.profile.get("voltage_delta", 0.0))
+        current_delta = float(self.profile.get("current_delta", 0.0))
+        speed_start = float(self.profile.get("speed_start", 20.0))
+        speed_end = float(self.profile.get("speed_end", 18.0))
+        temp_base = float(self.profile.get("temp_base", 35.0))
+        temp_rise = float(self.profile.get("temp_rise", 10.0))
 
-        noise = lambda scale=1.0: random.uniform(-scale, scale)
-        velocity = max(0.0, 20.0 + 10.0 * (1 - phase) + noise(1.5))
-        rpm = velocity * 25.0 + noise(20.0)
-        bus_current = max(0.0, base_current + noise(3.0))
-        bus_voltage = base_voltage + noise(1.5)
+        bus_voltage = base_voltage + voltage_delta * phase + random.uniform(-1.5, 1.5)
+        bus_current = max(0.0, base_current + current_delta * phase + random.uniform(-3.0, 3.0))
+        velocity = max(0.0, speed_start + (speed_end - speed_start) * phase + random.uniform(-1.5, 1.5))
+        rpm = velocity * 25.0 + random.uniform(-20.0, 20.0)
+        temp1 = temp_base + temp_rise * phase + random.uniform(-0.5, 0.5)
+        temp2 = temp_base + (temp_rise + 2.0) * phase + random.uniform(-0.5, 0.5)
 
         return {
             "timestamp": timestamp,
@@ -103,17 +106,17 @@ class _SyntheticWorker(QObject):
             "MC1BUS_Current": round(bus_current, 2),
             "MC1VEL_Speed": round(velocity, 2),
             "MC1VEL_RPM": round(rpm, 1),
-            "MC1TP1_Heatsink_Temp": round(35.0 + 10 * phase + noise(0.5), 2),
-            "MC1TP1_Motor_Temp": round(38.0 + 12 * phase + noise(0.5), 2),
-            "MC2BUS_Voltage": round(bus_voltage - noise(0.8), 2),
-            "MC2BUS_Current": round(bus_current - noise(2.0), 2),
-            "MC2VEL_Speed": round(max(0.0, velocity + noise(1.0)), 2),
-            "MC2VEL_RPM": round(rpm + noise(30.0), 1),
+            "MC1TP1_Heatsink_Temp": round(temp1, 2),
+            "MC1TP1_Motor_Temp": round(temp2, 2),
+            "MC2BUS_Voltage": round(bus_voltage + random.uniform(-0.8, 0.8), 2),
+            "MC2BUS_Current": round(max(0.0, bus_current + random.uniform(-2.0, 2.0)), 2),
+            "MC2VEL_Speed": round(max(0.0, velocity + random.uniform(-1.0, 1.0)), 2),
+            "MC2VEL_RPM": round(rpm + random.uniform(-30.0, 30.0), 1),
             "Battery_Pack_Power_W": round(bus_voltage * bus_current, 2),
             "Battery_Pack_Power_kW": round(bus_voltage * bus_current / 1000.0, 3),
             "Battery_C_Rate": round(bus_current / 60.0, 3),
-            "Predicted_Remaining_Time": round(max(0.5, 3.5 - 2.0 * phase + noise(0.2)), 2),
-            "Predicted_BreakEven_Speed": round(max(5.0, 18.0 - 6.0 * phase + noise(0.7)), 2),
+            "Predicted_Remaining_Time": round(max(0.5, 3.5 - 2.0 * phase + random.uniform(-0.2, 0.2)), 2),
+            "Predicted_BreakEven_Speed": round(max(5.0, 18.0 - 6.0 * phase + random.uniform(-0.7, 0.7)), 2),
         }
 
 
@@ -151,10 +154,12 @@ class TelemetrySimulator(QObject):
         worker = _ReplayWorker(file_path, interval, self._stop_event)
         self._start_worker(worker, mode="replay")
 
-    def start_synthetic(self, scenario: str, speed: float = 1.0):
+    def start_synthetic(self, scenario: str, speed: float = 1.0, profile: dict | None = None):
         self.stop()
         interval = max(0.05, 1.0 / max(0.1, speed))
-        worker = _SyntheticWorker(scenario, interval, self._stop_event)
+        base = self._default_profile(scenario)
+        merged = {**base, **(profile or {})}
+        worker = _SyntheticWorker(scenario, interval, self._stop_event, merged)
         self._start_worker(worker, mode=f"synthetic:{scenario}")
 
     def _start_worker(self, worker: QObject, mode: str):
@@ -177,3 +182,42 @@ class TelemetrySimulator(QObject):
         self._thread = None
         self._worker = None
         self._stop_event = threading.Event()
+
+    def _default_profile(self, scenario: str) -> dict:
+        defaults = {
+            "Nominal Cruise": {
+                "base_voltage": 120.0,
+                "base_current": 28.0,
+                "voltage_delta": -2.0,
+                "current_delta": 3.0,
+                "speed_start": 22.0,
+                "speed_end": 20.0,
+                "temp_base": 35.0,
+                "temp_rise": 8.0,
+                "duration_s": 240.0,
+            },
+            "High Load": {
+                "base_voltage": 118.0,
+                "base_current": 35.0,
+                "voltage_delta": -10.0,
+                "current_delta": 20.0,
+                "speed_start": 24.0,
+                "speed_end": 16.0,
+                "temp_base": 40.0,
+                "temp_rise": 18.0,
+                "duration_s": 300.0,
+            },
+            "Charging Spike": {
+                "base_voltage": 125.0,
+                "base_current": 10.0,
+                "voltage_delta": 12.0,
+                "current_delta": -20.0,
+                "speed_start": 10.0,
+                "speed_end": 0.0,
+                "temp_base": 30.0,
+                "temp_rise": 6.0,
+                "duration_s": 180.0,
+            },
+            "Custom": {},
+        }
+        return defaults.get(scenario, defaults["Nominal Cruise"]).copy()
