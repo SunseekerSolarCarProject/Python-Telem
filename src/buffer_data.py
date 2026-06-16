@@ -57,6 +57,8 @@ class BufferData:
 
         :param new_data: Dictionary containing new telemetry data.
         """
+        # Each serial line only carries a small slice of the car state. This
+        # dictionary is the latest-known snapshot assembled across many lines.
         self.combined_data.update(new_data)
         self.logger.debug(f"Combined data updated with: {new_data}")
 
@@ -118,11 +120,14 @@ class BufferData:
             self.logger.debug("Data buffer is empty. Nothing to flush.")
             return None  # Nothing to flush
 
-        # Fill missing fields with default values
+        # Fill missing fields with default values so CSV rows keep a stable
+        # schema even when a flush happens before every sensor has reported.
         for field in self.csv_headers:
             self.combined_data.setdefault(field, "N/A")
 
-        # Add battery-related metrics
+        # Add derived battery metrics. The shunt current is integrated over a
+        # fixed interval inside ExtraCalculations.update_used_Ah, while BP_PVS_Ah
+        # comes from the packet itself; both estimates are kept for comparison.
         shunt_current = self.safe_float(self.combined_data.get('BP_ISH_Amps', 0))
         used_ah = self.safe_float(self.extra_calculations.update_used_Ah(used_ah , shunt_current))
         self.logger.debug(f"Used_Ah2 is updated so often {used_ah}")
@@ -164,6 +169,8 @@ class BufferData:
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
         if write_to_csv:
+            # Simulations can use the same processing path without polluting the
+            # real collection CSVs; callers control that with write_to_csv.
             self.csv_handler.append_to_csv(filename, self.combined_data)
             self.save_training_data()
         self.data_buffer.clear()
@@ -181,7 +188,8 @@ class BufferData:
             self.logger.debug("No combined data to save for training.")
             return
 
-        # grab floats (0.0 if conversion fails)
+        # Training rows are deliberately sparse: the ML models only need these
+        # stable features/targets, so noisy display-only fields are left out.
         pvs_ma_s = self.safe_float(self.combined_data.get('BP_PVS_milliamp*s', None), default=None)
         pvs_ah   = self.safe_float(self.combined_data.get('BP_PVS_Ah', None), default=None)
         pvs_v    = self.safe_float(self.combined_data.get('BP_PVS_Voltage', None), default=None)

@@ -57,9 +57,12 @@ class SerialReaderThread(QThread):
                 self.logger.info(f"Opened serial port {self.port} at {self.baudrate}")
                 while self.running:
                     if ser.in_waiting:
+                        # Keep serial IO off the GUI thread. Emitting signals lets Qt
+                        # marshal the decoded line back to TelemetryApplication safely.
                         raw_line = ser.readline().decode('utf-8', errors='replace').strip()
                         if raw_line:
-                            # Only debug-log if level allows
+                            # Emit both streams: one is parsed into fields, the other is
+                            # archived verbatim so bad parser assumptions can be audited.
                             self.logger.debug(f"Raw data: {raw_line}")
                             self.data_received.emit(raw_line)
                             self.raw_data_received.emit(raw_line)

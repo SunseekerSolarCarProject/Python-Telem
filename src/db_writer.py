@@ -55,6 +55,9 @@ class TelemetryDBWriter:
             if self._table_ready:
                 return
             table = self.config.table
+            # Table names cannot be parameterized by pymysql. The application
+            # validates TELEMETRY_DB_TABLE before creating DBConfig, so this
+            # formatting step is limited to an allowlisted identifier shape.
             create_sql = (
                 f"CREATE TABLE IF NOT EXISTS `{table}` ("
                 "id BIGINT AUTO_INCREMENT PRIMARY KEY, "
@@ -80,6 +83,8 @@ class TelemetryDBWriter:
             measurement = payload.get("measurement")
             device_tag = tags.get("device")
             vehicle_year = tags.get("vehicle_year")
+            # Store the full event as JSON for replay/debugging, while also
+            # breaking out the common query fields for simple database filters.
             payload_json = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
             insert_sql = (
                 f"INSERT INTO `{table}` "

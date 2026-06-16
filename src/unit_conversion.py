@@ -4,7 +4,8 @@ from extra_calculations import ExtraCalculations
 
 calc = ExtraCalculations()
 
-#Build the two mode‐specific label dicts
+# These builders intentionally return copies. The GUI can swap labels between
+# metric and imperial modes without mutating the canonical KEY_UNITS table.
 def build_metric_units_dict():
     m = KEY_UNITS.copy()
     overrides = {
@@ -48,7 +49,9 @@ def build_imperial_units_dict():
     i.update(overrides)
     return i
 
-# Conversion lookup:  (original → target) pairs → function
+# Conversion lookup: (original unit, target unit) -> conversion function.
+# convert_value uses KEY_UNITS as the source-of-truth for what the raw telemetry
+# value means, then this map applies only the conversions the UI asks for.
 _conversion_map = {
     # m/s ↔ ft/s
     ("m/s", "ft/s"):  calc.convert_mps_to_fps,
@@ -85,6 +88,8 @@ def convert_value(key: str, raw_value, target_unit: str):
     if raw_value is None or not isinstance(raw_value, (int,float)):
         return raw_value
 
+    # Unknown keys or same-unit requests fall through unchanged. That makes new
+    # telemetry fields displayable before a conversion has been explicitly added.
     orig_unit = KEY_UNITS.get(key, "")
     fn = _conversion_map.get((orig_unit, target_unit))
     return fn(raw_value) if fn else raw_value

@@ -138,7 +138,9 @@ class DataProcessor:
             # Convert hex string to bytes
             bytes_data = bytes.fromhex(hex_data)
 
-            # Determine format based on endianness
+            # The microcontroller sends raw IEEE-754 bytes. The chosen
+            # endianness must match the firmware/config dialog or the decoded
+            # values will look valid but be physically meaningless.
             if self.endianness == 'big':
                 fmt = '>f'  # Big endian float
             elif self.endianness == 'little':
@@ -179,7 +181,9 @@ class DataProcessor:
             # Convert hex string to bytes
             bytes_data = bytes.fromhex(hex_data)
         
-            # Reverse bytes for little endian
+            # For flag packets we care about bit positions, not numeric value.
+            # Reversing bytes preserves the firmware's little-endian ordering
+            # before the later slices pick out flag groups.
             if self.endianness == 'little':
                 bytes_data = bytes_data[::-1]
         
@@ -219,7 +223,9 @@ class DataProcessor:
             can_transmit_error_count = int(bits1[8:16], 2)
             active_motor_info = int(bits1[16:32], 2)
 
-            # Second string (hex2) parsing for error and limit flags
+            # Second string (hex2) parsing for error and limit flags. The
+            # description lists below are indexed from the least-significant bit,
+            # so parse_error_and_limit_flags reverses each bit string.
             error_bits = bits2[0:16]  # Error flags (bits 31-16)
             limit_bits = bits2[16:32]  # Limit flags (bits 15-0)
             errors, limits = self.parse_error_and_limit_flags(error_bits, limit_bits)
@@ -261,6 +267,8 @@ class DataProcessor:
             return {}
 
     def parse_data(self, data_line):
+        # Incoming lines are usually "KEY,HEX1,HEX2". Some firmware messages,
+        # such as TL_TIM, are special-cased below because they are not floats.
         parts = data_line.strip().split(',')
         processed_data = {}
 
@@ -320,7 +328,8 @@ class DataProcessor:
                 else:
                     self.logger.error(f"Failed to parse {key} data.")
             else:
-                # Generic float conversion for all other data
+                # Most packets carry two 32-bit floats. The key decides what the
+                # two values mean and which canonical TelemetryKey names they use.
                 float1 = self.hex_to_float(hex1)
                 float2 = self.hex_to_float(hex2)
                 self.logger.debug(f"Converted hex to floats: {hex1} -> {float1}, {hex2} -> {float2}")

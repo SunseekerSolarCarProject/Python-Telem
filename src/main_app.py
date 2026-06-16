@@ -31,7 +31,11 @@ from central_logger import CentralLogger  # Import the CentralLogger class
 
 
 def main():
-    # Set default logging level
+    # Keep startup concerns here and leave telemetry flow to TelemetryApplication.
+    # This file is intentionally small because PyInstaller also uses these imports
+    # to discover runtime dependencies for the packaged executable.
+
+    # Set default logging level.
     default_log_level = 'INFO'
     log_level = getattr(logging, default_log_level.upper(), logging.INFO)
 
@@ -55,7 +59,7 @@ def main():
     # Initialize the centralized logger with the folder path
     central_logger = CentralLogger(log_file=log_file_path, level=log_level)
 
-    # Initialize QApplication
+    # QApplication must exist before any widgets or dialogs are created.
     app = QApplication(sys.argv)
 
     # ---------------------------------------------------------------------
@@ -69,7 +73,8 @@ def main():
     startup_success = telemetry_app.start()
 
     if not startup_success:
-        # Exit the application if configuration was canceled or failed
+        # A false return usually means the user canceled the configuration dialog,
+        # so exit cleanly instead of showing a stack trace.
         central_logger.get_logger(__name__).info("Startup failed or was canceled. Exiting application.")
         sys.exit(0)
 

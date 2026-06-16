@@ -30,6 +30,9 @@ from dotenv import load_dotenv
 
 
 def _load_env_file() -> Path | None:
+    # Packaged builds, source runs, and tests all start from different working
+    # directories. Try the most likely .env locations before falling back to
+    # python-dotenv's default search behavior.
     candidates = []
     try:
         module_dir = Path(__file__).resolve().parent
@@ -177,6 +180,8 @@ class TelemetryApplication(QObject):
         self.storage_mode = (os.getenv("TELEMETRY_STORAGE_MODE") or "http").strip().lower()
         self.db_writer = None
         if self.storage_mode in ("db", "database", "mariadb", "mysql", "both"):
+            # Database support is optional. Missing env vars should not prevent
+            # the app from running when HTTP ingestion is still available.
             config = self._load_db_config()
             if config:
                 self.db_writer = TelemetryDBWriter(config, self.logger)
@@ -417,6 +422,8 @@ class TelemetryApplication(QObject):
 
     def connect_signals(self):
         if not self.signals_connected:
+            # Qt signals form the main event wiring: parsed telemetry fans out to
+            # buffering and every visible tab, while user actions route back here.
             self.gui.save_csv_signal.connect(self.finalize_csv)
             self.gui.change_log_level_signal.connect(self.update_logging_level)
             self.gui.settings_applied_signal.connect(self.handle_settings_applied)
@@ -457,6 +464,9 @@ class TelemetryApplication(QObject):
         return headers
 
     def _build_http_payload(self, payload: dict, data: dict, device_tag: str) -> dict:
+        # Several ingestion services have existed over the life of the project.
+        # Keep payload shape configurable so the same desktop app can talk to
+        # the legacy Influx-style endpoint and the newer IONOS/API shape.
         if API_PAYLOAD_FORMAT == "ionos":
             vehicle = self.vehicle_year or API_VEHICLE or device_tag
             return {
@@ -483,6 +493,8 @@ class TelemetryApplication(QObject):
         }
 
         def convert(value):
+            # requests/json cannot encode NaN/Infinity safely, and database JSON
+            # columns reject many numpy scalar objects. Normalize recursively.
             if isinstance(value, dict):
                 return {str(k): convert(v) for k, v in value.items()}
             if isinstance(value, (list, tuple, set)):
@@ -751,6 +763,8 @@ class TelemetryApplication(QObject):
     def start_serial_reader(self, port, baudrate):
         if not port:
             raise ValueError("No COM port selected.")
+        # SerialReaderThread owns the blocking serial loop. The application only
+        # receives Qt signals, keeping the UI responsive during live telemetry.
         self.serial_reader_thread = SerialReaderThread(
             port,
             baudrate,
@@ -904,6 +918,8 @@ class TelemetryApplication(QObject):
             QMessageBox.critical(self.gui, "Simulation", f"Replay file not found:\n{file_path}")
             return
 
+        # Replay uses the exact same process_data path as live serial data. Pause
+        # the serial thread first so real packets do not interleave with replay.
         self._resume_serial_after_sim = bool(self.serial_reader_thread and self.serial_reader_thread.isRunning())
         if self._resume_serial_after_sim:
             self.stop_serial_reader()
@@ -1007,6 +1023,8 @@ class TelemetryApplication(QObject):
     def process_data(self, data):
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Simulators emit dictionaries that are already parsed; live serial
+            # emits raw comma-separated lines and must pass through DataProcessor.
             if isinstance(data, dict):
                 processed_data = dict(data)
             else:
@@ -1019,6 +1037,9 @@ class TelemetryApplication(QObject):
                 self.buffer.add_data(processed_data)
 
                 if self.buffer.is_ready_to_flush():
+                    # A flush creates a latest-known complete vehicle snapshot,
+                    # writes it when appropriate, and returns it for prediction,
+                    # GUI updates, and external storage.
                     combined_data = self.buffer.flush_buffer(
                         filename=self.csv_handler.get_csv_file_path(),
                         battery_info=self.battery_info,
@@ -1030,7 +1051,9 @@ class TelemetryApplication(QObject):
                         self.logger.error(f"Combined data is not a dict: {combined_data!r}")
                         return
 
-                    # --- build exactly the 3 inputs your battery-life RF expects ---
+                    # The trained models expect exact column names and feature
+                    # counts. Keep this narrow even though combined_data carries
+                    # many more fields for display and logging.
                     feat_batt = {
                         'BP_PVS_milliamp*s': self.buffer.safe_float(
                             combined_data.get('BP_PVS_milliamp*s', 0)
@@ -1075,7 +1098,9 @@ class TelemetryApplication(QObject):
                         be_uncertainty if be_uncertainty is not None else 'N/A'
                     )
 
-                    # --- aggregate quality diagnostics ---
+                    # Diagnostics describe model freshness/quality separately
+                    # from the prediction values, so the GUI can warn without
+                    # hiding the best available estimate.
                     diagnostics = self.quality_diagnostics.evaluate(
                         combined_data.get('timestamp'),
                         batt_details,
@@ -1104,6 +1129,8 @@ class TelemetryApplication(QObject):
         if self._simulation_mode:
             return
         try:
+            # Raw capture is intentionally separate from parsed CSV output. It is
+            # useful when a future parser change needs the original hex packets.
             self.buffer.add_raw_data(raw_data, self.csv_handler.get_secondary_csv_file_path())
         except Exception as e:
             self.logger.error(f"Error processing raw data: {e}")
