@@ -2,7 +2,8 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,
-    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog, QProgressBar, QLineEdit
+    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog, QProgressBar, QLineEdit,
+    QCheckBox
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
@@ -17,6 +18,7 @@ class SettingsTab(QWidget):
     machine_learning_retrain_signal = pyqtSignal()  # Signal to retrain ML model (no args)
     additional_files_selected = pyqtSignal(list) #adding files to the ML model.
     solcast_config_changed = pyqtSignal(str, str, str)
+    telemetry_ingestion_config_changed = pyqtSignal(dict)
 
     # New signals for updater version management
     refresh_versions_requested = pyqtSignal()
@@ -143,6 +145,49 @@ class SettingsTab(QWidget):
         self.solcast_lon_edit = QLineEdit()
         self.solcast_lon_edit.setPlaceholderText("Longitude (optional)")
         layout.addWidget(self.solcast_lon_edit)
+
+        # Telemetry website/API upload settings
+        telemetry_api_label = QLabel("Telemetry Website / API:")
+        telemetry_api_label.setMinimumWidth(200)
+        layout.addWidget(telemetry_api_label)
+
+        self.telemetry_url_edit = QLineEdit()
+        self.telemetry_url_edit.setPlaceholderText("JSON ingest URL, e.g. https://example.com/api/ingest")
+        layout.addWidget(self.telemetry_url_edit)
+
+        self.telemetry_api_key_edit = QLineEdit()
+        self.telemetry_api_key_edit.setPlaceholderText("API key/token (optional)")
+        self.telemetry_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.telemetry_api_key_edit)
+
+        telemetry_storage_row = QHBoxLayout()
+        telemetry_storage_row.addWidget(QLabel("Storage Mode:"))
+        self.telemetry_storage_mode_dropdown = QComboBox()
+        self.telemetry_storage_mode_dropdown.addItems(["http", "both", "db"])
+        telemetry_storage_row.addWidget(self.telemetry_storage_mode_dropdown)
+        telemetry_storage_row.addWidget(QLabel("Auth:"))
+        self.telemetry_auth_scheme_dropdown = QComboBox()
+        self.telemetry_auth_scheme_dropdown.addItems(["auto", "bearer", "x-api-token", "x-api-key", "none"])
+        telemetry_storage_row.addWidget(self.telemetry_auth_scheme_dropdown)
+        layout.addLayout(telemetry_storage_row)
+
+        telemetry_payload_row = QHBoxLayout()
+        telemetry_payload_row.addWidget(QLabel("Payload Format:"))
+        self.telemetry_payload_format_dropdown = QComboBox()
+        self.telemetry_payload_format_dropdown.addItems(["legacy", "ionos", "dual"])
+        telemetry_payload_row.addWidget(self.telemetry_payload_format_dropdown)
+        self.telemetry_expect_json_checkbox = QCheckBox("Require JSON response")
+        self.telemetry_expect_json_checkbox.setChecked(True)
+        telemetry_payload_row.addWidget(self.telemetry_expect_json_checkbox)
+        layout.addLayout(telemetry_payload_row)
+
+        self.telemetry_session_id_edit = QLineEdit()
+        self.telemetry_session_id_edit.setPlaceholderText("Session ID (optional)")
+        layout.addWidget(self.telemetry_session_id_edit)
+
+        self.telemetry_vehicle_edit = QLineEdit()
+        self.telemetry_vehicle_edit.setPlaceholderText("Vehicle identifier override (optional)")
+        layout.addWidget(self.telemetry_vehicle_edit)
 
         # Machine Learning Retrain Button
         machine_learning_label = QLabel("Machine Learning:")
@@ -284,9 +329,26 @@ class SettingsTab(QWidget):
             solcast_lat = ''
             solcast_lon = ''
 
+        telemetry_url = self.telemetry_url_edit.text().strip() if hasattr(self, 'telemetry_url_edit') else ''
+        if telemetry_url and not telemetry_url.lower().startswith(('http://', 'https://')):
+            QMessageBox.warning(self, "Invalid Telemetry URL", "Telemetry ingest URL must start with http:// or https://.")
+            return
+
+        telemetry_config = {
+            'telemetry_ingestion_api_url': telemetry_url,
+            'telemetry_ingestion_api_key': self.telemetry_api_key_edit.text().strip() if hasattr(self, 'telemetry_api_key_edit') else '',
+            'telemetry_ingestion_auth_scheme': self.telemetry_auth_scheme_dropdown.currentText() if hasattr(self, 'telemetry_auth_scheme_dropdown') else 'auto',
+            'telemetry_ingestion_payload_format': self.telemetry_payload_format_dropdown.currentText() if hasattr(self, 'telemetry_payload_format_dropdown') else 'legacy',
+            'telemetry_ingestion_session_id': self.telemetry_session_id_edit.text().strip() if hasattr(self, 'telemetry_session_id_edit') else '',
+            'telemetry_ingestion_vehicle': self.telemetry_vehicle_edit.text().strip() if hasattr(self, 'telemetry_vehicle_edit') else '',
+            'telemetry_ingestion_expect_json': self.telemetry_expect_json_checkbox.isChecked() if hasattr(self, 'telemetry_expect_json_checkbox') else True,
+            'telemetry_storage_mode': self.telemetry_storage_mode_dropdown.currentText() if hasattr(self, 'telemetry_storage_mode_dropdown') else 'http',
+        }
+
         # Emit signal for COM port, baud rate, log level, and endianness changes
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
         self.solcast_config_changed.emit(solcast_key, solcast_lat, solcast_lon)
+        self.telemetry_ingestion_config_changed.emit(telemetry_config)
         status = 'set' if solcast_key else 'empty'
         self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}, Endianness={endianness}, Solcast Key={status}")
 
@@ -425,5 +487,39 @@ class SettingsTab(QWidget):
             if hasattr(self, 'solcast_lon_edit'):
                 self.solcast_lon_edit.setText(str(config_data.get('solcast_longitude', '')))
 
+            if hasattr(self, 'telemetry_url_edit'):
+                self.telemetry_url_edit.setText(config_data.get('telemetry_ingestion_api_url', ''))
+            if hasattr(self, 'telemetry_api_key_edit'):
+                self.telemetry_api_key_edit.setText(config_data.get('telemetry_ingestion_api_key', ''))
+            if hasattr(self, 'telemetry_auth_scheme_dropdown'):
+                self._set_combo_text(
+                    self.telemetry_auth_scheme_dropdown,
+                    config_data.get('telemetry_ingestion_auth_scheme', 'auto')
+                )
+            if hasattr(self, 'telemetry_payload_format_dropdown'):
+                self._set_combo_text(
+                    self.telemetry_payload_format_dropdown,
+                    config_data.get('telemetry_ingestion_payload_format', 'legacy')
+                )
+            if hasattr(self, 'telemetry_session_id_edit'):
+                self.telemetry_session_id_edit.setText(config_data.get('telemetry_ingestion_session_id', ''))
+            if hasattr(self, 'telemetry_vehicle_edit'):
+                self.telemetry_vehicle_edit.setText(config_data.get('telemetry_ingestion_vehicle', ''))
+            if hasattr(self, 'telemetry_expect_json_checkbox'):
+                self.telemetry_expect_json_checkbox.setChecked(
+                    bool(config_data.get('telemetry_ingestion_expect_json', True))
+                )
+            if hasattr(self, 'telemetry_storage_mode_dropdown'):
+                self._set_combo_text(
+                    self.telemetry_storage_mode_dropdown,
+                    config_data.get('telemetry_storage_mode', 'http')
+                )
+
         except Exception as e:
             self.logger.error(f"Failed to set initial settings: {e}")
+
+    def _set_combo_text(self, combo_box, value):
+        value = str(value or '')
+        index = combo_box.findText(value)
+        if index != -1:
+            combo_box.setCurrentIndex(index)

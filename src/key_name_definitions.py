@@ -126,6 +126,22 @@ class TelemetryKey(Enum):
     SOLCAST_FCST_TEMP   = ("Solcast_Fcst_Temp",  "°C")
     SOLCAST_FCST_TIME   = ("Solcast_Fcst_Time",  "ISO")
 
+    # Navigation / GPS
+    NAV_IMU_MPH = ("NAV_IMU_MPH", "mph")
+    NAV_GPS_MPH = ("NAV_GPS_MPH", "mph")
+    NAV_GPS_VALID = ("NAV_GPS_VALID", "")
+    NAV_VEHICLE_MPH = ("NAV_VEHICLE_MPH", "mph")
+    NAV_SOURCE = ("NAV_SOURCE", "")
+    NAV_LATITUDE = ("NAV_LAT", "deg")
+    NAV_LONGITUDE = ("NAV_LON", "deg")
+    NAV_FIX = ("NAV_FIX", "")
+    NAV_AGE_MS = ("NAV_AGE_MS", "ms")
+    NAV_ROUTE_NAME = ("NAV_Route_Name", "")
+    NAV_CHECKPOINT_NAME = ("NAV_Checkpoint_Name", "")
+    NAV_ROUTE_DISTANCE_REMAINING_MI = ("NAV_Route_Distance_Remaining", "mi")
+    NAV_CHECKPOINT_DISTANCE_REMAINING_MI = ("NAV_Checkpoint_Distance_Remaining", "mi")
+    NAV_CHECKPOINT_ETA = ("NAV_Checkpoint_ETA", "hh:mm:ss")
+
     # Remaining Capacity
     REMAINING_CAPACITY_AH = ("Remaining_Capacity_Ah", "Ah")
     CAPACITY_AH = ("capacity_ah", "Ah")

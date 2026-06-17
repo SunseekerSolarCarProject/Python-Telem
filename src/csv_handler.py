@@ -99,7 +99,16 @@ class CSVHandler:
             TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
             TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0],
             TelemetryKey.USED_AH_EXACT_TIME.value[0], TelemetryKey.PREDICTED_BREAK_EVEN_SPEED.value[0], TelemetryKey.PREDICTED_REMAINING_TIME.value[0],
-            TelemetryKey.PREDICTED_EXACT_TIME.value[0]
+            TelemetryKey.PREDICTED_EXACT_TIME.value[0],
+            TelemetryKey.NAV_IMU_MPH.value[0], TelemetryKey.NAV_GPS_MPH.value[0],
+            TelemetryKey.NAV_GPS_VALID.value[0], TelemetryKey.NAV_VEHICLE_MPH.value[0],
+            TelemetryKey.NAV_SOURCE.value[0], TelemetryKey.NAV_LATITUDE.value[0],
+            TelemetryKey.NAV_LONGITUDE.value[0], TelemetryKey.NAV_FIX.value[0],
+            TelemetryKey.NAV_AGE_MS.value[0], TelemetryKey.NAV_ROUTE_NAME.value[0],
+            TelemetryKey.NAV_CHECKPOINT_NAME.value[0],
+            TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0],
+            TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0],
+            TelemetryKey.NAV_CHECKPOINT_ETA.value[0]
         ]
         self.logger.debug(f"Primary headers generated: {ordered_keys}")
         return ordered_keys

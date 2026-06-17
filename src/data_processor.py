@@ -266,6 +266,49 @@ class DataProcessor:
             self.logger.error(f"Error parsing SWC data: hex1={hex1}, hex2={hex2}, Exception: {e}")
             return {}
 
+    def parse_nav_data(self, parts):
+        """
+        Parse NAV key-value telemetry lines.
+
+        Expected format:
+        NAV,IMU_MPH=0.00,GPS_MPH=0.00,GPS_VALID=0,VEHICLE_MPH=0.00,
+        SOURCE=NONE,LAT=0.000000,LON=0.000000,FIX=0,AGE_MS=4294967295
+        """
+        nav_pairs = {}
+        for part in parts[1:]:
+            if "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            nav_pairs[name.strip().upper()] = value.strip()
+
+        def as_float(name, default=0.0):
+            try:
+                return float(nav_pairs.get(name, default))
+            except (TypeError, ValueError):
+                self.logger.warning(f"Invalid NAV float for {name}: {nav_pairs.get(name)}")
+                return default
+
+        def as_int(name, default=0):
+            try:
+                return int(float(nav_pairs.get(name, default)))
+            except (TypeError, ValueError):
+                self.logger.warning(f"Invalid NAV integer for {name}: {nav_pairs.get(name)}")
+                return default
+
+        processed_data = {
+            TelemetryKey.NAV_IMU_MPH.value[0]: as_float("IMU_MPH"),
+            TelemetryKey.NAV_GPS_MPH.value[0]: as_float("GPS_MPH"),
+            TelemetryKey.NAV_GPS_VALID.value[0]: as_int("GPS_VALID"),
+            TelemetryKey.NAV_VEHICLE_MPH.value[0]: as_float("VEHICLE_MPH"),
+            TelemetryKey.NAV_SOURCE.value[0]: nav_pairs.get("SOURCE", "NONE"),
+            TelemetryKey.NAV_LATITUDE.value[0]: as_float("LAT"),
+            TelemetryKey.NAV_LONGITUDE.value[0]: as_float("LON"),
+            TelemetryKey.NAV_FIX.value[0]: as_int("FIX"),
+            TelemetryKey.NAV_AGE_MS.value[0]: as_int("AGE_MS", 0),
+        }
+        self.logger.debug(f"Processed NAV data: {processed_data}")
+        return processed_data
+
     def parse_data(self, data_line):
         # Incoming lines are usually "KEY,HEX1,HEX2". Some firmware messages,
         # such as TL_TIM, are special-cased below because they are not floats.
@@ -301,6 +344,9 @@ class DataProcessor:
                 else:
                     self.logger.warning(f"TL_TIM data line is incomplete: {data_line}")
                 return processed_data
+
+            if key == "NAV":
+                return self.parse_nav_data(parts)
 
             # Handle other lines with at least 3 parts
             if len(parts) < 3:

@@ -29,6 +29,7 @@ from gui_files.gui_settings_tab import SettingsTab
 from gui_files.gui_csv_management import CSVManagementTab
 from gui_files.gui_config_dialog import ConfigDialog
 from gui_files.gui_simulation_tab import SimulationTab
+from gui_files.gui_gps_map_tab import GPSMapTab
 
 from unit_conversion import build_metric_units_dict, build_imperial_units_dict, convert_value
 
@@ -387,6 +388,22 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.SOLCAST_FCST_DNI.value[0],
                 TelemetryKey.SOLCAST_FCST_TEMP.value[0],
             ],
+            "GPS": [
+                TelemetryKey.NAV_IMU_MPH.value[0],
+                TelemetryKey.NAV_GPS_MPH.value[0],
+                TelemetryKey.NAV_GPS_VALID.value[0],
+                TelemetryKey.NAV_VEHICLE_MPH.value[0],
+                TelemetryKey.NAV_SOURCE.value[0],
+                TelemetryKey.NAV_LATITUDE.value[0],
+                TelemetryKey.NAV_LONGITUDE.value[0],
+                TelemetryKey.NAV_FIX.value[0],
+                TelemetryKey.NAV_AGE_MS.value[0],
+                TelemetryKey.NAV_ROUTE_NAME.value[0],
+                TelemetryKey.NAV_CHECKPOINT_NAME.value[0],
+                TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0],
+                TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0],
+                TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
+            ],
             "General": [
                 TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0],
                 TelemetryKey.TOTAL_VOLTAGE.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
@@ -405,6 +422,10 @@ class TelemetryGUI(QWidget):
         # Data Display Tab
         self.data_display_tab = DataDisplayTab(self.units)
         self.tabs.addTab(self.data_display_tab, "Data Display")
+
+        # GPS Map Tab
+        self.gps_map_tab = GPSMapTab()
+        self.tabs.addTab(self.gps_map_tab, "GPS Map")
 
         # Image Annotation Tabs
         try:
@@ -536,8 +557,12 @@ class TelemetryGUI(QWidget):
         try:
             # Exclude 'Errors' and 'Limits' or anything you don't want to graph
 
-            self.last_telemetry_data = telemetry_data.copy()
-            graph_data = {k: v for k, v in telemetry_data.items() if k not in ['Errors', 'Limits']}
+            enriched_data = telemetry_data.copy()
+            route_metrics = self.gps_map_tab.update_data(enriched_data) or {}
+            enriched_data.update(route_metrics)
+
+            self.last_telemetry_data = enriched_data.copy()
+            graph_data = {k: v for k, v in enriched_data.items() if k not in ['Errors', 'Limits']}
 
             self.mc1_tab.update_graphs(graph_data)
             self.mc2_tab.update_graphs(graph_data)
@@ -545,9 +570,9 @@ class TelemetryGUI(QWidget):
             self.pack2_tab.update_graphs(graph_data)
             self.remaining_tab.update_graphs(graph_data)
             self.insights_tab.update_graphs(graph_data)
-            self.data_table_tab.update_data(telemetry_data)
-            self.data_display_tab.update_display(telemetry_data)
-            self.custom_data_table_tab.update_data(telemetry_data)
+            self.data_table_tab.update_data(enriched_data)
+            self.data_display_tab.update_display(enriched_data)
+            self.custom_data_table_tab.update_data(enriched_data)
 
             # Feed battery temperature probe updates into the Battery Image tab
             try:
@@ -555,10 +580,10 @@ class TelemetryGUI(QWidget):
                 t_key = TelemetryKey.BP_TMX_TEMPERATURE.value[0]
                 ts_key = TelemetryKey.TIMESTAMP.value[0]
                 dts_key = TelemetryKey.DEVICE_TIMESTAMP.value[0]
-                if hasattr(self, 'battery_image_tab') and pid_key in telemetry_data and t_key in telemetry_data:
-                    pid_val = telemetry_data.get(pid_key)
-                    temp_val = telemetry_data.get(t_key)
-                    ts_val = telemetry_data.get(ts_key) or telemetry_data.get(dts_key) or None
+                if hasattr(self, 'battery_image_tab') and pid_key in enriched_data and t_key in enriched_data:
+                    pid_val = enriched_data.get(pid_key)
+                    temp_val = enriched_data.get(t_key)
+                    ts_val = enriched_data.get(ts_key) or enriched_data.get(dts_key) or None
                     self.battery_image_tab.update_probe_reading(pid_val, temp_val, ts_val)
             except Exception as e:
                 self.logger.error(f"Image tab update error: {e}")

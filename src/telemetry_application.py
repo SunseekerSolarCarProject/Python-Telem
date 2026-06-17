@@ -94,6 +94,13 @@ class TelemetryApplication(QObject):
         self.solcast_key = SOLCAST_API_KEY
         self.solcast_lat = SOLCAST_LATITUDE
         self.solcast_lon = SOLCAST_LONGITUDE
+        self.telemetry_ingestion_api_url = API_URL
+        self.telemetry_ingestion_api_key = API_KEY or ""
+        self.telemetry_ingestion_auth_scheme = API_AUTH_SCHEME
+        self.telemetry_ingestion_payload_format = API_PAYLOAD_FORMAT
+        self.telemetry_ingestion_session_id = API_SESSION_ID
+        self.telemetry_ingestion_vehicle = API_VEHICLE
+        self.telemetry_ingestion_expect_json = API_EXPECT_JSON
         self.serial_reader_thread = None
         self.signals_connected = False
         self.used_Ah = 0
@@ -115,6 +122,7 @@ class TelemetryApplication(QObject):
             self.solcast_key = existing_settings.get('solcast_api_key', self.solcast_key)
             self.solcast_lat = existing_settings.get('solcast_latitude', self.solcast_lat)
             self.solcast_lon = existing_settings.get('solcast_longitude', self.solcast_lon)
+            self._apply_telemetry_ingestion_settings(existing_settings, save=False)
 
         self.init_buffer()
         self.init_data_processors()
@@ -370,6 +378,14 @@ class TelemetryApplication(QObject):
                 'solcast_api_key': self.solcast_key,
                 'solcast_latitude': self.solcast_lat,
                 'solcast_longitude': self.solcast_lon,
+                'telemetry_ingestion_api_url': self.telemetry_ingestion_api_url,
+                'telemetry_ingestion_api_key': self.telemetry_ingestion_api_key,
+                'telemetry_ingestion_auth_scheme': self.telemetry_ingestion_auth_scheme,
+                'telemetry_ingestion_payload_format': self.telemetry_ingestion_payload_format,
+                'telemetry_ingestion_session_id': self.telemetry_ingestion_session_id,
+                'telemetry_ingestion_vehicle': self.telemetry_ingestion_vehicle,
+                'telemetry_ingestion_expect_json': self.telemetry_ingestion_expect_json,
+                'telemetry_storage_mode': self.storage_mode,
             }
             config['app_settings'] = settings
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -439,6 +455,8 @@ class TelemetryApplication(QObject):
                 self.gui.stop_simulation_requested.connect(self.stop_simulation)
             if hasattr(self.gui.settings_tab, 'solcast_config_changed'):
                 self.gui.settings_tab.solcast_config_changed.connect(self.on_solcast_config_changed)
+            if hasattr(self.gui.settings_tab, 'telemetry_ingestion_config_changed'):
+                self.gui.settings_tab.telemetry_ingestion_config_changed.connect(self.on_telemetry_ingestion_config_changed)
             self.signals_connected = True
             self.logger.debug("Connected GUI signals.")
 
@@ -451,35 +469,38 @@ class TelemetryApplication(QObject):
         headers = {
             "Content-Type": "application/json"
         }
-        if not API_KEY:
+        api_key = (self.telemetry_ingestion_api_key or "").strip()
+        auth_scheme = (self.telemetry_ingestion_auth_scheme or "auto").strip().lower()
+        if not api_key or auth_scheme == "none":
             return headers
 
         # Keep backward compatibility and support common API auth styles.
-        if API_AUTH_SCHEME in ("auto", "bearer"):
-            headers["Authorization"] = f"Bearer {API_KEY}"
-        if API_AUTH_SCHEME in ("auto", "x-api-token"):
-            headers["X-API-Token"] = API_KEY
-        if API_AUTH_SCHEME in ("auto", "x-api-key"):
-            headers["X-API-KEY"] = API_KEY
+        if auth_scheme in ("auto", "bearer"):
+            headers["Authorization"] = f"Bearer {api_key}"
+        if auth_scheme in ("auto", "x-api-token"):
+            headers["X-API-Token"] = api_key
+        if auth_scheme in ("auto", "x-api-key"):
+            headers["X-API-KEY"] = api_key
         return headers
 
     def _build_http_payload(self, payload: dict, data: dict, device_tag: str) -> dict:
         # Several ingestion services have existed over the life of the project.
         # Keep payload shape configurable so the same desktop app can talk to
         # the legacy Influx-style endpoint and the newer IONOS/API shape.
-        if API_PAYLOAD_FORMAT == "ionos":
-            vehicle = self.vehicle_year or API_VEHICLE or device_tag
+        payload_format = (self.telemetry_ingestion_payload_format or "legacy").strip().lower()
+        if payload_format == "ionos":
+            vehicle = self.vehicle_year or self.telemetry_ingestion_vehicle or device_tag
             return {
-                "session_id": API_SESSION_ID,
+                "session_id": self.telemetry_ingestion_session_id,
                 "vehicle": vehicle,
                 "data": data,
                 "timestamp": payload.get("timestamp")
             }
-        if API_PAYLOAD_FORMAT == "dual":
-            vehicle = self.vehicle_year or API_VEHICLE or device_tag
+        if payload_format == "dual":
+            vehicle = self.vehicle_year or self.telemetry_ingestion_vehicle or device_tag
             merged = dict(payload)
             merged.update({
-                "session_id": API_SESSION_ID,
+                "session_id": self.telemetry_ingestion_session_id,
                 "vehicle": vehicle,
                 "data": data,
             })
@@ -541,13 +562,17 @@ class TelemetryApplication(QObject):
                 stats["non_finite"],
             )
         try:
-            response = requests.post(API_URL, json=safe_payload, headers=headers, timeout=5)
+            api_url = (self.telemetry_ingestion_api_url or API_URL).strip()
+            if not api_url:
+                self.logger.debug("Telemetry ingestion URL is empty; skipping HTTP send.")
+                return False
+            response = requests.post(api_url, json=safe_payload, headers=headers, timeout=5)
             response.raise_for_status()
             ctype = (response.headers.get("Content-Type") or "").lower()
             body_prefix = (response.text or "")[:160].strip().lower()
             looks_like_html = "<html" in body_prefix or "<!doctype html" in body_prefix
 
-            if API_EXPECT_JSON and "json" not in ctype:
+            if self.telemetry_ingestion_expect_json and "json" not in ctype:
                 raise requests.exceptions.RequestException(
                     f"Unexpected content type '{ctype or 'unknown'}' from ingest endpoint. "
                     "This usually means the URL points to the website frontend, not the API."
@@ -556,7 +581,7 @@ class TelemetryApplication(QObject):
             if looks_like_html:
                 raise requests.exceptions.RequestException(
                     "Ingest endpoint returned HTML content instead of API response. "
-                    "Check TELEMETRY_INGESTION_API_URL and web routing."
+                    "Check the Telemetry Website / API URL in Settings and web routing."
                 )
 
             self.logger.info("Telemetry data sent successfully (HTTP %s).", response.status_code)
@@ -685,6 +710,14 @@ class TelemetryApplication(QObject):
         config_data_copy.setdefault("solcast_api_key", self.solcast_key)
         config_data_copy.setdefault("solcast_latitude", self.solcast_lat)
         config_data_copy.setdefault("solcast_longitude", self.solcast_lon)
+        config_data_copy.setdefault("telemetry_ingestion_api_url", self.telemetry_ingestion_api_url)
+        config_data_copy.setdefault("telemetry_ingestion_api_key", self.telemetry_ingestion_api_key)
+        config_data_copy.setdefault("telemetry_ingestion_auth_scheme", self.telemetry_ingestion_auth_scheme)
+        config_data_copy.setdefault("telemetry_ingestion_payload_format", self.telemetry_ingestion_payload_format)
+        config_data_copy.setdefault("telemetry_ingestion_session_id", self.telemetry_ingestion_session_id)
+        config_data_copy.setdefault("telemetry_ingestion_vehicle", self.telemetry_ingestion_vehicle)
+        config_data_copy.setdefault("telemetry_ingestion_expect_json", self.telemetry_ingestion_expect_json)
+        config_data_copy.setdefault("telemetry_storage_mode", self.storage_mode)
         self.config_data_copy = config_data_copy
 
         self._save_app_settings()
@@ -706,6 +739,60 @@ class TelemetryApplication(QObject):
         self._save_app_settings()
         self._apply_solcast_settings()
         self.logger.info('Solcast configuration updated via Settings tab.')
+
+    def _apply_telemetry_ingestion_settings(self, config_data: dict, save: bool = True):
+        url = str(config_data.get("telemetry_ingestion_api_url", self.telemetry_ingestion_api_url) or "").strip()
+        api_key = str(config_data.get("telemetry_ingestion_api_key", self.telemetry_ingestion_api_key) or "").strip()
+        auth_scheme = str(config_data.get("telemetry_ingestion_auth_scheme", self.telemetry_ingestion_auth_scheme) or "auto").strip().lower()
+        payload_format = str(config_data.get("telemetry_ingestion_payload_format", self.telemetry_ingestion_payload_format) or "legacy").strip().lower()
+        session_id = str(config_data.get("telemetry_ingestion_session_id", self.telemetry_ingestion_session_id) or "").strip()
+        vehicle = str(config_data.get("telemetry_ingestion_vehicle", self.telemetry_ingestion_vehicle) or "").strip()
+        expect_json = config_data.get("telemetry_ingestion_expect_json", self.telemetry_ingestion_expect_json)
+        storage_mode = str(config_data.get("telemetry_storage_mode", self.storage_mode) or "http").strip().lower()
+
+        if auth_scheme not in ("auto", "bearer", "x-api-token", "x-api-key", "none"):
+            self.logger.warning("Invalid telemetry auth scheme '%s'; using auto.", auth_scheme)
+            auth_scheme = "auto"
+        if payload_format not in ("legacy", "ionos", "dual"):
+            self.logger.warning("Invalid telemetry payload format '%s'; using legacy.", payload_format)
+            payload_format = "legacy"
+        if storage_mode not in ("http", "api", "both", "db", "database", "mariadb", "mysql"):
+            self.logger.warning("Invalid telemetry storage mode '%s'; using http.", storage_mode)
+            storage_mode = "http"
+
+        self.telemetry_ingestion_api_url = url or API_URL
+        self.telemetry_ingestion_api_key = api_key
+        self.telemetry_ingestion_auth_scheme = auth_scheme
+        self.telemetry_ingestion_payload_format = payload_format
+        self.telemetry_ingestion_session_id = session_id or API_SESSION_ID
+        self.telemetry_ingestion_vehicle = vehicle
+        self.telemetry_ingestion_expect_json = bool(expect_json)
+        self.storage_mode = storage_mode
+
+        if self.config_data_copy is None:
+            self.config_data_copy = {}
+        self.config_data_copy.update({
+            "telemetry_ingestion_api_url": self.telemetry_ingestion_api_url,
+            "telemetry_ingestion_api_key": self.telemetry_ingestion_api_key,
+            "telemetry_ingestion_auth_scheme": self.telemetry_ingestion_auth_scheme,
+            "telemetry_ingestion_payload_format": self.telemetry_ingestion_payload_format,
+            "telemetry_ingestion_session_id": self.telemetry_ingestion_session_id,
+            "telemetry_ingestion_vehicle": self.telemetry_ingestion_vehicle,
+            "telemetry_ingestion_expect_json": self.telemetry_ingestion_expect_json,
+            "telemetry_storage_mode": self.storage_mode,
+        })
+
+        if save:
+            self._save_app_settings()
+
+    def on_telemetry_ingestion_config_changed(self, config_data: dict):
+        self._apply_telemetry_ingestion_settings(config_data, save=True)
+        self.logger.info(
+            "Telemetry ingestion settings updated via Settings tab: mode=%s, url=%s, payload=%s",
+            self.storage_mode,
+            self.telemetry_ingestion_api_url,
+            self.telemetry_ingestion_payload_format,
+        )
 
     def start(self):
         return self.run_application()
