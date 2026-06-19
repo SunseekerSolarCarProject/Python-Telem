@@ -59,7 +59,18 @@ To add new battery pack presets to the configuration dialog:
 
 ### Developer Setup
 
-On this Linux device, use a Linux virtual environment separate from any existing Windows-style `.venv` folder:
+Use a virtual environment for local development. Keep OS-specific environments separate if you work across multiple machines, because a `.venv` created on Windows will not run correctly on Linux or macOS.
+
+Windows PowerShell:
+
+```powershell
+py -m venv .venv-windows
+.\.venv-windows\Scripts\Activate.ps1
+pip install -r requirements.txt
+python src/main_app.py
+```
+
+Linux:
 
 ```bash
 python3 -m venv .venv-linux
@@ -68,7 +79,14 @@ pip install -r requirements.txt
 python src/main_app.py
 ```
 
-The existing `.venv` folder may be Windows-oriented. Prefer `.venv-linux` for local Linux development and testing.
+macOS:
+
+```bash
+python3 -m venv .venv-macos
+source .venv-macos/bin/activate
+pip install -r requirements.txt
+python src/main_app.py
+```
 
 ### Code Map
 - `main_app.py` – entry point; wires logging and launches `TelemetryApplication`.
