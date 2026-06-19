@@ -7,7 +7,7 @@
   },
   {
    "optionDest": "filenames",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/main_app.py"
+   "value": "src/main_app.py"
   },
   {
    "optionDest": "onefile",
@@ -19,7 +19,7 @@
   },
   {
    "optionDest": "icon_file",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/assets/logo-icon.ico"
+   "value": "src/assets/logo-icon.ico"
   },
   {
    "optionDest": "name",
@@ -59,59 +59,75 @@
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/gui_files;gui_files/"
+   "value": "src/gui_files;gui_files/"
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/learning_datasets;learning_datasets/"
+   "value": "src/learning_datasets;learning_datasets/"
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/__init__.py;."
+   "value": "src/__init__.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/buffer_data.py;."
+   "value": "src/app_settings.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/central_logger.py;."
+   "value": "src/buffer_data.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/csv_handler.py;."
+   "value": "src/central_logger.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/data_display.py;."
+   "value": "src/csv_handler.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/data_processor.py;."
+   "value": "src/data_display.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/extra_calculations.py;."
+   "value": "src/data_processor.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/key_name_definitions.py;."
+   "value": "src/db_writer.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/serial_reader.py;."
+   "value": "src/extra_calculations.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/telemetry_application.py;."
+   "value": "src/key_name_definitions.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/unit_conversion.py;."
+   "value": "src/serial_reader.py;."
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/Version.py;."
+   "value": "src/simulation.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "src/telemetry_application.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "src/unit_conversion.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "src/Version.py;."
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "pytz"
   },
   {
    "optionDest": "hiddenimports",
@@ -131,19 +147,47 @@
   },
   {
    "optionDest": "hookspath",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/hooks"
+   "value": "src/hooks"
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/updater;updater/"
+   "value": "src/updater;updater/"
   },
   {
    "optionDest": "datas",
-   "value": "E:/Programming_Folder/Python Programs/Python-Telem/src/updater/metadata;metadata/"
+   "value": "src/updater/metadata;updater/metadata/"
   },
   {
    "optionDest": "hiddenimports",
    "value": "tuf.ngclient"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "pandas"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "python-dateutil"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "pytz"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "tzdata"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "scikit-learn"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "scipy"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "numpy"
   }
  ],
  "nonPyinstallerOptions": {

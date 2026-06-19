@@ -58,9 +58,14 @@ jobs:
             --collect-binaries sklearn
             --collect-binaries scipy
             --collect-binaries numpy
+            --copy-metadata pandas
+            --copy-metadata python-dateutil
+            --copy-metadata pytz
+            --copy-metadata tzdata
             --copy-metadata scikit-learn
             --copy-metadata scipy
             --copy-metadata numpy
+            --hidden-import pytz
             --exclude-module sklearn.externals.array_api_compat.torch
             --exclude-module pyqtgraph.opengl
           )
@@ -78,11 +83,13 @@ jobs:
             --add-data "src/updater${{ matrix.sep }}updater/" \
             --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/" \
             --add-data "src/__init__.py${{ matrix.sep }}." \
+            --add-data "src/app_settings.py${{ matrix.sep }}." \
             --add-data "src/buffer_data.py${{ matrix.sep }}." \
             --add-data "src/central_logger.py${{ matrix.sep }}." \
             --add-data "src/csv_handler.py${{ matrix.sep }}." \
             --add-data "src/data_display.py${{ matrix.sep }}." \
             --add-data "src/data_processor.py${{ matrix.sep }}." \
+            --add-data "src/db_writer.py${{ matrix.sep }}." \
             --add-data "src/extra_calculations.py${{ matrix.sep }}." \
             --add-data "src/key_name_definitions.py${{ matrix.sep }}." \
             --add-data "src/serial_reader.py${{ matrix.sep }}." \
