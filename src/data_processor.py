@@ -309,6 +309,35 @@ class DataProcessor:
         self.logger.debug(f"Processed NAV data: {processed_data}")
         return processed_data
 
+    def parse_bme_data(self, parts):
+        """
+        Parse BME environmental sensor key-value telemetry lines.
+
+        Expected format:
+        BME,T=23.65,P=98110.73,H=52.43
+        """
+        bme_pairs = {}
+        for part in parts[1:]:
+            if "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            bme_pairs[name.strip().upper()] = value.strip()
+
+        def as_float(name, default=0.0):
+            try:
+                return float(bme_pairs.get(name, default))
+            except (TypeError, ValueError):
+                self.logger.warning(f"Invalid BME float for {name}: {bme_pairs.get(name)}")
+                return default
+
+        processed_data = {
+            TelemetryKey.BME_TEMPERATURE_C.value[0]: as_float("T"),
+            TelemetryKey.BME_PRESSURE_PA.value[0]: as_float("P"),
+            TelemetryKey.BME_HUMIDITY_PCT.value[0]: as_float("H"),
+        }
+        self.logger.debug(f"Processed BME data: {processed_data}")
+        return processed_data
+
     def parse_data(self, data_line):
         # Incoming lines are usually "KEY,HEX1,HEX2". Some firmware messages,
         # such as TL_TIM, are special-cased below because they are not floats.
@@ -347,6 +376,9 @@ class DataProcessor:
 
             if key == "NAV":
                 return self.parse_nav_data(parts)
+
+            if key == "BME":
+                return self.parse_bme_data(parts)
 
             # Handle other lines with at least 3 parts
             if len(parts) < 3:

@@ -49,6 +49,14 @@ class MapGraphicsView(QGraphicsView):
 
 
 class GPSMapTab(QWidget):
+    """Live map tab with OSM tiles, optional GPX routes, and ETA fields.
+
+    The tab keeps two tile caches: an in-memory LRU cache for the current
+    session and Qt's disk cache for reuse across launches. Telemetry updates
+    move the vehicle marker and trail. Loaded GPX files are route/checkpoint
+    segments used for distance remaining and checkpoint ETA calculations.
+    """
+
     TILE_SIZE = 256
     TILE_RADIUS = 3
     MAX_MEMORY_TILES = 384
@@ -266,6 +274,9 @@ class GPSMapTab(QWidget):
         self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def _render_map(self):
+        # Render the map from scratch so stale tiles, trails, and route paths do
+        # not survive zoom/pan changes. Tile requests are async; placeholders
+        # are replaced in _on_tile_reply as network replies arrive.
         self.scene.clear()
         self.tile_items = {}
         self.visible_tile_keys = set()
@@ -313,6 +324,8 @@ class GPSMapTab(QWidget):
         return max(3, int(math.ceil(widest / self.TILE_SIZE / 2.0)) + 3)
 
     def _create_tile_disk_cache(self):
+        # Qt owns the persistent disk cache. The OrderedDict tile_cache above is
+        # only a bounded memory cache for the visible neighborhood.
         cache = QNetworkDiskCache(self)
         cache_root = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)
         if not cache_root:
@@ -514,6 +527,9 @@ class GPSMapTab(QWidget):
         )
 
     def _load_gpx_route(self):
+        # A GPX file may contain tracks, routes, or waypoints. Treat each loaded
+        # file as one checkpoint segment so race-day route files can be chained
+        # and the next-segment ETA stays readable in the data table.
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Load GPX Route Files",
@@ -569,6 +585,8 @@ class GPSMapTab(QWidget):
         }
 
     def _build_route_metrics(self, speed_mph):
+        # Route metrics are returned as telemetry fields so the normal GUI and
+        # CSV paths can display them without a GPS-map-specific data channel.
         defaults = {
             TelemetryKey.NAV_ROUTE_NAME.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_NAME.value[0]: "N/A",
@@ -604,6 +622,9 @@ class GPSMapTab(QWidget):
         }
 
     def _nearest_route_position(self, lat, lon):
+        # This intentionally checks the sampled GPX points directly. It is
+        # simple and predictable for modest route files; drawing is separately
+        # downsampled so visual rendering stays responsive for large GPX files.
         best = None
         best_distance = float("inf")
         for segment_index, segment in enumerate(self.route_segments):

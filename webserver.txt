@@ -1,0 +1,207 @@
+Telemetry Website Integration Notes
+==================================
+
+Goal
+----
+The Python telemetry application can send vehicle telemetry to a website/API so the website can show the vehicle location, speed, and related data.
+
+Important Clarification
+-----------------------
+The telemetry application does not upload a .json file.
+
+It sends an HTTP POST request with a JSON body to an API endpoint URL.
+
+Example:
+
+    POST https://your-site.com/api/telemetry/ingest
+    Content-Type: application/json
+
+A normal static HTML page cannot securely receive this data by itself. The website needs a backend/API endpoint or serverless function to accept the telemetry POST, validate it, parse it, and store it.
+
+Recommended Data Flow
+---------------------
+Telemetry App
+    Sends JSON telemetry + API key
+
+Backend/API Endpoint
+    Receives POST at /api/telemetry/ingest
+    Validates API key
+    Parses vehicle coordinates and speed
+    Stores latest telemetry data
+
+Website HTML/JavaScript
+    Fetches latest telemetry from /api/telemetry/latest
+    Updates the map/display every 5 minutes
+
+Recommended Endpoints
+---------------------
+1. Ingest endpoint
+
+    POST /api/telemetry/ingest
+
+    Purpose:
+    Receives data from the Python telemetry application.
+
+    Security:
+    Must require an API key or token.
+
+2. Latest telemetry endpoint
+
+    GET /api/telemetry/latest
+
+    Purpose:
+    Used by the website JavaScript to fetch the latest vehicle position and speed.
+
+API Key Handling
+----------------
+The secret API key should only be used between the Python telemetry app and the backend ingest endpoint.
+
+Do not put the secret API key in browser JavaScript.
+
+The telemetry app can send the API key using one of these header styles:
+
+    Authorization: Bearer YOUR_API_KEY
+
+or:
+
+    X-API-KEY: YOUR_API_KEY
+
+or:
+
+    X-API-Token: YOUR_API_KEY
+
+Legacy Payload Format
+---------------------
+A legacy payload looks roughly like this:
+
+    {
+      "measurement": "telemetry",
+      "tags": {
+        "device": "device1",
+        "vehicle_year": "2026"
+      },
+      "fields": {
+        "NAV_LAT": 42.291707,
+        "NAV_LON": -85.587229,
+        "NAV_VEHICLE_MPH": 35.2,
+        "NAV_GPS_VALID": 1,
+        "NAV_FIX": 3,
+        "NAV_SOURCE": "GPS",
+        "NAV_AGE_MS": 120
+      },
+      "timestamp": "2026-06-18T12:34:56.000000"
+    }
+
+Main fields needed for live vehicle tracking:
+
+    fields.NAV_LAT
+    fields.NAV_LON
+    fields.NAV_VEHICLE_MPH
+    fields.NAV_GPS_VALID
+    fields.NAV_FIX
+    timestamp
+
+Example Backend Logic
+---------------------
+The backend ingest endpoint should:
+
+    1. Read the API key from the request header.
+    2. Compare it to the expected secret key stored on the server.
+    3. Reject the request if the key is missing or invalid.
+    4. Read request JSON.
+    5. Extract fields.NAV_LAT, fields.NAV_LON, and fields.NAV_VEHICLE_MPH.
+    6. Store the latest location/speed in a database, file, cache, or memory store.
+    7. Return JSON confirming success.
+
+Pseudo-code:
+
+    token = request.headers["x-api-key"]
+
+    if token != EXPECTED_API_KEY:
+        return 401, { "ok": false, "error": "unauthorized" }
+
+    fields = request.json["fields"]
+
+    latest = {
+        "lat": fields["NAV_LAT"],
+        "lon": fields["NAV_LON"],
+        "speed_mph": fields["NAV_VEHICLE_MPH"],
+        "gps_valid": fields["NAV_GPS_VALID"],
+        "fix": fields["NAV_FIX"],
+        "timestamp": request.json["timestamp"]
+    }
+
+    save_latest_telemetry(latest)
+
+    return 200, { "ok": true }
+
+Example Website JavaScript Flow
+-------------------------------
+The website JavaScript should not receive the telemetry POST directly.
+
+Instead, it should periodically fetch the latest stored telemetry:
+
+    async function updateVehicle() {
+      const response = await fetch("/api/telemetry/latest");
+      const data = await response.json();
+
+      const lat = data.lat;
+      const lon = data.lon;
+      const speed = data.speed_mph;
+
+      // Update map marker and speed display here.
+    }
+
+    updateVehicle();
+    setInterval(updateVehicle, 5 * 60 * 1000);
+
+Server Response Requirements
+----------------------------
+If "Require JSON response" is enabled in the telemetry app, the ingest endpoint should return:
+
+    HTTP 200
+    Content-Type: application/json
+
+    { "ok": true }
+
+If the app receives HTML, the ingest URL probably points to the website frontend instead of the backend API endpoint.
+
+Hosting Options
+---------------
+If the current website is only HTML and JavaScript, add one of these:
+
+    Node/Express API
+    Flask or FastAPI API
+    PHP endpoint
+    Cloudflare Worker
+    Netlify Function
+    Vercel Function
+    AWS Lambda/API Gateway
+    Another backend/database API service
+
+What the Website Developer Needs
+--------------------------------
+The telemetry app user should provide:
+
+    Ingest URL:
+        https://your-site.com/api/telemetry/ingest
+
+    API key:
+        A shared secret generated by the website/backend developer.
+
+    Auth style:
+        bearer, x-api-key, x-api-token, or auto.
+
+    Payload format:
+        legacy
+
+    Update rate:
+        The app can send whenever telemetry is flushed. The website can display/fetch every 5 minutes if desired.
+
+Summary
+-------
+The static website can display telemetry, but a backend/API endpoint must receive and store it first.
+
+The browser should fetch already-stored latest telemetry.
+
+The secret ingest API key must stay on the backend and in the Python telemetry app only, never in public browser JavaScript.

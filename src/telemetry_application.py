@@ -2,7 +2,6 @@
 import sys
 import os
 import logging
-import json
 import re
 import math
 import requests
@@ -19,6 +18,7 @@ from buffer_data import BufferData
 from extra_calculations import ExtraCalculations
 from gui_files.gui_display import TelemetryGUI, ConfigDialog  # Adjusted import
 from csv_handler import CSVHandler
+from app_settings import APP_SETTINGS_SECTION, AppSettings, load_config, save_app_settings
 from learning_datasets.machine_learning import MachineLearningModel
 from learning_datasets.quality_diagnostics import QualityDiagnostics
 from simulation import TelemetrySimulator
@@ -252,6 +252,9 @@ class TelemetryApplication(QObject):
             TelemetryKey.TOTAL_CAPACITY_WH.value[0],
             TelemetryKey.TOTAL_CAPACITY_AH.value[0],
             TelemetryKey.TOTAL_VOLTAGE.value[0],
+            TelemetryKey.BME_TEMPERATURE_C.value[0],
+            TelemetryKey.BME_PRESSURE_PA.value[0],
+            TelemetryKey.BME_HUMIDITY_PCT.value[0],
             TelemetryKey.SHUNT_REMAINING_AH.value[0],
             TelemetryKey.USED_AH_REMAINING_AH.value[0],
             TelemetryKey.SHUNT_REMAINING_WH.value[0],
@@ -350,10 +353,13 @@ class TelemetryApplication(QObject):
     def _load_app_settings(self) -> dict:
         path = self._get_config_file_path()
         try:
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                return data.get('app_settings', {})
+            if not os.path.exists(path):
+                return {}
+            config = load_config(path)
+            persisted_settings = config.get(APP_SETTINGS_SECTION)
+            if not persisted_settings:
+                return {}
+            return AppSettings.from_dict(persisted_settings).to_dict()
         except Exception as exc:
             self.logger.debug(f"Failed to load app settings: {exc}")
         return {}
@@ -361,36 +367,26 @@ class TelemetryApplication(QObject):
     def _save_app_settings(self) -> None:
         try:
             path = self._get_config_file_path()
-            config = {}
-            if os.path.exists(path):
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        config = json.load(f)
-                except Exception:
-                    config = {}
-            settings = {
-                'battery_info': self.battery_info,
-                'selected_port': self.selected_port,
-                'logging_level': self.logging_level,
-                'baud_rate': self.baudrate,
-                'endianness': self.endianness,
-                'vehicle_year': self.vehicle_year,
-                'solcast_api_key': self.solcast_key,
-                'solcast_latitude': self.solcast_lat,
-                'solcast_longitude': self.solcast_lon,
-                'telemetry_ingestion_api_url': self.telemetry_ingestion_api_url,
-                'telemetry_ingestion_api_key': self.telemetry_ingestion_api_key,
-                'telemetry_ingestion_auth_scheme': self.telemetry_ingestion_auth_scheme,
-                'telemetry_ingestion_payload_format': self.telemetry_ingestion_payload_format,
-                'telemetry_ingestion_session_id': self.telemetry_ingestion_session_id,
-                'telemetry_ingestion_vehicle': self.telemetry_ingestion_vehicle,
-                'telemetry_ingestion_expect_json': self.telemetry_ingestion_expect_json,
-                'telemetry_storage_mode': self.storage_mode,
-            }
-            config['app_settings'] = settings
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=4)
+            settings = AppSettings.from_dict({
+                "battery_info": self.battery_info,
+                "selected_port": self.selected_port,
+                "logging_level": self.logging_level,
+                "baud_rate": self.baudrate,
+                "endianness": self.endianness,
+                "vehicle_year": self.vehicle_year,
+                "solcast_api_key": self.solcast_key,
+                "solcast_latitude": self.solcast_lat,
+                "solcast_longitude": self.solcast_lon,
+                "telemetry_ingestion_api_url": self.telemetry_ingestion_api_url,
+                "telemetry_ingestion_api_key": self.telemetry_ingestion_api_key,
+                "telemetry_ingestion_auth_scheme": self.telemetry_ingestion_auth_scheme,
+                "telemetry_ingestion_payload_format": self.telemetry_ingestion_payload_format,
+                "telemetry_ingestion_session_id": self.telemetry_ingestion_session_id,
+                "telemetry_ingestion_vehicle": self.telemetry_ingestion_vehicle,
+                "telemetry_ingestion_expect_json": self.telemetry_ingestion_expect_json,
+                "telemetry_storage_mode": self.storage_mode,
+            })
+            save_app_settings(path, settings)
         except Exception as exc:
             self.logger.error(f"Failed to save app settings: {exc}")
 
@@ -741,33 +737,26 @@ class TelemetryApplication(QObject):
         self.logger.info('Solcast configuration updated via Settings tab.')
 
     def _apply_telemetry_ingestion_settings(self, config_data: dict, save: bool = True):
-        url = str(config_data.get("telemetry_ingestion_api_url", self.telemetry_ingestion_api_url) or "").strip()
-        api_key = str(config_data.get("telemetry_ingestion_api_key", self.telemetry_ingestion_api_key) or "").strip()
-        auth_scheme = str(config_data.get("telemetry_ingestion_auth_scheme", self.telemetry_ingestion_auth_scheme) or "auto").strip().lower()
-        payload_format = str(config_data.get("telemetry_ingestion_payload_format", self.telemetry_ingestion_payload_format) or "legacy").strip().lower()
-        session_id = str(config_data.get("telemetry_ingestion_session_id", self.telemetry_ingestion_session_id) or "").strip()
-        vehicle = str(config_data.get("telemetry_ingestion_vehicle", self.telemetry_ingestion_vehicle) or "").strip()
-        expect_json = config_data.get("telemetry_ingestion_expect_json", self.telemetry_ingestion_expect_json)
-        storage_mode = str(config_data.get("telemetry_storage_mode", self.storage_mode) or "http").strip().lower()
+        settings = AppSettings.from_dict({
+            "telemetry_ingestion_api_url": self.telemetry_ingestion_api_url,
+            "telemetry_ingestion_api_key": self.telemetry_ingestion_api_key,
+            "telemetry_ingestion_auth_scheme": self.telemetry_ingestion_auth_scheme,
+            "telemetry_ingestion_payload_format": self.telemetry_ingestion_payload_format,
+            "telemetry_ingestion_session_id": self.telemetry_ingestion_session_id,
+            "telemetry_ingestion_vehicle": self.telemetry_ingestion_vehicle,
+            "telemetry_ingestion_expect_json": self.telemetry_ingestion_expect_json,
+            "telemetry_storage_mode": self.storage_mode,
+            **config_data,
+        })
 
-        if auth_scheme not in ("auto", "bearer", "x-api-token", "x-api-key", "none"):
-            self.logger.warning("Invalid telemetry auth scheme '%s'; using auto.", auth_scheme)
-            auth_scheme = "auto"
-        if payload_format not in ("legacy", "ionos", "dual"):
-            self.logger.warning("Invalid telemetry payload format '%s'; using legacy.", payload_format)
-            payload_format = "legacy"
-        if storage_mode not in ("http", "api", "both", "db", "database", "mariadb", "mysql"):
-            self.logger.warning("Invalid telemetry storage mode '%s'; using http.", storage_mode)
-            storage_mode = "http"
-
-        self.telemetry_ingestion_api_url = url or API_URL
-        self.telemetry_ingestion_api_key = api_key
-        self.telemetry_ingestion_auth_scheme = auth_scheme
-        self.telemetry_ingestion_payload_format = payload_format
-        self.telemetry_ingestion_session_id = session_id or API_SESSION_ID
-        self.telemetry_ingestion_vehicle = vehicle
-        self.telemetry_ingestion_expect_json = bool(expect_json)
-        self.storage_mode = storage_mode
+        self.telemetry_ingestion_api_url = settings.telemetry_ingestion_api_url or API_URL
+        self.telemetry_ingestion_api_key = settings.telemetry_ingestion_api_key
+        self.telemetry_ingestion_auth_scheme = settings.telemetry_ingestion_auth_scheme
+        self.telemetry_ingestion_payload_format = settings.telemetry_ingestion_payload_format
+        self.telemetry_ingestion_session_id = settings.telemetry_ingestion_session_id or API_SESSION_ID
+        self.telemetry_ingestion_vehicle = settings.telemetry_ingestion_vehicle
+        self.telemetry_ingestion_expect_json = settings.telemetry_ingestion_expect_json
+        self.storage_mode = settings.telemetry_storage_mode
 
         if self.config_data_copy is None:
             self.config_data_copy = {}

@@ -57,13 +57,30 @@ To add new battery pack presets to the configuration dialog:
 
 ## Developer Notes
 
+### Developer Setup
+
+On this Linux device, use a Linux virtual environment separate from any existing Windows-style `.venv` folder:
+
+```bash
+python3 -m venv .venv-linux
+source .venv-linux/bin/activate
+pip install -r requirements.txt
+python src/main_app.py
+```
+
+The existing `.venv` folder may be Windows-oriented. Prefer `.venv-linux` for local Linux development and testing.
+
 ### Code Map
 - `main_app.py` – entry point; wires logging and launches `TelemetryApplication`.
-- `telemetry_application.py` – central coordinator: GUI creation, serial reader lifecycle, buffering, ML predictions, telemetry server upload, and simulation handling.
+- `telemetry_application.py` – central coordinator: GUI creation, serial reader lifecycle, buffering, ML predictions, telemetry storage handoff, and simulation handling.
+- `app_settings.py` – canonical `config.json` settings names, defaults, and load/save helpers.
 - `buffer_data.py` / `csv_handler.py` – ingest buffering, CSV/training persistence, and bundle import/export helpers.
 - `learning_datasets/` – machine-learning pipelines and quality diagnostics.
 - `gui_files/` – modular PyQt tabs (data display, graphs, images, simulation, settings, CSV management).
 - `simulation.py` – worker threads for replaying recorded telemetry and generating synthetic scenarios.
+- `docs/ARCHITECTURE.md` – higher-level module boundaries and future split notes.
+- `docs/TELEMETRY_FORMAT.md` – serial packet examples and parser output keys.
+- `docs/WEBSITE_INTEGRATION.md` – backend/API handoff contract for website telemetry.
 
 ### Building & Releases
 1. Run unit/system smoke tests locally (e.g., simulation replay, bundle export/import).  

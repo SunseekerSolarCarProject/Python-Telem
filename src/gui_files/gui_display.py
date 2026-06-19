@@ -388,6 +388,11 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.SOLCAST_FCST_DNI.value[0],
                 TelemetryKey.SOLCAST_FCST_TEMP.value[0],
             ],
+            "Ambient Sensor": [
+                TelemetryKey.BME_TEMPERATURE_C.value[0],
+                TelemetryKey.BME_PRESSURE_PA.value[0],
+                TelemetryKey.BME_HUMIDITY_PCT.value[0],
+            ],
             "GPS": [
                 TelemetryKey.NAV_IMU_MPH.value[0],
                 TelemetryKey.NAV_GPS_MPH.value[0],

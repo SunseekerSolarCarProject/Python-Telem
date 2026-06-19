@@ -95,6 +95,7 @@ class CSVHandler:
             TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
             TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0], TelemetryKey.MC2LIM_ERRORS.value[0], TelemetryKey.MC2LIM_LIMITS.value[0],
             TelemetryKey.TOTAL_CAPACITY_WH.value[0], TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_VOLTAGE.value[0],
+            TelemetryKey.BME_TEMPERATURE_C.value[0], TelemetryKey.BME_PRESSURE_PA.value[0], TelemetryKey.BME_HUMIDITY_PCT.value[0],
             TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
             TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
             TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0],

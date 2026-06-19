@@ -98,6 +98,11 @@ class TelemetryKey(Enum):
     TOTAL_VOLTAGE = ("Total_Voltage", "V")
     DEVICE_TIMESTAMP = ("device_timestamp", "hh:mm:ss")
     TIMESTAMP = ("timestamp", "year-Month-day hh:mm:ss")
+
+    # Ambient sensor data
+    BME_TEMPERATURE_C = ("BME_Temperature_C", "°C")
+    BME_PRESSURE_PA = ("BME_Pressure_Pa", "Pa")
+    BME_HUMIDITY_PCT = ("BME_Humidity_Pct", "%")
     
     # Motor Controller Limits
     MC1LIM_CAN_RECEIVE_ERROR_COUNT = ("MC1LIM_CAN_Receive_Error_Count", "")
