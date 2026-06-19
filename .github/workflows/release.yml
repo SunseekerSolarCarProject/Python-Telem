@@ -66,6 +66,7 @@ jobs:
             --copy-metadata scipy
             --copy-metadata numpy
             --hidden-import pytz
+            --hidden-import PyQt6.QtNetwork
             --hidden-import scipy._lib.array_api_compat.numpy.fft
             --hidden-import scipy._lib.array_api_compat.numpy.linalg
             --hidden-import scipy._external.array_api_compat.numpy.fft

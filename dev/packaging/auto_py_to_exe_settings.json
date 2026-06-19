@@ -131,6 +131,10 @@
   },
   {
    "optionDest": "hiddenimports",
+   "value": "PyQt6.QtNetwork"
+  },
+  {
+   "optionDest": "hiddenimports",
    "value": "scipy._lib.array_api_compat.numpy.fft"
   },
   {
