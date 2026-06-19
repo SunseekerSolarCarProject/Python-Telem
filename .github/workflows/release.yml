@@ -66,6 +66,14 @@ jobs:
             --copy-metadata scipy
             --copy-metadata numpy
             --hidden-import pytz
+            --hidden-import scipy._lib.array_api_compat.numpy.fft
+            --hidden-import scipy._lib.array_api_compat.numpy.linalg
+            --hidden-import scipy._external.array_api_compat.numpy.fft
+            --hidden-import scipy._external.array_api_compat.numpy.linalg
+            --hidden-import sklearn.externals.array_api_compat.numpy.fft
+            --hidden-import sklearn.externals.array_api_compat.numpy.linalg
+            --collect-submodules scipy._lib.array_api_compat.numpy
+            --collect-submodules sklearn.externals.array_api_compat.numpy
             --exclude-module sklearn.externals.array_api_compat.torch
             --exclude-module pyqtgraph.opengl
           )

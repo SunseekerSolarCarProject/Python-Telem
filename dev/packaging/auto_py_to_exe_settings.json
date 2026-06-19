@@ -131,6 +131,38 @@
   },
   {
    "optionDest": "hiddenimports",
+   "value": "scipy._lib.array_api_compat.numpy.fft"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "scipy._lib.array_api_compat.numpy.linalg"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "scipy._external.array_api_compat.numpy.fft"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "scipy._external.array_api_compat.numpy.linalg"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "sklearn.externals.array_api_compat.numpy.fft"
+  },
+  {
+   "optionDest": "hiddenimports",
+   "value": "sklearn.externals.array_api_compat.numpy.linalg"
+  },
+  {
+   "optionDest": "collect_submodules",
+   "value": "scipy._lib.array_api_compat.numpy"
+  },
+  {
+   "optionDest": "collect_submodules",
+   "value": "sklearn.externals.array_api_compat.numpy"
+  },
+  {
+   "optionDest": "hiddenimports",
    "value": "tufup.client"
   },
   {
