@@ -59,12 +59,14 @@ jobs:
             --collect-binaries scipy
             --collect-binaries numpy
             --copy-metadata pandas
+            --copy-metadata PyMySQL
             --copy-metadata python-dateutil
             --copy-metadata pytz
             --copy-metadata tzdata
             --copy-metadata scikit-learn
             --copy-metadata scipy
             --copy-metadata numpy
+            --hidden-import pymysql
             --hidden-import pytz
             --hidden-import PyQt6.QtNetwork
             --hidden-import scipy._lib.array_api_compat.numpy.fft
@@ -73,6 +75,7 @@ jobs:
             --hidden-import scipy._external.array_api_compat.numpy.linalg
             --hidden-import sklearn.externals.array_api_compat.numpy.fft
             --hidden-import sklearn.externals.array_api_compat.numpy.linalg
+            --collect-submodules pymysql
             --collect-submodules scipy._lib.array_api_compat.numpy
             --collect-submodules sklearn.externals.array_api_compat.numpy
             --exclude-module sklearn.externals.array_api_compat.torch

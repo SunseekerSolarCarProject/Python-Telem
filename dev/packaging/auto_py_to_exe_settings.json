@@ -127,6 +127,10 @@
   },
   {
    "optionDest": "hiddenimports",
+   "value": "pymysql"
+  },
+  {
+   "optionDest": "hiddenimports",
    "value": "pytz"
   },
   {
@@ -156,6 +160,10 @@
   {
    "optionDest": "hiddenimports",
    "value": "sklearn.externals.array_api_compat.numpy.linalg"
+  },
+  {
+   "optionDest": "collect_submodules",
+   "value": "pymysql"
   },
   {
    "optionDest": "collect_submodules",
@@ -200,6 +208,10 @@
   {
    "optionDest": "copy_metadata",
    "value": "pandas"
+  },
+  {
+   "optionDest": "copy_metadata",
+   "value": "PyMySQL"
   },
   {
    "optionDest": "copy_metadata",

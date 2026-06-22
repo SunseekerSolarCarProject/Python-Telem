@@ -16,6 +16,7 @@ import numpy
 import serial
 import serial.tools.list_ports
 import pyqtgraph
+import pymysql
 import shutil
 import sklearn.pipeline
 import sklearn.ensemble
