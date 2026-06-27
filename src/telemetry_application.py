@@ -830,6 +830,7 @@ class TelemetryApplication(QObject):
                 self.gui.set_initial_settings(self.config_data_copy)
 
             self.gui.show()
+            self.gui.set_connection_status(f"Connecting to {self.selected_port}")
             self.start_serial_reader(self.selected_port, self.baudrate)
             return True
         except Exception as e:
@@ -850,6 +851,9 @@ class TelemetryApplication(QObject):
         self.serial_reader_thread.data_received.connect(self.process_data)
         self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)
         self.serial_reader_thread.start()
+        if self.gui:
+            self.gui.set_connection_status(f"Live on {port} @ {baudrate}")
+            self.gui.set_simulation_status("Live")
         self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
 
     def stop_serial_reader(self):
@@ -858,6 +862,8 @@ class TelemetryApplication(QObject):
             self.serial_reader_thread.stop()
             self.serial_reader_thread.wait()
         self.serial_reader_thread = None
+        if self.gui:
+            self.gui.set_connection_status("Serial stopped")
 
     def handle_retrain_model(self):
         """
@@ -1022,6 +1028,9 @@ class TelemetryApplication(QObject):
         if hasattr(self.gui, 'simulation_tab'):
             self.gui.simulation_tab.set_running(True)
             self.gui.simulation_tab.set_status(f"Running {mode}")
+        if self.gui:
+            self.gui.set_simulation_status(f"Simulation: {mode}")
+            self.gui.set_connection_status("Serial paused for simulation")
         self.logger.info(f"Simulation started: {mode}")
 
     def on_simulation_finished(self):
@@ -1048,6 +1057,10 @@ class TelemetryApplication(QObject):
                     "Simulation",
                     f"Simulation ended but serial connection could not be restarted:\n{exc}"
                 )
+        elif self.gui:
+            self.gui.set_connection_status("Serial stopped")
+        if self.gui:
+            self.gui.set_simulation_status("Live")
         self._resume_serial_after_sim = False
         self._simulation_mode = None
 
@@ -1091,9 +1104,14 @@ class TelemetryApplication(QObject):
             self.serial_reader_thread.data_received.connect(self.process_data)
             self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)
             self.serial_reader_thread.start()
+            if self.gui:
+                self.gui.set_connection_status(f"Live on {port} @ {baudrate}")
+                self.gui.set_simulation_status("Live")
             self.logger.info(f"Restarted SerialReaderThread on {port} with baudrate {baudrate}")
         except Exception as e:
             self.logger.error(f"Failed to restart SerialReaderThread with COM Port={port}, Baud Rate={baudrate}: {e}")
+            if self.gui:
+                self.gui.set_connection_status("Serial error")
             QMessageBox.critical(None, "Error", f"Failed to connect to COM Port {port} with baud rate {baudrate}.\nError: {e}")
 
     def process_data(self, data):

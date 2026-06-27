@@ -18,6 +18,30 @@ A cross-platform telemetry dashboard built for the Sunseeker Solar Car team. The
 4. Install requirements (`pip install -r requirements.txt`).  
 5. Launch with `python src/main_app.py`.
 
+### Linux virtual serial ports
+For bench testing without hardware, the app can use `socat` pseudo-terminals such as `/dev/pts/3`. The startup configuration dialog and Settings tab list readable/writable `/dev/pts/*` ports when available, and the port field is editable if you need to paste one manually.
+
+Example pair:
+
+```bash
+socat -d -d pty,raw,echo=0 pty,raw,echo=0
+```
+
+Use one printed `/dev/pts/N` path in the telemetry app and write simulated serial lines to the other.
+
+If the app opens `/dev/pts/4` but does not update, check that your generator is writing to the paired PTY, not `/dev/pts/4` itself, and that every telemetry packet ends with a newline. A quick manual test looks like:
+
+```bash
+printf 'TL_TIM,12:34:56\n' > /dev/pts/5
+```
+
+where `/dev/pts/5` is the peer printed by `socat` and `/dev/pts/4` is the port selected in the app.
+
+### Windows virtual serial ports
+For Windows bench testing, create a paired virtual COM/null-modem connection with a tool such as com0com, Null-modem emulator, or a similar virtual serial-port application. Configure a pair such as `COM10` and `COM11`, select one side in the telemetry app, and send generated telemetry lines to the other side from your simulator or terminal tool.
+
+If the virtual COM port does not appear immediately, reopen the configuration dialog or use **Settings > Connection > Refresh Ports**. The port field is editable, so you can also type the COM name manually.
+
 ---
 
 ## Key Tabs & Features

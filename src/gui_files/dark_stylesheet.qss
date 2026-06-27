@@ -6,8 +6,8 @@
 
 /* Base QWidget */
 QWidget {
-    background-color: #2b2b2b; /* Dark gray background */
-    color: #f0f0f0;            /* Light gray text */
+    background-color: #202225;
+    color: #f0f0f0;
     font-family: Arial, sans-serif;
     font-size: 12px;
 }
@@ -17,22 +17,22 @@ QWidget {
    ================================ */
 
 QTabWidget::pane {
-    border: 1px solid #444;     /* Border around the tab pane */
-    background-color: #2b2b2b;  /* Match the base widget background */
+    border: 1px solid #3a3f46;
+    background-color: #202225;
 }
 
 QTabBar::tab {
-    background: #3c3c3c;             /* Darker tab background */
-    border: 1px solid #444;          /* Border around each tab */
-    padding: 5px 15px;               /* Padding within tabs */
-    margin: 2px;                      /* Space between tabs */
-    border-top-left-radius: 4px;      /* Rounded corners */
+    background: #2c3036;
+    border: 1px solid #3a3f46;
+    padding: 7px 16px;
+    margin: 2px;
+    border-top-left-radius: 4px;
     border-top-right-radius: 4px;
 }
 
 QTabBar::tab:selected, QTabBar::tab:hover {
-    background: #555555;             /* Highlight selected or hovered tab */
-    border-color: #666666;           /* Slightly lighter border on interaction */
+    background: #414853;
+    border-color: #6c7a89;
 }
 
 /* ================================
@@ -49,19 +49,24 @@ QLabel {
    ================================ */
 
 QPushButton {
-    background-color: #3c3c3c;      /* Dark button background */
-    border: 1px solid #555555;      /* Border around button */
-    padding: 5px 10px;              /* Padding within button */
-    border-radius: 4px;             /* Rounded corners */
-    color: #f0f0f0;                  /* Light gray text */
+    background-color: #343a42;
+    border: 1px solid #59616d;
+    padding: 6px 12px;
+    border-radius: 4px;
+    color: #f0f0f0;
 }
 
 QPushButton:hover {
-    background-color: #555555;      /* Lighter background on hover */
+    background-color: #48515d;
 }
 
 QPushButton:pressed {
-    background-color: #777777;      /* Even lighter on press */
+    background-color: #5f6b78;
+}
+
+QPushButton:checked {
+    background-color: #6b4f1d;
+    border-color: #c7902f;
 }
 
 /* ================================
@@ -69,11 +74,11 @@ QPushButton:pressed {
    ================================ */
 
 QLineEdit {
-    background-color: #3c3c3c;      /* Dark input background */
-    border: 1px solid #555555;      /* Border around input */
-    padding: 5px;                    /* Padding within input */
-    color: #f0f0f0;                  /* Light gray text */
-    border-radius: 4px;             /* Rounded corners */
+    background-color: #2c3036;
+    border: 1px solid #59616d;
+    padding: 6px;
+    color: #f0f0f0;
+    border-radius: 4px;
 }
 
 QLineEdit:focus {
@@ -135,11 +140,11 @@ QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
    ================================ */
 
 QComboBox {
-    background-color: #3c3c3c;      /* Dark background */
-    border: 1px solid #555555;      /* Border around combo box */
-    padding: 5px;                    /* Padding within combo box */
-    color: #f0f0f0;                  /* Light gray text */
-    border-radius: 4px;             /* Rounded corners */
+    background-color: #2c3036;
+    border: 1px solid #59616d;
+    padding: 5px;
+    color: #f0f0f0;
+    border-radius: 4px;
 }
 
 QComboBox QAbstractItemView {
@@ -243,4 +248,88 @@ QToolTip {
     border: 1px solid #555555;      /* Tooltip border */
     padding: 5px;                    /* Tooltip padding */
     border-radius: 4px;             /* Tooltip rounded corners */
+}
+
+/* ================================
+   Dashboard and Operational States
+   ================================ */
+
+QFrame#MetricCard {
+    background-color: #2a2f36;
+    border: 1px solid #3f4752;
+    border-radius: 6px;
+    min-height: 108px;
+}
+
+QFrame#MetricCard[state="warning"] {
+    border-color: #c7902f;
+    background-color: #332d20;
+}
+
+QFrame#MetricCard[state="danger"] {
+    border-color: #d9534f;
+    background-color: #3a2426;
+}
+
+QLabel#MetricTitle {
+    color: #aeb8c4;
+    font-size: 12px;
+    font-weight: normal;
+}
+
+QLabel#MetricValue {
+    color: #ffffff;
+    font-size: 26px;
+    font-weight: bold;
+}
+
+QLabel#MetricUnit {
+    color: #9aa6b2;
+    font-size: 12px;
+    font-weight: normal;
+}
+
+QLabel#StatusPill {
+    background-color: #293440;
+    border: 1px solid #4e657c;
+    border-radius: 4px;
+    padding: 6px 10px;
+    color: #e7edf3;
+    font-weight: bold;
+}
+
+QLabel#StatusPill[state="warning"] {
+    background-color: #3a3020;
+    border-color: #c7902f;
+}
+
+QLabel#StatusPill[state="danger"] {
+    background-color: #3a2426;
+    border-color: #d9534f;
+}
+
+QLabel#StatusPill[state="simulation"] {
+    background-color: #243a35;
+    border-color: #39a275;
+}
+
+QListWidget#AlertList {
+    background-color: #252a30;
+    border: 1px solid #3f4752;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+QGroupBox {
+    border: 1px solid #3f4752;
+    border-radius: 6px;
+    margin-top: 14px;
+    padding: 10px;
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
 }

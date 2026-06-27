@@ -2,6 +2,9 @@
 import os
 import sys
 import logging
+import re
+from datetime import datetime
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QDialog, QFormLayout, QComboBox, QPushButton, QDialogButtonBox, QMessageBox, QInputDialog, QLabel,
     QProgressBar,
@@ -10,7 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, QTimer
 from updater.update_checker import UpdateChecker
 from Version import VERSION
-import serial.tools.list_ports
+from serial_reader import SerialReaderThread
 
 class ConfigDialog(QDialog):
     config_data_signal = pyqtSignal(dict)
@@ -41,11 +44,15 @@ class ConfigDialog(QDialog):
         self.solcast_longitude = self.initial_config.get("solcast_longitude", "")
 
         # Resolve install dir
+        self._running_from_bundle = getattr(sys, "frozen", False)
         if app_install_dir is None:
-            if getattr(sys, "frozen", False):
+            if self._running_from_bundle:
                 app_install_dir = os.path.dirname(sys.executable)
             else:
                 app_install_dir = os.path.dirname(os.path.abspath(__file__))
+        self.app_install_dir = app_install_dir
+        self.config_dir = self._resolve_config_dir()
+        self.vehicle_years_file = os.path.join(self._execution_dir(), "vehicle_years.txt")
         
         # --- Updater wiring ---
         self.updater = UpdateChecker(
@@ -78,6 +85,7 @@ class ConfigDialog(QDialog):
 
         # COM Port Dropdown
         self.port_dropdown = QComboBox()
+        self.port_dropdown.setEditable(True)
         self.populate_com_port_dropdown()
         layout.addRow("Select COM Port:", self.port_dropdown)
 
@@ -241,34 +249,71 @@ class ConfigDialog(QDialog):
         self.update_progress.setValue(0)
 
     def populate_config_dropdown(self):
-        config_dir = "config_files"
-        if not os.path.exists(config_dir):
-            os.makedirs(config_dir)
-            self.logger.info(f"Created configuration directory: {config_dir}")
-        config_files = [f for f in os.listdir(config_dir) if f.endswith('.txt')]
+        os.makedirs(self.config_dir, exist_ok=True)
+        self.logger.info(f"Using configuration directory: {self.config_dir}")
+        config_files = [f for f in os.listdir(self.config_dir) if f.endswith('.txt')]
         self.config_dropdown.addItems(config_files)
         self.config_dropdown.addItem("Manual Input")
 
     def populate_com_port_dropdown(self):
-        ports = serial.tools.list_ports.comports()
-        port_list = [port.device for port in ports]
+        port_list = SerialReaderThread.get_available_ports()
         if not port_list:
             port_list = ["No COM ports available"]
         self.port_dropdown.addItems(port_list)
 
     def load_configuration(self):
         selected = self.config_dropdown.currentText()
-        config_dir = "config_files"
 
         if selected == "Manual Input":
             self.manual_battery_input()
         else:
-            file_path = os.path.join(config_dir, selected)
+            file_path = os.path.join(self.config_dir, selected)
             try:
                 self.load_battery_info_from_file(file_path)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load configuration: {e}")
                 self.logger.error(f"Error loading configuration from file {file_path}: {e}")
+
+    def _execution_dir(self) -> str:
+        # Packaged builds should read/write next to the executable. Source runs
+        # use the current working directory, matching `python src/main_app.py`.
+        if self._running_from_bundle:
+            return os.path.dirname(sys.executable)
+        return str(Path.cwd())
+
+    def _resolve_config_dir(self) -> str:
+        return os.path.join(self._execution_dir(), "config_files")
+
+    def _safe_config_filename(self, requested_name: str) -> str:
+        name = (requested_name or "").strip()
+        if not name:
+            name = "Manual_Battery_Config"
+        name = re.sub(r"[^A-Za-z0-9_. -]+", "_", name).strip(" .")
+        if not name:
+            name = "Manual_Battery_Config"
+        if not name.lower().endswith(".txt"):
+            name += ".txt"
+        return name
+
+    def _unique_config_path(self, filename: str) -> str:
+        base, ext = os.path.splitext(filename)
+        path = os.path.join(self.config_dir, filename)
+        counter = 2
+        while os.path.exists(path):
+            path = os.path.join(self.config_dir, f"{base}_{counter}{ext}")
+            counter += 1
+        return path
+
+    def _write_battery_config_file(self, file_path: str, battery_info: dict) -> None:
+        os.makedirs(self.config_dir, exist_ok=True)
+        lines = [
+            f"Battery cell capacity amps hours, {battery_info['capacity_ah']}",
+            f"Battery cell nominal voltage, {battery_info['voltage']}",
+            f"Amount of battery cells, {battery_info['quantity']}",
+            f"Number of battery series, {battery_info['series_strings']}",
+        ]
+        with open(file_path, "w", encoding="utf-8") as file:
+            file.write("\n".join(lines) + "\n")
 
     def emit_config_data(self):
         selected_port = self.port_dropdown.currentText()
@@ -280,6 +325,15 @@ class ConfigDialog(QDialog):
         vehicle_year = self.vehicle_year_dropdown.currentText()
         if vehicle_year == "Add New":
             vehicle_year = ""
+
+        if selected_port == "No COM ports available":
+            QMessageBox.warning(
+                self,
+                "Invalid Serial Port",
+                "No serial ports were detected. Enter a valid port path such as /dev/pts/3 or connect a device.",
+            )
+            self.logger.warning("Attempted to accept configuration with no serial port.")
+            return
 
         try:
             baud_rate = int(baud_rate_str)
@@ -377,11 +431,40 @@ class ConfigDialog(QDialog):
                 "quantity": quantity,
                 "series_strings": series_strings
             }
+            default_name = self.vehicle_year_dropdown.currentText()
+            if not default_name or default_name == "Add New":
+                default_name = f"Battery_Config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            config_name, ok_name = QInputDialog.getText(
+                self,
+                "Save Battery Configuration",
+                "Configuration file name:",
+                text=default_name,
+            )
+            filename = self._safe_config_filename(config_name if ok_name else default_name)
+            file_path = self._unique_config_path(filename)
+            self._write_battery_config_file(file_path, self.battery_info)
+
+            self.config_dropdown.blockSignals(True)
+            self.config_dropdown.clear()
+            self.populate_config_dropdown()
+            saved_name = os.path.basename(file_path)
+            idx = self.config_dropdown.findText(saved_name)
+            if idx != -1:
+                self.config_dropdown.setCurrentIndex(idx)
+            self.config_dropdown.blockSignals(False)
+
             self.logger.info(f"Manual battery input: {self.battery_info}")
-            QMessageBox.information(self, "Success", "Battery configuration set manually.")
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Battery configuration saved to:\n{file_path}",
+            )
         except ValueError as e:
             QMessageBox.warning(self, "Input Canceled", str(e))
             self.logger.warning(str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save manual battery configuration: {e}")
+            self.logger.error(f"Failed to save manual battery configuration: {e}")
 
     def handle_vehicle_year_activated(self, index):
         """Triggered when the user clicks/activates a dropdown item."""
@@ -399,7 +482,7 @@ class ConfigDialog(QDialog):
                 self.vehicle_year_dropdown.setCurrentText(new_year)
 
     def load_vehicle_years(self):
-        file_path = "vehicle_years.txt"
+        file_path = self.vehicle_years_file
         if os.path.exists(file_path):
             with open(file_path, 'r') as file:
                 years = [line.strip() for line in file if line.strip()]
@@ -407,7 +490,7 @@ class ConfigDialog(QDialog):
         return []
 
     def save_vehicle_year(self, new_year):
-        file_path = "vehicle_years.txt"
+        file_path = self.vehicle_years_file
         with open(file_path, 'a') as file:
             file.write(new_year + "\n")
 

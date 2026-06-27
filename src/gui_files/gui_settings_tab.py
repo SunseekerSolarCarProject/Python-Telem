@@ -1,260 +1,291 @@
-# src/gui_files/gui_settings_tab.py
-
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox,
-    QColorDialog, QHBoxLayout, QScrollArea, QSizePolicy, QFileDialog, QProgressBar, QLineEdit,
-    QCheckBox
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QColor
-import serial.tools.list_ports
+from PyQt6.QtCore import Qt, pyqtSignal
 import logging
+from serial_reader import SerialReaderThread
+
 
 class SettingsTab(QWidget):
-    log_level_signal = pyqtSignal(str)  # Signal for logging level changes
-    color_changed_signal = pyqtSignal(str, str)  # Signal for color changes (key, color)
-    settings_applied_signal = pyqtSignal(str, int, str, str)  # COM port, baud rate, log level, endianness
-    units_changed_signal = pyqtSignal(str)  # Signal for units system changes
-    machine_learning_retrain_signal = pyqtSignal()  # Signal to retrain ML model (no args)
-    additional_files_selected = pyqtSignal(list) #adding files to the ML model.
+    log_level_signal = pyqtSignal(str)
+    color_changed_signal = pyqtSignal(str, str)
+    settings_applied_signal = pyqtSignal(str, int, str, str)
+    units_changed_signal = pyqtSignal(str)
+    machine_learning_retrain_signal = pyqtSignal()
+    additional_files_selected = pyqtSignal(list)
     solcast_config_changed = pyqtSignal(str, str, str)
     telemetry_ingestion_config_changed = pyqtSignal(dict)
-
-    # New signals for updater version management
     refresh_versions_requested = pyqtSignal()
     install_version_requested = pyqtSignal(str)
 
     def __init__(self, groups, color_mapping):
         super().__init__()
         self.logger = logging.getLogger(__name__)
-        self.groups = groups  # Dictionary of group names to keys
-        self.color_mapping = color_mapping.copy()  # Make a copy of the color mapping
+        self.groups = groups
+        self.color_mapping = color_mapping.copy()
+        self.color_buttons = {}
+        self.color_displays = {}
         self.init_ui()
 
     def init_ui(self):
-        # Main layout for the entire widget
-        main_layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
 
-        # Create a scroll area to handle smaller screens and many items
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        main_layout.addWidget(scroll_area)
+        self.tabs = QTabWidget()
+        self.tabs.setMovable(True)
+        outer.addWidget(self.tabs)
 
-        # Container widget inside the scroll area
+        self.tabs.addTab(self._build_connection_tab(), "Connection")
+        self.tabs.addTab(self._build_ingestion_tab(), "API & Solar")
+        self.tabs.addTab(self._build_model_tab(), "Models")
+        self.tabs.addTab(self._build_updates_tab(), "Updates")
+        self.tabs.addTab(self._build_colors_tab(), "Graph Colors")
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self.apply_button = QPushButton("Apply Settings")
+        self.apply_button.setMinimumWidth(160)
+        self.apply_button.clicked.connect(self.apply_settings)
+        footer.addWidget(self.apply_button)
+        outer.addLayout(footer)
+
+    def _scroll_page(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
         container = QWidget()
-        scroll_area.setWidget(container)
-
-        # Layout inside the container
         layout = QVBoxLayout(container)
+        layout.setSpacing(14)
+        scroll.setWidget(container)
+        return scroll, layout
 
-        # ---- Updater: Version management ----
-        versions_label = QLabel("Application Version (install/rollback):")
-        versions_label.setMinimumWidth(200)
-        layout.addWidget(versions_label)
+    def _build_connection_tab(self):
+        page, layout = self._scroll_page()
 
-        versions_row = QHBoxLayout()
-        self.version_dropdown = QComboBox()
-        self.version_dropdown.setMinimumWidth(200)
-        versions_row.addWidget(self.version_dropdown)
-        self.refresh_versions_btn = QPushButton("Refresh")
-        self.refresh_versions_btn.clicked.connect(lambda: self.refresh_versions_requested.emit())
-        versions_row.addWidget(self.refresh_versions_btn)
-        self.install_version_btn = QPushButton("Install Selected")
-        self.install_version_btn.clicked.connect(self._emit_install_selected)
-        versions_row.addWidget(self.install_version_btn)
-        layout.addLayout(versions_row)
+        serial_group = QGroupBox("Serial Connection")
+        serial_form = QFormLayout(serial_group)
+        serial_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        # Progress status + bar for updates (install/rollback)
-        self.updater_status = QLabel("Updater: Idle")
-        layout.addWidget(self.updater_status)
-        self.updater_progress = QProgressBar()
-        self.updater_progress.setRange(0, 100)
-        self.updater_progress.setValue(0)
-        layout.addWidget(self.updater_progress)
-
-        # Logging Level Controls
-        log_level_label = QLabel("Select Logging Level:")
-        log_level_label.setMinimumWidth(200)
-        layout.addWidget(log_level_label)
-
-        self.log_level_dropdown = QComboBox()
-        self.log_level_dropdown.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
-        self.log_level_dropdown.setCurrentText('INFO')
-        self.log_level_dropdown.currentTextChanged.connect(self.on_log_level_changed)
-        self.log_level_dropdown.setMinimumWidth(200)
-        layout.addWidget(self.log_level_dropdown)
-
-        # COM Port Dropdown
-        com_port_label = QLabel("Select COM Port:")
-        com_port_label.setMinimumWidth(200)
-        layout.addWidget(com_port_label)
-
+        port_row = QHBoxLayout()
         self.com_port_dropdown = QComboBox()
-        self.com_port_dropdown.setMinimumWidth(200)
-        layout.addWidget(self.com_port_dropdown)
-        self.populate_com_ports()
-
-        # Baud Rate Dropdown
-        baud_rate_label = QLabel("Select Baud Rate:")
-        baud_rate_label.setMinimumWidth(200)
-        layout.addWidget(baud_rate_label)
+        self.com_port_dropdown.setEditable(True)
+        self.com_port_dropdown.setMinimumWidth(220)
+        refresh_ports_btn = QPushButton("Refresh Ports")
+        refresh_ports_btn.clicked.connect(self.populate_com_ports)
+        port_row.addWidget(self.com_port_dropdown, 1)
+        port_row.addWidget(refresh_ports_btn)
+        serial_form.addRow("COM Port:", port_row)
 
         self.baud_rate_dropdown = QComboBox()
-        self.baud_rate_dropdown.addItems(['9600', '19200', '38400', '57600', '115200'])
-        self.baud_rate_dropdown.setCurrentText('9600')  # Default baud rate
-        self.baud_rate_dropdown.setMinimumWidth(200)
-        layout.addWidget(self.baud_rate_dropdown)
-
-        # Endianness Dropdown
-        endianness_label = QLabel("Select Endianness:")
-        endianness_label.setMinimumWidth(200)
-        layout.addWidget(endianness_label)
+        self.baud_rate_dropdown.addItems(["9600", "19200", "38400", "57600", "115200"])
+        self.baud_rate_dropdown.setCurrentText("9600")
+        serial_form.addRow("Baud Rate:", self.baud_rate_dropdown)
 
         self.endianness_dropdown = QComboBox()
-        self.endianness_dropdown.addItems(['Big Endian', 'Little Endian'])
-        self.endianness_dropdown.setCurrentText('Big Endian')  # Default endianness
-        self.endianness_dropdown.setMinimumWidth(200)
-        layout.addWidget(self.endianness_dropdown)
+        self.endianness_dropdown.addItems(["Big Endian", "Little Endian"])
+        self.endianness_dropdown.setCurrentText("Big Endian")
+        serial_form.addRow("Endianness:", self.endianness_dropdown)
+        layout.addWidget(serial_group)
 
-        # Units System dropdown
-        units_label = QLabel("Units System:")
-        units_label.setMinimumWidth(200)
-        layout.addWidget(units_label)
+        display_group = QGroupBox("Display & Diagnostics")
+        display_form = QFormLayout(display_group)
+        display_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.units_dropdown = QComboBox()
-        self.units_dropdown.addItems(['Metric (SI)', 'Imperial'])
-        # default to Metric
-        self.units_dropdown.setCurrentText('Metric (SI)')
-        self.units_dropdown.setMinimumWidth(200)
-        layout.addWidget(self.units_dropdown)
+        self.units_dropdown.addItems(["Metric (SI)", "Imperial"])
+        self.units_dropdown.setCurrentText("Metric (SI)")
+        display_form.addRow("Units:", self.units_dropdown)
 
-        # Solcast credentials
-        solcast_label = QLabel("Solcast Settings:")
-        solcast_label.setMinimumWidth(200)
-        layout.addWidget(solcast_label)
+        self.log_level_dropdown = QComboBox()
+        self.log_level_dropdown.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+        self.log_level_dropdown.setCurrentText("INFO")
+        self.log_level_dropdown.currentTextChanged.connect(self.on_log_level_changed)
+        display_form.addRow("Log Level:", self.log_level_dropdown)
+        layout.addWidget(display_group)
 
-        self.solcast_key_edit = QLineEdit()
-        self.solcast_key_edit.setPlaceholderText("API key (optional)")
-        self.solcast_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addWidget(self.solcast_key_edit)
+        layout.addStretch()
+        self.populate_com_ports()
+        return page
 
-        self.solcast_lat_edit = QLineEdit()
-        self.solcast_lat_edit.setPlaceholderText("Latitude (optional)")
-        layout.addWidget(self.solcast_lat_edit)
+    def _build_ingestion_tab(self):
+        page, layout = self._scroll_page()
 
-        self.solcast_lon_edit = QLineEdit()
-        self.solcast_lon_edit.setPlaceholderText("Longitude (optional)")
-        layout.addWidget(self.solcast_lon_edit)
-
-        # Telemetry website/API upload settings
-        telemetry_api_label = QLabel("Telemetry Website / API:")
-        telemetry_api_label.setMinimumWidth(200)
-        layout.addWidget(telemetry_api_label)
+        api_group = QGroupBox("Telemetry Website / API")
+        api_form = QFormLayout(api_group)
+        api_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.telemetry_url_edit = QLineEdit()
         self.telemetry_url_edit.setPlaceholderText("JSON ingest URL, e.g. https://example.com/api/ingest")
-        layout.addWidget(self.telemetry_url_edit)
+        api_form.addRow("Ingest URL:", self.telemetry_url_edit)
 
         self.telemetry_api_key_edit = QLineEdit()
         self.telemetry_api_key_edit.setPlaceholderText("API key/token (optional)")
         self.telemetry_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addWidget(self.telemetry_api_key_edit)
+        api_form.addRow("API Key:", self.telemetry_api_key_edit)
 
-        telemetry_storage_row = QHBoxLayout()
-        telemetry_storage_row.addWidget(QLabel("Storage Mode:"))
         self.telemetry_storage_mode_dropdown = QComboBox()
         self.telemetry_storage_mode_dropdown.addItems(["http", "both", "db"])
-        telemetry_storage_row.addWidget(self.telemetry_storage_mode_dropdown)
-        telemetry_storage_row.addWidget(QLabel("Auth:"))
+        api_form.addRow("Storage Mode:", self.telemetry_storage_mode_dropdown)
+
         self.telemetry_auth_scheme_dropdown = QComboBox()
         self.telemetry_auth_scheme_dropdown.addItems(["auto", "bearer", "x-api-token", "x-api-key", "none"])
-        telemetry_storage_row.addWidget(self.telemetry_auth_scheme_dropdown)
-        layout.addLayout(telemetry_storage_row)
+        api_form.addRow("Auth:", self.telemetry_auth_scheme_dropdown)
 
-        telemetry_payload_row = QHBoxLayout()
-        telemetry_payload_row.addWidget(QLabel("Payload Format:"))
         self.telemetry_payload_format_dropdown = QComboBox()
         self.telemetry_payload_format_dropdown.addItems(["legacy", "ionos", "dual"])
-        telemetry_payload_row.addWidget(self.telemetry_payload_format_dropdown)
+        api_form.addRow("Payload Format:", self.telemetry_payload_format_dropdown)
+
         self.telemetry_expect_json_checkbox = QCheckBox("Require JSON response")
         self.telemetry_expect_json_checkbox.setChecked(True)
-        telemetry_payload_row.addWidget(self.telemetry_expect_json_checkbox)
-        layout.addLayout(telemetry_payload_row)
+        api_form.addRow("", self.telemetry_expect_json_checkbox)
 
         self.telemetry_session_id_edit = QLineEdit()
         self.telemetry_session_id_edit.setPlaceholderText("Session ID (optional)")
-        layout.addWidget(self.telemetry_session_id_edit)
+        api_form.addRow("Session ID:", self.telemetry_session_id_edit)
 
         self.telemetry_vehicle_edit = QLineEdit()
         self.telemetry_vehicle_edit.setPlaceholderText("Vehicle identifier override (optional)")
-        layout.addWidget(self.telemetry_vehicle_edit)
+        api_form.addRow("Vehicle:", self.telemetry_vehicle_edit)
+        layout.addWidget(api_group)
 
-        # Machine Learning Retrain Button
-        machine_learning_label = QLabel("Machine Learning:")
-        machine_learning_label.setMinimumWidth(200)
-        layout.addWidget(machine_learning_label)
+        solcast_group = QGroupBox("Solcast")
+        solcast_form = QFormLayout(solcast_group)
+        solcast_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
+        self.solcast_key_edit = QLineEdit()
+        self.solcast_key_edit.setPlaceholderText("API key (optional)")
+        self.solcast_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        solcast_form.addRow("API Key:", self.solcast_key_edit)
+
+        self.solcast_lat_edit = QLineEdit()
+        self.solcast_lat_edit.setPlaceholderText("Latitude (optional)")
+        solcast_form.addRow("Latitude:", self.solcast_lat_edit)
+
+        self.solcast_lon_edit = QLineEdit()
+        self.solcast_lon_edit.setPlaceholderText("Longitude (optional)")
+        solcast_form.addRow("Longitude:", self.solcast_lon_edit)
+        layout.addWidget(solcast_group)
+
+        layout.addStretch()
+        return page
+
+    def _build_model_tab(self):
+        page, layout = self._scroll_page()
+
+        model_group = QGroupBox("Machine Learning")
+        model_layout = QVBoxLayout(model_group)
+
+        actions = QHBoxLayout()
         self.retrain_button = QPushButton("Retrain Machine Learning Model")
         self.retrain_button.clicked.connect(self.on_retrain_button_clicked)
-        layout.addWidget(self.retrain_button)
+        actions.addWidget(self.retrain_button)
 
         add_data_button = QPushButton("Add Training Data Files")
         add_data_button.clicked.connect(self.on_add_data_button_clicked)
-        layout.addWidget(add_data_button)
+        actions.addWidget(add_data_button)
+        actions.addStretch()
+        model_layout.addLayout(actions)
 
-        # Color Selection Section
-        color_selection_label = QLabel("Select Graph Colors:")
-        color_selection_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(color_selection_label)
-
-        self.color_buttons = {}
-        for group_name, keys in self.groups.items():
-            # Group header
-            group_header = QLabel(group_name)
-            group_header.setStyleSheet("font-weight: bold; color: #1e90ff;")
-            group_header.setMinimumWidth(200)
-            layout.addWidget(group_header)
-
-            for key in keys:
-                row_layout = QHBoxLayout()
-
-                key_label = QLabel(key)
-                key_label.setFixedWidth(250)
-                key_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-                row_layout.addWidget(key_label)
-
-                color_display = QLabel()
-                color_display.setFixedSize(50, 20)
-                color_display.setStyleSheet(f"background-color: {self.color_mapping.get(key, 'gray')}")
-                row_layout.addWidget(color_display)
-
-                color_button = QPushButton("Choose Color")
-                color_button.setMinimumWidth(100)
-                # Use a lambda with default arguments to capture the current key and color_display
-                color_button.clicked.connect(lambda checked, k=key, disp=color_display: self.choose_color(k, disp))
-                row_layout.addWidget(color_button)
-
-                layout.addLayout(row_layout)
-                self.color_buttons[key] = color_button
-
-        # Apply Settings Button
-        apply_button = QPushButton("Apply Settings")
-        apply_button.setFixedWidth(150)
-        apply_button.clicked.connect(self.apply_settings)
-        apply_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        layout.addWidget(apply_button, alignment=Qt.AlignmentFlag.AlignRight)
-
-        # Add stretch to push content up
+        layout.addWidget(model_group)
         layout.addStretch()
+        return page
+
+    def _build_updates_tab(self):
+        page, layout = self._scroll_page()
+
+        update_group = QGroupBox("Application Version")
+        update_layout = QVBoxLayout(update_group)
+
+        version_row = QHBoxLayout()
+        self.version_dropdown = QComboBox()
+        self.version_dropdown.setMinimumWidth(220)
+        version_row.addWidget(self.version_dropdown, 1)
+
+        self.refresh_versions_btn = QPushButton("Refresh")
+        self.refresh_versions_btn.clicked.connect(lambda: self.refresh_versions_requested.emit())
+        version_row.addWidget(self.refresh_versions_btn)
+
+        self.install_version_btn = QPushButton("Install Selected")
+        self.install_version_btn.clicked.connect(self._emit_install_selected)
+        version_row.addWidget(self.install_version_btn)
+        update_layout.addLayout(version_row)
+
+        self.updater_status = QLabel("Updater: Idle")
+        update_layout.addWidget(self.updater_status)
+
+        self.updater_progress = QProgressBar()
+        self.updater_progress.setRange(0, 100)
+        self.updater_progress.setValue(0)
+        update_layout.addWidget(self.updater_progress)
+
+        layout.addWidget(update_group)
+        layout.addStretch()
+        return page
+
+    def _build_colors_tab(self):
+        page, layout = self._scroll_page()
+
+        for group_name, keys in self.groups.items():
+            group = QGroupBox(group_name)
+            grid = QGridLayout(group)
+            grid.setColumnStretch(0, 1)
+            grid.setColumnStretch(1, 0)
+            grid.setColumnStretch(2, 0)
+
+            for row, key in enumerate(keys):
+                key_label = QLabel(key)
+                key_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+                grid.addWidget(key_label, row, 0)
+
+                color_display = QFrame()
+                color_display.setFixedSize(44, 22)
+                color_display.setFrameShape(QFrame.Shape.StyledPanel)
+                color_display.setStyleSheet(f"background-color: {self.color_mapping.get(key, 'gray')};")
+                grid.addWidget(color_display, row, 1)
+
+                color_button = QPushButton("Choose")
+                color_button.clicked.connect(lambda checked, k=key, disp=color_display: self.choose_color(k, disp))
+                grid.addWidget(color_button, row, 2)
+
+                self.color_buttons[key] = color_button
+                self.color_displays[key] = color_display
+
+            layout.addWidget(group)
+
+        layout.addStretch()
+        return page
 
     def populate_com_ports(self):
         try:
-            ports = serial.tools.list_ports.comports()
+            current = self.com_port_dropdown.currentText().strip()
             self.com_port_dropdown.clear()
-            port_list = [port.device for port in ports]
+            port_list = SerialReaderThread.get_available_ports()
             if not port_list:
                 port_list = ["No COM ports available"]
             self.com_port_dropdown.addItems(port_list)
+            if current and current != "No COM ports available":
+                index = self.com_port_dropdown.findText(current)
+                if index == -1:
+                    self.com_port_dropdown.addItem(current)
+                    index = self.com_port_dropdown.findText(current)
+                self.com_port_dropdown.setCurrentIndex(index)
         except Exception as e:
             self.logger.error(f"Error populating COM ports: {e}")
             QMessageBox.critical(self, "Error", f"Failed to populate COM ports: {e}")
@@ -263,7 +294,7 @@ class SettingsTab(QWidget):
         color = QColorDialog.getColor()
         if color.isValid():
             selected_color = color.name()
-            color_display_label.setStyleSheet(f"background-color: {selected_color}")
+            color_display_label.setStyleSheet(f"background-color: {selected_color};")
             self.color_mapping[key] = selected_color
             self.color_changed_signal.emit(key, selected_color)
             self.logger.info(f"Color for {key} changed to {selected_color}")
@@ -271,21 +302,20 @@ class SettingsTab(QWidget):
             self.logger.info(f"Color selection canceled for {key}")
 
     def apply_settings(self):
-        """
-        Apply settings including logging level, COM port, baud rate, endianness, and graph colors.
-        """
         com_port = self.com_port_dropdown.currentText()
         baud_rate_str = self.baud_rate_dropdown.currentText()
-        selected_log_level = self.log_level_dropdown.currentText()  # Get the logging level
-        selected_endianness = self.endianness_dropdown.currentText()  # Get endianness
+        selected_log_level = self.log_level_dropdown.currentText()
+        selected_endianness = self.endianness_dropdown.currentText()
 
-        # Validate COM port
         if com_port == "No COM ports available":
-            QMessageBox.warning(self, "Invalid COM Port", "No COM ports are available. Please connect a device or select a valid port.")
+            QMessageBox.warning(
+                self,
+                "Invalid COM Port",
+                "No COM ports are available. Please connect a device or select a valid port.",
+            )
             self.logger.warning("Attempted to apply settings with no available COM ports.")
             return
 
-        # Validate baud rate
         try:
             baud_rate = int(baud_rate_str)
         except ValueError:
@@ -293,30 +323,27 @@ class SettingsTab(QWidget):
             self.logger.warning(f"Invalid baud rate selected: {baud_rate_str}")
             return
 
-        # Validate endianness
-        if selected_endianness not in ['Big Endian', 'Little Endian']:
+        if selected_endianness not in ["Big Endian", "Little Endian"]:
             QMessageBox.warning(self, "Invalid Endianness", "Please select a valid endianness.")
             self.logger.warning(f"Invalid endianness selected: {selected_endianness}")
             return
 
-        endianness = 'big' if selected_endianness == 'Big Endian' else 'little'
-
-        # Read and Emit units choice
-        units_choice = 'metric' if self.units_dropdown.currentText() == 'Metric (SI)' else 'imperial'
+        endianness = "big" if selected_endianness == "Big Endian" else "little"
+        units_choice = "metric" if self.units_dropdown.currentText() == "Metric (SI)" else "imperial"
         self.units_changed_signal.emit(units_choice)
-
-        # Emit logging level and color changes
         self.log_level_signal.emit(selected_log_level)
-        # Color changes are emitted individually on change
 
-        # Prepare Solcast values
-        solcast_key = self.solcast_key_edit.text().strip() if hasattr(self, 'solcast_key_edit') else ''
-        solcast_lat = self.solcast_lat_edit.text().strip() if hasattr(self, 'solcast_lat_edit') else ''
-        solcast_lon = self.solcast_lon_edit.text().strip() if hasattr(self, 'solcast_lon_edit') else ''
+        solcast_key = self.solcast_key_edit.text().strip()
+        solcast_lat = self.solcast_lat_edit.text().strip()
+        solcast_lon = self.solcast_lon_edit.text().strip()
 
         if solcast_key or solcast_lat or solcast_lon:
             if not solcast_key or not solcast_lat or not solcast_lon:
-                QMessageBox.warning(self, "Incomplete Solcast Configuration", "Provide API key, latitude, and longitude or leave all three blank.")
+                QMessageBox.warning(
+                    self,
+                    "Incomplete Solcast Configuration",
+                    "Provide API key, latitude, and longitude or leave all three blank.",
+                )
                 return
             try:
                 float(solcast_lat)
@@ -325,39 +352,44 @@ class SettingsTab(QWidget):
                 QMessageBox.warning(self, "Invalid Coordinates", "Latitude and longitude must be numeric values.")
                 return
         else:
-            solcast_key = ''
-            solcast_lat = ''
-            solcast_lon = ''
+            solcast_key = ""
+            solcast_lat = ""
+            solcast_lon = ""
 
-        telemetry_url = self.telemetry_url_edit.text().strip() if hasattr(self, 'telemetry_url_edit') else ''
-        if telemetry_url and not telemetry_url.lower().startswith(('http://', 'https://')):
+        telemetry_url = self.telemetry_url_edit.text().strip()
+        if telemetry_url and not telemetry_url.lower().startswith(("http://", "https://")):
             QMessageBox.warning(self, "Invalid Telemetry URL", "Telemetry ingest URL must start with http:// or https://.")
             return
 
         telemetry_config = {
-            'telemetry_ingestion_api_url': telemetry_url,
-            'telemetry_ingestion_api_key': self.telemetry_api_key_edit.text().strip() if hasattr(self, 'telemetry_api_key_edit') else '',
-            'telemetry_ingestion_auth_scheme': self.telemetry_auth_scheme_dropdown.currentText() if hasattr(self, 'telemetry_auth_scheme_dropdown') else 'auto',
-            'telemetry_ingestion_payload_format': self.telemetry_payload_format_dropdown.currentText() if hasattr(self, 'telemetry_payload_format_dropdown') else 'legacy',
-            'telemetry_ingestion_session_id': self.telemetry_session_id_edit.text().strip() if hasattr(self, 'telemetry_session_id_edit') else '',
-            'telemetry_ingestion_vehicle': self.telemetry_vehicle_edit.text().strip() if hasattr(self, 'telemetry_vehicle_edit') else '',
-            'telemetry_ingestion_expect_json': self.telemetry_expect_json_checkbox.isChecked() if hasattr(self, 'telemetry_expect_json_checkbox') else True,
-            'telemetry_storage_mode': self.telemetry_storage_mode_dropdown.currentText() if hasattr(self, 'telemetry_storage_mode_dropdown') else 'http',
+            "telemetry_ingestion_api_url": telemetry_url,
+            "telemetry_ingestion_api_key": self.telemetry_api_key_edit.text().strip(),
+            "telemetry_ingestion_auth_scheme": self.telemetry_auth_scheme_dropdown.currentText(),
+            "telemetry_ingestion_payload_format": self.telemetry_payload_format_dropdown.currentText(),
+            "telemetry_ingestion_session_id": self.telemetry_session_id_edit.text().strip(),
+            "telemetry_ingestion_vehicle": self.telemetry_vehicle_edit.text().strip(),
+            "telemetry_ingestion_expect_json": self.telemetry_expect_json_checkbox.isChecked(),
+            "telemetry_storage_mode": self.telemetry_storage_mode_dropdown.currentText(),
         }
 
-        # Emit signal for COM port, baud rate, log level, and endianness changes
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
         self.solcast_config_changed.emit(solcast_key, solcast_lat, solcast_lon)
         self.telemetry_ingestion_config_changed.emit(telemetry_config)
-        status = 'set' if solcast_key else 'empty'
-        self.logger.info(f"Applied settings: COM Port={com_port}, Baud Rate={baud_rate}, Log Level={selected_log_level}, Endianness={endianness}, Solcast Key={status}")
+        status = "set" if solcast_key else "empty"
+        self.logger.info(
+            "Applied settings: COM Port=%s, Baud Rate=%s, Log Level=%s, Endianness=%s, Solcast Key=%s",
+            com_port,
+            baud_rate,
+            selected_log_level,
+            endianness,
+            status,
+        )
 
-    # ----- Updater helpers -----
     def set_versions(self, versions: list[str], current_version: str | None = None):
         try:
             self.version_dropdown.clear()
-            for v in versions:
-                self.version_dropdown.addItem(v)
+            for version in versions:
+                self.version_dropdown.addItem(version)
             if current_version:
                 idx = self.version_dropdown.findText(current_version)
                 if idx != -1:
@@ -366,9 +398,9 @@ class SettingsTab(QWidget):
             self.logger.error(f"Failed to set versions: {e}")
 
     def _emit_install_selected(self):
-        v = self.version_dropdown.currentText().strip()
-        if v:
-            self.install_version_requested.emit(v)
+        version = self.version_dropdown.currentText().strip()
+        if version:
+            self.install_version_requested.emit(version)
 
     def set_update_progress(self, value: int):
         try:
@@ -386,140 +418,76 @@ class SettingsTab(QWidget):
             pass
 
     def on_retrain_button_clicked(self):
-        """
-        Slot for handling the retrain button click event.
-        """
         confirm = QMessageBox.question(
             self,
             "Retrain Model",
             "Are you sure you want to retrain the machine learning model?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if confirm == QMessageBox.StandardButton.Yes:
-            # Emit the retrain signal with no arguments, as defined
             self.machine_learning_retrain_signal.emit()
             QMessageBox.information(self, "Retrain Model", "Model retraining initiated.")
         else:
             self.logger.info("Model retraining canceled by the user.")
 
     def set_retrain_button_enabled(self, enabled):
-        if hasattr(self, 'retrain_button') and self.retrain_button is not None:
+        if hasattr(self, "retrain_button") and self.retrain_button is not None:
             self.retrain_button.setEnabled(enabled)
 
     def on_add_data_button_clicked(self):
         dialog = QFileDialog(self, "Select Additional Training Data Files")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
         dialog.setNameFilters(["CSV files (*.csv)", "All files (*)"])
-    
         if dialog.exec():
-            selected_files = dialog.selectedFiles()
-            # Emit a new signal for adding these files to training
-            self.additional_files_selected.emit(selected_files)
+            self.additional_files_selected.emit(dialog.selectedFiles())
 
     def on_log_level_changed(self, level: str):
-        """
-        Emit log_level_signal when logging level changes.
-        """
         self.log_level_signal.emit(level)
         self.logger.info(f"Logging level changed to {level}")
 
     def set_initial_settings(self, config_data: dict):
-        """
-        Set the initial settings in the SettingsTab based on configuration data.
-
-        :param config_data: Dictionary containing 'selected_port', 'logging_level', 'baud_rate', and 'endianness'.
-        """
         try:
-            # Set Logging Level
             log_level = config_data.get("logging_level", "INFO")
-            log_level_str = log_level.upper()
-            index = self.log_level_dropdown.findText(log_level_str)
-            if index != -1:
-                self.log_level_dropdown.setCurrentIndex(index)
-                self.logger.debug(f"Set logging level to {log_level_str}")
-            else:
-                self.logger.warning(f"Logging level {log_level_str} not found in dropdown. Using default.")
+            self._set_combo_text(self.log_level_dropdown, str(log_level).upper())
 
-            # Set COM Port
             selected_port = config_data.get("selected_port", "No COM ports available")
             index = self.com_port_dropdown.findText(selected_port)
             if index != -1:
                 self.com_port_dropdown.setCurrentIndex(index)
-                self.logger.debug(f"Set COM port to {selected_port}")
+            elif selected_port and selected_port != "No COM ports available":
+                self.com_port_dropdown.addItem(selected_port)
+                self.com_port_dropdown.setCurrentIndex(self.com_port_dropdown.count() - 1)
             else:
-                if selected_port and selected_port != "No COM ports available":
-                    self.com_port_dropdown.addItem(selected_port)
-                    self.com_port_dropdown.setCurrentIndex(self.com_port_dropdown.count()-1)
-                    self.logger.debug(f"Added and set COM port to {selected_port}")
-                else:
-                    self.logger.warning(f"COM port {selected_port} not available.")
+                self.logger.warning(f"COM port {selected_port} not available.")
 
-            # Set Baud Rate
-            baud_rate = config_data.get("baud_rate", 9600)
-            baud_rate_str = str(baud_rate)
-            index = self.baud_rate_dropdown.findText(baud_rate_str)
-            if index != -1:
-                self.baud_rate_dropdown.setCurrentIndex(index)
-                self.logger.debug(f"Set baud rate to {baud_rate_str}")
-            else:
-                if baud_rate_str and baud_rate_str != "9600":
-                    self.baud_rate_dropdown.addItem(baud_rate_str)
-                    self.baud_rate_dropdown.setCurrentIndex(self.baud_rate_dropdown.count()-1)
-                    self.logger.debug(f"Added and set baud rate to {baud_rate_str}")
-                else:
-                    self.logger.warning(f"Baud rate {baud_rate_str} not available.")
+            baud_rate = str(config_data.get("baud_rate", 9600))
+            if self.baud_rate_dropdown.findText(baud_rate) == -1:
+                self.baud_rate_dropdown.addItem(baud_rate)
+            self._set_combo_text(self.baud_rate_dropdown, baud_rate)
 
-            # Set Endianness
             endianness = config_data.get("endianness", "big")
-            endianness_str = 'Big Endian' if endianness == 'big' else 'Little Endian'
-            index = self.endianness_dropdown.findText(endianness_str)
-            if index != -1:
-                self.endianness_dropdown.setCurrentIndex(index)
-                self.logger.debug(f"Set endianness to {endianness_str}")
-            else:
-                self.logger.warning(f"Endianness {endianness_str} not found in dropdown. Using default.")
+            self._set_combo_text(self.endianness_dropdown, "Big Endian" if endianness == "big" else "Little Endian")
 
-            # Solcast settings
-            if hasattr(self, 'solcast_key_edit'):
-                self.solcast_key_edit.setText(config_data.get('solcast_api_key', ''))
-            if hasattr(self, 'solcast_lat_edit'):
-                self.solcast_lat_edit.setText(str(config_data.get('solcast_latitude', '')))
-            if hasattr(self, 'solcast_lon_edit'):
-                self.solcast_lon_edit.setText(str(config_data.get('solcast_longitude', '')))
+            units_mode = str(config_data.get("units_mode", "metric")).lower()
+            self._set_combo_text(self.units_dropdown, "Imperial" if units_mode == "imperial" else "Metric (SI)")
 
-            if hasattr(self, 'telemetry_url_edit'):
-                self.telemetry_url_edit.setText(config_data.get('telemetry_ingestion_api_url', ''))
-            if hasattr(self, 'telemetry_api_key_edit'):
-                self.telemetry_api_key_edit.setText(config_data.get('telemetry_ingestion_api_key', ''))
-            if hasattr(self, 'telemetry_auth_scheme_dropdown'):
-                self._set_combo_text(
-                    self.telemetry_auth_scheme_dropdown,
-                    config_data.get('telemetry_ingestion_auth_scheme', 'auto')
-                )
-            if hasattr(self, 'telemetry_payload_format_dropdown'):
-                self._set_combo_text(
-                    self.telemetry_payload_format_dropdown,
-                    config_data.get('telemetry_ingestion_payload_format', 'legacy')
-                )
-            if hasattr(self, 'telemetry_session_id_edit'):
-                self.telemetry_session_id_edit.setText(config_data.get('telemetry_ingestion_session_id', ''))
-            if hasattr(self, 'telemetry_vehicle_edit'):
-                self.telemetry_vehicle_edit.setText(config_data.get('telemetry_ingestion_vehicle', ''))
-            if hasattr(self, 'telemetry_expect_json_checkbox'):
-                self.telemetry_expect_json_checkbox.setChecked(
-                    bool(config_data.get('telemetry_ingestion_expect_json', True))
-                )
-            if hasattr(self, 'telemetry_storage_mode_dropdown'):
-                self._set_combo_text(
-                    self.telemetry_storage_mode_dropdown,
-                    config_data.get('telemetry_storage_mode', 'http')
-                )
+            self.solcast_key_edit.setText(config_data.get("solcast_api_key", ""))
+            self.solcast_lat_edit.setText(str(config_data.get("solcast_latitude", "")))
+            self.solcast_lon_edit.setText(str(config_data.get("solcast_longitude", "")))
 
+            self.telemetry_url_edit.setText(config_data.get("telemetry_ingestion_api_url", ""))
+            self.telemetry_api_key_edit.setText(config_data.get("telemetry_ingestion_api_key", ""))
+            self._set_combo_text(self.telemetry_auth_scheme_dropdown, config_data.get("telemetry_ingestion_auth_scheme", "auto"))
+            self._set_combo_text(self.telemetry_payload_format_dropdown, config_data.get("telemetry_ingestion_payload_format", "legacy"))
+            self.telemetry_session_id_edit.setText(config_data.get("telemetry_ingestion_session_id", ""))
+            self.telemetry_vehicle_edit.setText(config_data.get("telemetry_ingestion_vehicle", ""))
+            self.telemetry_expect_json_checkbox.setChecked(bool(config_data.get("telemetry_ingestion_expect_json", True)))
+            self._set_combo_text(self.telemetry_storage_mode_dropdown, config_data.get("telemetry_storage_mode", "http"))
         except Exception as e:
             self.logger.error(f"Failed to set initial settings: {e}")
 
     def _set_combo_text(self, combo_box, value):
-        value = str(value or '')
+        value = str(value or "")
         index = combo_box.findText(value)
         if index != -1:
             combo_box.setCurrentIndex(index)

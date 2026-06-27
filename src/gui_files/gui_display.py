@@ -3,7 +3,7 @@
 # -------------------------
 import sys
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QMessageBox, QProgressBar
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QSettings, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import pyqtSignal, QTimer
 import json
@@ -30,6 +30,7 @@ from gui_files.gui_csv_management import CSVManagementTab
 from gui_files.gui_config_dialog import ConfigDialog
 from gui_files.gui_simulation_tab import SimulationTab
 from gui_files.gui_gps_map_tab import GPSMapTab
+from gui_files.gui_dashboard_tab import DashboardTab
 
 from unit_conversion import build_metric_units_dict, build_imperial_units_dict, convert_value
 
@@ -233,6 +234,21 @@ class TelemetryGUI(QWidget):
         self.tabs.setMovable(True)
         layout.addWidget(self.tabs)
 
+        self.dashboard_tab = DashboardTab(self.units)
+        self.tabs.addTab(self.dashboard_tab, "Dashboard")
+
+        # Top-level tabs stay broad; detailed feature areas live inside nested
+        # tab widgets so the main navigation reads like an operator workflow.
+        self.graph_tabs = QTabWidget()
+        self.graph_tabs.setMovable(True)
+        self.tabs.addTab(self.graph_tabs, "Graphs")
+
+        self.data_tabs = QTabWidget()
+        self.data_tabs.setMovable(True)
+
+        self.tools_tabs = QTabWidget()
+        self.tools_tabs.setMovable(True)
+
         # Define graph-related groups (customize as needed)
         graph_groups = {
             "Motor Controller 1": [
@@ -288,8 +304,8 @@ class TelemetryGUI(QWidget):
         self.mc2_tab = MotorControllerGraphTab("Motor Controller 2",
                                                graph_groups["Motor Controller 2"],
                                                self.units, self.color_mapping)
-        self.tabs.addTab(self.mc1_tab, "Motor Controller 1")
-        self.tabs.addTab(self.mc2_tab, "Motor Controller 2")
+        self.graph_tabs.addTab(self.mc1_tab, "Motor Controller 1")
+        self.graph_tabs.addTab(self.mc2_tab, "Motor Controller 2")
 
         # Battery Pack Tabs
         self.pack1_tab = BatteryPackGraphTab("Battery Pack 1",
@@ -298,19 +314,19 @@ class TelemetryGUI(QWidget):
         self.pack2_tab = BatteryPackGraphTab("Battery Pack 2",
                                              graph_groups["Battery Pack 2"],
                                              self.units, self.color_mapping)
-        self.tabs.addTab(self.pack1_tab, "Battery Pack 1")
-        self.tabs.addTab(self.pack2_tab, "Battery Pack 2")
+        self.graph_tabs.addTab(self.pack1_tab, "Battery Pack 1")
+        self.graph_tabs.addTab(self.pack2_tab, "Battery Pack 2")
 
         # Remaining Capacity Tab
         self.remaining_tab = GraphTab("Remaining Capacity",
                                       graph_groups["Remaining Capacity"],
                                       self.units, self.color_mapping)
-        self.tabs.addTab(self.remaining_tab, "Battery Remaining Capacity")
+        self.graph_tabs.addTab(self.remaining_tab, "Remaining Capacity")
 
         self.insights_tab = GraphTab("Insights",
                                      graph_groups["Insights"],
                                      self.units, self.color_mapping)
-        self.tabs.addTab(self.insights_tab, "Insights")
+        self.graph_tabs.addTab(self.insights_tab, "Insights")
 
         # Data Table Tab
         data_table_groups = {
@@ -417,27 +433,28 @@ class TelemetryGUI(QWidget):
         }
 
         self.data_table_tab = DataTableTab(self.units, self.units_mode, data_table_groups)
-        self.tabs.addTab(self.data_table_tab, "Data Table")
+        self.data_tabs.addTab(self.data_table_tab, "Data Table")
 
         # Customizable Data Table Tab
         self.custom_data_table_tab = CustomizableDataTableTab(self.units, self.units_mode, data_table_groups)
         self.custom_data_table_tab.setObjectName("Customizable Data Table")
-        self.tabs.addTab(self.custom_data_table_tab, "Custom Data Table")
+        self.data_tabs.addTab(self.custom_data_table_tab, "Custom Data Table")
 
         # Data Display Tab
         self.data_display_tab = DataDisplayTab(self.units)
-        self.tabs.addTab(self.data_display_tab, "Data Display")
+        self.data_tabs.addTab(self.data_display_tab, "Data Display")
+        self.tabs.addTab(self.data_tabs, "Data")
 
         # GPS Map Tab
         self.gps_map_tab = GPSMapTab()
-        self.tabs.addTab(self.gps_map_tab, "GPS Map")
+        self.tabs.addTab(self.gps_map_tab, "Map")
 
         # Image Annotation Tabs
         try:
             self.battery_image_tab = ImageAnnotationTab("battery", "Battery Image", self.config_file)
             self.array_image_tab = ImageAnnotationTab("array", "Array Image", self.config_file)
-            self.tabs.addTab(self.battery_image_tab, "Battery Image")
-            self.tabs.addTab(self.array_image_tab, "Array Image")
+            self.tools_tabs.addTab(self.battery_image_tab, "Battery Image")
+            self.tools_tabs.addTab(self.array_image_tab, "Array Image")
         except Exception as e:
             # Fail-safe: don't block the rest of UI if these fail
             self.logger.error(f"Failed to init image tabs: {e}")
@@ -446,13 +463,14 @@ class TelemetryGUI(QWidget):
         self.csv_management_tab = CSVManagementTab(self.csv_handler)
         self.csv_management_tab.export_bundle_requested.connect(self.export_bundle_requested.emit)
         self.csv_management_tab.import_bundle_requested.connect(self.import_bundle_requested.emit)
-        self.tabs.addTab(self.csv_management_tab, "CSV Management")
+        self.tools_tabs.addTab(self.csv_management_tab, "CSV Management")
 
         self.simulation_tab = SimulationTab()
         self.simulation_tab.start_replay.connect(self.start_simulation_replay_requested.emit)
         self.simulation_tab.start_scenario.connect(self.start_simulation_scenario_requested.emit)
         self.simulation_tab.stop_requested.connect(self.stop_simulation_requested.emit)
-        self.tabs.addTab(self.simulation_tab, "Simulation")
+        self.tools_tabs.addTab(self.simulation_tab, "Simulation")
+        self.tabs.addTab(self.tools_tabs, "Tools")
 
         # Settings Tab
         self.settings_tab = SettingsTab(graph_groups, self.color_mapping)
@@ -472,6 +490,8 @@ class TelemetryGUI(QWidget):
             QTimer.singleShot(300, self.on_refresh_versions)
         except Exception:
             pass
+
+        self.restore_gui_state()
 
     def apply_dark_mode(self):
         """
@@ -569,6 +589,9 @@ class TelemetryGUI(QWidget):
             self.last_telemetry_data = enriched_data.copy()
             graph_data = {k: v for k, v in enriched_data.items() if k not in ['Errors', 'Limits']}
 
+            # Fan the same enriched snapshot into every view so Dashboard, Map,
+            # tables, and graphs stay consistent for a given telemetry tick.
+            self.dashboard_tab.update_data(enriched_data)
             self.mc1_tab.update_graphs(graph_data)
             self.mc2_tab.update_graphs(graph_data)
             self.pack1_tab.update_graphs(graph_data)
@@ -607,6 +630,7 @@ class TelemetryGUI(QWidget):
         self.update_graph_tab_color(self.pack1_tab, key, color)
         self.update_graph_tab_color(self.pack2_tab, key, color)
         self.update_graph_tab_color(self.remaining_tab, key, color)
+        self.update_graph_tab_color(self.insights_tab, key, color)
 
         # Save the updated color mapping
         self.save_color_mapping()
@@ -642,11 +666,13 @@ class TelemetryGUI(QWidget):
         # inside on_units_changed
         for tab in (self.data_table_tab,
                     self.data_display_tab,
+                    self.dashboard_tab,
                     self.mc1_tab,
                     self.mc2_tab,
                     self.pack1_tab,
                     self.pack2_tab,
-                    self.remaining_tab):
+                    self.remaining_tab,
+                    self.insights_tab):
             if hasattr(tab, 'set_units_map'):
                 tab.set_units_map(self.units, self.units_mode)
 
@@ -654,6 +680,34 @@ class TelemetryGUI(QWidget):
             self.update_all_tabs(self.last_telemetry_data)
 
         self.logger.info(f"Units changed to {units_choice}. Updated units: {self.units}")
+
+    def set_connection_status(self, status: str):
+        if hasattr(self, "dashboard_tab"):
+            self.dashboard_tab.set_connection_status(status)
+
+    def set_simulation_status(self, mode: str | None):
+        if hasattr(self, "dashboard_tab"):
+            self.dashboard_tab.set_mode(mode or "Live")
+
+    def restore_gui_state(self):
+        # Persist only view preferences here. Operational settings remain in
+        # application_data/config.json through AppSettings.
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        geometry = settings.value("window/geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        self.tabs.setCurrentIndex(int(settings.value("tabs/main", 0)))
+        self.graph_tabs.setCurrentIndex(int(settings.value("tabs/graphs", 0)))
+        self.data_tabs.setCurrentIndex(int(settings.value("tabs/data", 0)))
+        self.tools_tabs.setCurrentIndex(int(settings.value("tabs/tools", 0)))
+
+    def save_gui_state(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("tabs/main", self.tabs.currentIndex())
+        settings.setValue("tabs/graphs", self.graph_tabs.currentIndex())
+        settings.setValue("tabs/data", self.data_tabs.currentIndex())
+        settings.setValue("tabs/tools", self.tools_tabs.currentIndex())
 
     def set_initial_settings(self, config_data: dict):
         """
@@ -668,6 +722,7 @@ class TelemetryGUI(QWidget):
         """
         Override the closeEvent to ensure color mapping is saved before exiting.
         """
+        self.save_gui_state()
         self.save_color_mapping()
         # Persist image annotations if present
         try:

@@ -31,6 +31,8 @@ class DataTableTab(QWidget):
         self.units_map  = units_map
         self.units_mode = units_mode
         self.groups     = groups
+        self._row_for_key = {}
+        self._layout_signature = None
 
         # build metric/imperial maps so unit selector can show both
         self._metric_map   = build_metric_units_dict()
@@ -89,7 +91,54 @@ class DataTableTab(QWidget):
 
         # count rows
         total = sum(1 + len(keys) + 1 for keys in self.groups.values())
+        signature = tuple((group, tuple(keys)) for group, keys in self.groups.items())
+        if self.table.rowCount() != total or signature != self._layout_signature:
+            # The table structure is stable during normal telemetry. Rebuild it
+            # only when groups change, then update value cells in place.
+            self._build_static_rows(total, signature)
+
+        for key, row in self._row_for_key.items():
+            raw = telemetry_data.get(key)
+            target = self.unit_overrides.get(key, self.units_map.get(key, ""))
+            disp = convert_value(key, raw, target)
+
+            value_item = self.table.item(row, 1)
+            if value_item is None:
+                value_item = QTableWidgetItem()
+                value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row, 1, value_item)
+            value_item.setText(str(disp))
+            value_item.setForeground(QBrush(QColor("#FFF")))
+            value_item.setBackground(QBrush())
+
+            bg = None
+            if key in self.error_keys:
+                s = str(raw).strip().lower()
+                if s and s not in ("0", "none", "n/a"):
+                    bg = QColor("#FF0000")
+            elif key in self.error_count_keys:
+                try:
+                    if int(raw) > 0:
+                        bg = QColor("#FFA500")
+                except Exception:
+                    pass
+
+            if bg:
+                value_item.setBackground(QBrush(bg))
+
+            unit_item = self.table.item(row, 2)
+            if unit_item is None:
+                unit_item = QTableWidgetItem()
+                unit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row, 2, unit_item)
+            unit_item.setText(target)
+            unit_item.setForeground(QBrush(QColor("#FFF")))
+
+    def _build_static_rows(self, total, signature):
+        # Build group headers and parameter/unit cells once. update_data() keeps
+        # the hot path limited to value text and warning colors.
         self.table.setRowCount(total)
+        self._row_for_key.clear()
 
         row = 0
         for group, keys in self.groups.items():
@@ -105,12 +154,6 @@ class DataTableTab(QWidget):
             row += 1
 
             for key in keys:
-                raw = telemetry_data.get(key)
-                # pick override first
-                target = self.unit_overrides.get(key,
-                            self.units_map.get(key,""))
-                disp = convert_value(key, raw, target)
-
                 # Param
                 pi = QTableWidgetItem(key)
                 pi.setTextAlignment(Qt.AlignmentFlag.AlignLeft|
@@ -118,41 +161,23 @@ class DataTableTab(QWidget):
                 pi.setForeground(QBrush(QColor("#FFF")))
                 self.table.setItem(row,0,pi)
 
-                # Value + coloring
-                vs = str(disp)
-                vi = QTableWidgetItem(vs)
+                vi = QTableWidgetItem("--")
                 vi.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 vi.setForeground(QBrush(QColor("#FFF")))
-
-                # error coloring logic:
-                bg = None
-                if key in self.error_keys:
-                    # any non-zero / non-empty → red
-                    s = str(raw).strip().lower()
-                    if s and s not in ("0","none","n/a"):
-                        bg = QColor("#FF0000")
-                elif key in self.error_count_keys:
-                    try:
-                        if int(raw) > 0:
-                            bg = QColor("#FFA500")
-                    except:
-                        pass
-
-                if bg:
-                    vi.setBackground(QBrush(bg))
-
                 self.table.setItem(row,1,vi)
 
                 # Unit
-                ui = QTableWidgetItem(target)
+                ui = QTableWidgetItem(self.units_map.get(key, ""))
                 ui.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 ui.setForeground(QBrush(QColor("#FFF")))
                 self.table.setItem(row,2,ui)
 
+                self._row_for_key[key] = row
                 row += 1
 
             # spacer
             row += 1
+        self._layout_signature = signature
 
     def _on_cell_double_clicked(self, r, c):
         if c != 2:  # only Unit column
