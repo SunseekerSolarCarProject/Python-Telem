@@ -3,6 +3,7 @@ import math
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -54,12 +55,17 @@ class MetricCard(QFrame):
 class DashboardTab(QWidget):
     # This tab is the race-day cockpit: it surfaces the values and warnings
     # operators should not have to hunt for across the detailed graph/table tabs.
+    SPEED_SOURCE_NAV = "nav"
+    SPEED_SOURCE_MOTOR_AVG = "motor_avg"
+
     def __init__(self, units_map):
         super().__init__()
         self.units_map = units_map.copy()
         self.last_update = None
+        self.last_telemetry_data = {}
         self.mode = "Live"
         self.connection = "Starting"
+        self.speed_source = self.SPEED_SOURCE_NAV
         self._init_ui()
 
         self.age_timer = QTimer(self)
@@ -76,9 +82,15 @@ class DashboardTab(QWidget):
         self.connection_label.setObjectName("StatusPill")
         self.age_label = QLabel("Data age: --")
         self.age_label.setObjectName("StatusPill")
+        self.speed_source_selector = QComboBox()
+        self.speed_source_selector.addItem("Nav", self.SPEED_SOURCE_NAV)
+        self.speed_source_selector.addItem("Motor Avg", self.SPEED_SOURCE_MOTOR_AVG)
+        self.speed_source_selector.currentIndexChanged.connect(self._on_speed_source_changed)
         status_row.addWidget(self.mode_label)
         status_row.addWidget(self.connection_label)
         status_row.addWidget(self.age_label)
+        status_row.addWidget(QLabel("Speed Source:"))
+        status_row.addWidget(self.speed_source_selector)
         status_row.addStretch()
         layout.addLayout(status_row)
 
@@ -138,8 +150,14 @@ class DashboardTab(QWidget):
         self.connection_label.style().polish(self.connection_label)
 
     def update_data(self, telemetry_data):
+        self.last_telemetry_data = telemetry_data.copy()
         self.last_update = datetime.now()
         for key, card in self.cards.items():
+            if key == TelemetryKey.NAV_VEHICLE_MPH.value[0]:
+                display, target, state = self._speed_card_display(telemetry_data, card.unit)
+                card.set_value(display, target, state)
+                continue
+
             raw = telemetry_data.get(key)
             target = self.units_map.get(key, card.unit)
             try:
@@ -149,6 +167,51 @@ class DashboardTab(QWidget):
             card.set_value(display, target, self._state_for_value(key, raw))
         self._update_alerts(telemetry_data)
         self._refresh_age()
+
+    def _on_speed_source_changed(self):
+        self.speed_source = self.speed_source_selector.currentData() or self.SPEED_SOURCE_NAV
+        if self.last_telemetry_data:
+            self.update_data(self.last_telemetry_data)
+
+    def _speed_card_display(self, telemetry_data, fallback_unit):
+        target = self.units_map.get(TelemetryKey.NAV_VEHICLE_MPH.value[0], fallback_unit)
+        if self.speed_source == self.SPEED_SOURCE_MOTOR_AVG:
+            raw = self._average_motor_velocity_mps(telemetry_data)
+            return self._mps_to_speed_unit(raw, target), target, self._state_for_value(
+                TelemetryKey.NAV_VEHICLE_MPH.value[0], raw
+            )
+
+        key = TelemetryKey.NAV_VEHICLE_MPH.value[0]
+        raw = telemetry_data.get(key)
+        try:
+            display = convert_value(key, raw, target)
+        except Exception:
+            display = raw
+        return display, target, self._state_for_value(key, raw)
+
+    def _average_motor_velocity_mps(self, telemetry_data):
+        values = []
+        for key in (
+            TelemetryKey.MC1VEL_VELOCITY.value[0],
+            TelemetryKey.MC2VEL_VELOCITY.value[0],
+        ):
+            try:
+                values.append(float(telemetry_data.get(key)))
+            except (TypeError, ValueError):
+                return None
+        return sum(values) / len(values)
+
+    def _mps_to_speed_unit(self, value, target_unit):
+        if value is None:
+            return None
+        unit = (target_unit or "").lower()
+        if unit in ("mph", "mi/h", "miles/hour"):
+            return value * 2.23694
+        if unit in ("km/h", "kph", "kmh"):
+            return value * 3.6
+        if unit in ("ft/s", "fps"):
+            return value * 3.28084
+        return value
 
     def _state_for_value(self, key, value):
         try:

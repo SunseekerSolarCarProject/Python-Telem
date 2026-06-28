@@ -182,3 +182,5 @@ graphify-out/cache/ast/v0.8.40/f6831ea993b4731d92478d0f60de1ec7b010a5bf8e661bc70
 graphify-out/cache/ast/v0.8.40/fbbc5b5720a6d67c66407c4059f2dafe16f987b0cbf43368b88634c1f2ae99f8.json
 graphify-out/cache/ast/v0.8.40/fe3328ceb16e6f049ffc644df391a1df356bd8d868aba3242f0c4b1c8b184dbe.json
 graphify-out/cache/ast/v0.8.40/fea694f3f1c9966d2fbff9cbeeb70aeea9208b3cf2c04041f457dbf04a634166.json
+src/application_data/models/battery_life_model.pkl
+src/application_data/models/break_even_model.pkl
