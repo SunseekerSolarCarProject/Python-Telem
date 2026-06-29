@@ -424,11 +424,20 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0],
                 TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0],
                 TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
+                TelemetryKey.NAV_LAP_COUNT.value[0],
+                TelemetryKey.NAV_CURRENT_LAP_TIME.value[0],
+                TelemetryKey.NAV_LAST_LAP_TIME.value[0],
+                TelemetryKey.NAV_BEST_LAP_TIME.value[0],
+                TelemetryKey.NAV_LAP_STATUS.value[0],
             ],
             "General": [
                 TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0],
                 TelemetryKey.TOTAL_VOLTAGE.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
-                TelemetryKey.TIMESTAMP.value[0]
+                TelemetryKey.TIMESTAMP.value[0],
+                TelemetryKey.TELEMETRY_STATUS.value[0],
+                TelemetryKey.TELEMETRY_ERROR.value[0],
+                TelemetryKey.TELEMETRY_BAD_PACKET_COUNT.value[0],
+                TelemetryKey.TELEMETRY_LAST_BAD_RAW.value[0],
             ]
         }
 
@@ -583,7 +592,11 @@ class TelemetryGUI(QWidget):
             # Exclude 'Errors' and 'Limits' or anything you don't want to graph
 
             enriched_data = telemetry_data.copy()
-            route_metrics = self.gps_map_tab.update_data(enriched_data) or {}
+            lap_already_computed = TelemetryKey.NAV_LAP_STATUS.value[0] in enriched_data
+            route_metrics = self.gps_map_tab.update_data(
+                enriched_data,
+                update_laps=not lap_already_computed,
+            ) or {}
             enriched_data.update(route_metrics)
 
             self.last_telemetry_data = enriched_data.copy()

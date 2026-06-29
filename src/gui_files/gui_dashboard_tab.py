@@ -110,6 +110,10 @@ class DashboardTab(QWidget):
             ("Remaining Time", TelemetryKey.PREDICTED_EXACT_TIME.value[0]),
             ("Break Even", TelemetryKey.PREDICTED_BREAK_EVEN_SPEED.value[0]),
             ("GPS Fix", TelemetryKey.NAV_FIX.value[0]),
+            ("Lap Count", TelemetryKey.NAV_LAP_COUNT.value[0]),
+            ("Current Lap", TelemetryKey.NAV_CURRENT_LAP_TIME.value[0]),
+            ("Last Lap", TelemetryKey.NAV_LAST_LAP_TIME.value[0]),
+            ("Telemetry", TelemetryKey.TELEMETRY_STATUS.value[0]),
         ]
 
         grid = QGridLayout()
@@ -243,6 +247,14 @@ class DashboardTab(QWidget):
         gps_valid = str(telemetry_data.get(TelemetryKey.NAV_GPS_VALID.value[0], "")).lower()
         if gps_valid in ("0", "false", "invalid"):
             alerts.append("GPS telemetry is invalid.")
+
+        telemetry_status = str(telemetry_data.get(TelemetryKey.TELEMETRY_STATUS.value[0], "")).strip()
+        if telemetry_status and telemetry_status.upper() not in ("OK", "N/A"):
+            telemetry_error = str(telemetry_data.get(TelemetryKey.TELEMETRY_ERROR.value[0], "")).strip()
+            if telemetry_error:
+                alerts.append(f"Telemetry packet issue: {telemetry_error}")
+            else:
+                alerts.append(f"Telemetry status: {telemetry_status}")
 
         quality = str(telemetry_data.get(TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0], "")).strip()
         if quality and quality.lower() not in ("0", "none", "ok", "n/a"):

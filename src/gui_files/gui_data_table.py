@@ -44,6 +44,8 @@ class DataTableTab(QWidget):
             TelemetryKey.MC2LIM_ERRORS.value[0],
             TelemetryKey.MC1LIM_LIMITS.value[0],
             TelemetryKey.MC2LIM_LIMITS.value[0],
+            TelemetryKey.TELEMETRY_STATUS.value[0],
+            TelemetryKey.TELEMETRY_ERROR.value[0],
         }
         self.error_count_keys = {
             TelemetryKey.MC1LIM_CAN_RECEIVE_ERROR_COUNT.value[0],
@@ -112,7 +114,11 @@ class DataTableTab(QWidget):
             value_item.setBackground(QBrush())
 
             bg = None
-            if key in self.error_keys:
+            if key == TelemetryKey.TELEMETRY_STATUS.value[0]:
+                s = str(raw).strip().lower()
+                if s and s not in ("0", "none", "n/a", "ok"):
+                    bg = QColor("#FF0000")
+            elif key in self.error_keys:
                 s = str(raw).strip().lower()
                 if s and s not in ("0", "none", "n/a"):
                     bg = QColor("#FF0000")

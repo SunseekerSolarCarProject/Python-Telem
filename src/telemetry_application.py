@@ -1138,7 +1138,7 @@ class TelemetryApplication(QObject):
                         filename=self.csv_handler.get_csv_file_path(),
                         battery_info=self.battery_info,
                         used_ah=self.used_Ah,
-                        write_to_csv=not bool(self._simulation_mode)
+                        write_to_csv=False
                     )
 
                     if not isinstance(combined_data, dict):
@@ -1210,6 +1210,18 @@ class TelemetryApplication(QObject):
                     # --- tack on static battery_info if present ---
                     if self.battery_info:
                         combined_data.update(self.battery_info)
+
+                    if self.gui and hasattr(self.gui, "gps_map_tab"):
+                        nav_metrics = self.gui.gps_map_tab.build_navigation_metrics_for_snapshot(
+                            combined_data,
+                            update_laps=True,
+                        )
+                        if nav_metrics:
+                            combined_data.update(nav_metrics)
+
+                    if not self._simulation_mode:
+                        self.csv_handler.append_to_csv(self.csv_handler.get_csv_file_path(), combined_data)
+                        self.buffer.save_training_data()
 
                     # --- emit to GUI & server ---
                     self.update_data_signal.emit(combined_data)

@@ -95,6 +95,8 @@ class CSVHandler:
             TelemetryKey.MC2LIM_CAN_TRANSMIT_ERROR_COUNT.value[0],
             TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0], TelemetryKey.MC2LIM_ERRORS.value[0], TelemetryKey.MC2LIM_LIMITS.value[0],
             TelemetryKey.TOTAL_CAPACITY_WH.value[0], TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_VOLTAGE.value[0],
+            TelemetryKey.TELEMETRY_STATUS.value[0], TelemetryKey.TELEMETRY_ERROR.value[0],
+            TelemetryKey.TELEMETRY_BAD_PACKET_COUNT.value[0], TelemetryKey.TELEMETRY_LAST_BAD_RAW.value[0],
             TelemetryKey.BME_TEMPERATURE_C.value[0], TelemetryKey.BME_PRESSURE_PA.value[0], TelemetryKey.BME_HUMIDITY_PCT.value[0],
             TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
             TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
@@ -109,7 +111,10 @@ class CSVHandler:
             TelemetryKey.NAV_CHECKPOINT_NAME.value[0],
             TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0],
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0],
-            TelemetryKey.NAV_CHECKPOINT_ETA.value[0]
+            TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
+            TelemetryKey.NAV_LAP_COUNT.value[0], TelemetryKey.NAV_CURRENT_LAP_TIME.value[0],
+            TelemetryKey.NAV_LAST_LAP_TIME.value[0], TelemetryKey.NAV_BEST_LAP_TIME.value[0],
+            TelemetryKey.NAV_LAP_STATUS.value[0]
         ]
         self.logger.debug(f"Primary headers generated: {ordered_keys}")
         return ordered_keys
@@ -138,14 +143,42 @@ class CSVHandler:
         :param headers: List of header strings.
         """
         with self.lock:
-            if not os.path.exists(csv_file):
-                try:
+            try:
+                if not os.path.exists(csv_file):
                     with open(csv_file, 'w', newline='') as file:
                         writer = csv.DictWriter(file, fieldnames=headers)
                         writer.writeheader()
                     self.logger.info(f"CSV file created: {csv_file}")
-                except Exception as exc:
-                    self.logger.error(f"Error setting up CSV file {csv_file}: {exc}")
+                else:
+                    self._ensure_csv_headers(csv_file, headers)
+            except Exception as exc:
+                self.logger.error(f"Error setting up CSV file {csv_file}: {exc}")
+
+    def _ensure_csv_headers(self, csv_file, headers):
+        with open(csv_file, 'r', newline='') as file:
+            reader = csv.DictReader(file)
+            existing_headers = reader.fieldnames or []
+            if not existing_headers:
+                rows = []
+            else:
+                missing_headers = [header for header in headers if header not in existing_headers]
+                if not missing_headers:
+                    return
+                rows = list(reader)
+
+        final_headers = list(headers)
+        for header in existing_headers:
+            if header not in final_headers:
+                final_headers.append(header)
+
+        temp_file = f"{csv_file}.tmp"
+        with open(temp_file, 'w', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=final_headers)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({header: row.get(header, "N/A") for header in final_headers})
+        os.replace(temp_file, csv_file)
+        self.logger.info(f"CSV headers updated: {csv_file}")
 
     def _get_csv_config(self, csv_kind):
         config = {

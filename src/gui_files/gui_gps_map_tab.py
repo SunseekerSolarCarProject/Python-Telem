@@ -1,5 +1,6 @@
 import math
 import os
+import time
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 
@@ -74,6 +75,15 @@ class GPSMapTab(QWidget):
         self.trail = []
         self.route_points = []
         self.route_segments = []
+        self.lap_start_point = None
+        self.lap_end_point = None
+        self.previous_lap_point = None
+        self.lap_count = 0
+        self.lap_started_at = None
+        self.last_lap_seconds = None
+        self.best_lap_seconds = None
+        self.last_crossing_at = None
+        self.lap_status = "Set start/end line"
         self.tile_cache = OrderedDict()
         self.tile_items = {}
         self.visible_tile_keys = set()
@@ -138,6 +148,15 @@ class GPSMapTab(QWidget):
         load_gpx_button = QPushButton("Load GPX")
         load_gpx_button.clicked.connect(self._load_gpx_route)
         manual_layout.addWidget(load_gpx_button)
+        set_lap_start_button = QPushButton("Set Start")
+        set_lap_start_button.clicked.connect(self._set_lap_start)
+        manual_layout.addWidget(set_lap_start_button)
+        set_lap_end_button = QPushButton("Set End")
+        set_lap_end_button.clicked.connect(self._set_lap_end)
+        manual_layout.addWidget(set_lap_end_button)
+        reset_laps_button = QPushButton("Reset Laps")
+        reset_laps_button.clicked.connect(self._reset_laps)
+        manual_layout.addWidget(reset_laps_button)
         self.follow_vehicle_checkbox = QCheckBox("Follow vehicle")
         self.follow_vehicle_checkbox.setChecked(True)
         manual_layout.addWidget(self.follow_vehicle_checkbox)
@@ -146,6 +165,8 @@ class GPSMapTab(QWidget):
 
         self.route_label = QLabel("Route: none")
         layout.addWidget(self.route_label)
+        self.lap_label = QLabel("Laps: set start/end line")
+        layout.addWidget(self.lap_label)
 
         self.tile_status_label = QLabel("Map tiles: idle")
         layout.addWidget(self.tile_status_label)
@@ -165,7 +186,7 @@ class GPSMapTab(QWidget):
         self.attribution_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.attribution_label)
 
-    def update_data(self, telemetry_data):
+    def update_data(self, telemetry_data, update_laps=True):
         lat = self._as_float(telemetry_data.get(TelemetryKey.NAV_LATITUDE.value[0]))
         lon = self._as_float(telemetry_data.get(TelemetryKey.NAV_LONGITUDE.value[0]))
         valid = self._as_int(telemetry_data.get(TelemetryKey.NAV_GPS_VALID.value[0]))
@@ -175,7 +196,7 @@ class GPSMapTab(QWidget):
         age_ms = self._as_int(telemetry_data.get(TelemetryKey.NAV_AGE_MS.value[0]))
 
         if lat is None or lon is None:
-            return self._build_route_metrics(speed or 0.0)
+            return self._build_navigation_metrics(speed or 0.0, update_laps=False)
 
         self.coord_label.setText(f"Lat: {lat:.6f}  Lon: {lon:.6f}")
         self.speed_label.setText(f"Speed: {speed or 0.0:.2f} mph")
@@ -184,7 +205,7 @@ class GPSMapTab(QWidget):
         if not has_location:
             self.status_label.setText(f"GPS invalid | fix {fix} | source {source} | age {age_ms} ms")
             self._render_empty_state(lat, lon)
-            return self._build_route_metrics(speed or 0.0)
+            return self._build_navigation_metrics(speed or 0.0, update_laps=False)
 
         self._set_vehicle_location(
             lat,
@@ -194,7 +215,27 @@ class GPSMapTab(QWidget):
             reset_trail=False,
             recenter=self.follow_vehicle_checkbox.isChecked(),
         )
-        return self._build_route_metrics(speed or 0.0)
+        return self._build_navigation_metrics(speed or 0.0, update_laps=update_laps, lat=lat, lon=lon)
+
+    def build_navigation_metrics_for_snapshot(self, telemetry_data, update_laps=True):
+        lat = self._as_float(telemetry_data.get(TelemetryKey.NAV_LATITUDE.value[0]))
+        lon = self._as_float(telemetry_data.get(TelemetryKey.NAV_LONGITUDE.value[0]))
+        valid = self._as_int(telemetry_data.get(TelemetryKey.NAV_GPS_VALID.value[0]))
+        fix = self._as_int(telemetry_data.get(TelemetryKey.NAV_FIX.value[0]))
+        speed = self._as_float(telemetry_data.get(TelemetryKey.NAV_VEHICLE_MPH.value[0])) or 0.0
+        has_location = (
+            lat is not None
+            and lon is not None
+            and valid == 1
+            and fix > 0
+            and not (abs(lat) < 0.000001 and abs(lon) < 0.000001)
+        )
+        return self._build_navigation_metrics(
+            speed,
+            update_laps=bool(update_laps and has_location),
+            lat=lat,
+            lon=lon,
+        )
 
     def _set_zoom(self, zoom):
         self.zoom = max(2, min(19, zoom))
@@ -250,6 +291,53 @@ class GPSMapTab(QWidget):
             speed=0.0,
             reset_trail=True,
         )
+
+    def _set_lap_start(self):
+        point = self._current_lap_point()
+        if point is None:
+            QMessageBox.warning(self, "Lap Line", "Set a valid vehicle or manual location first.")
+            return
+        self.lap_start_point = point
+        self._reset_laps(keep_line=True)
+        self._refresh_lap_label()
+        self._render_map()
+
+    def _set_lap_end(self):
+        point = self._current_lap_point()
+        if point is None:
+            QMessageBox.warning(self, "Lap Line", "Set a valid vehicle or manual location first.")
+            return
+        if self.lap_start_point and self._haversine_miles(
+            self.lap_start_point[0],
+            self.lap_start_point[1],
+            point[0],
+            point[1],
+        ) < 0.003:
+            QMessageBox.warning(self, "Lap Line", "Start and end need to be at least about 15 feet apart.")
+            return
+        self.lap_end_point = point
+        self._reset_laps(keep_line=True)
+        self._refresh_lap_label()
+        self._render_map()
+
+    def _reset_laps(self, keep_line=False):
+        self.previous_lap_point = None
+        self.lap_count = 0
+        self.lap_started_at = None
+        self.last_lap_seconds = None
+        self.best_lap_seconds = None
+        self.last_crossing_at = None
+        self.lap_status = "Ready" if self._lap_line_ready() else "Set start/end line"
+        self._refresh_lap_label()
+
+    def _current_lap_point(self):
+        if self.vehicle_lat is not None and self.vehicle_lon is not None:
+            return self.vehicle_lat, self.vehicle_lon
+        lat = self._as_float(self.manual_lat_edit.text())
+        lon = self._as_float(self.manual_lon_edit.text())
+        if lat is None or lon is None or not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            return None
+        return lat, lon
 
     def _set_map_center_from_view(self):
         if self.center_lat is None or self.center_lon is None:
@@ -310,6 +398,7 @@ class GPSMapTab(QWidget):
         center_scene_y = (center_tile_y - self.base_tile_y) * self.TILE_SIZE
         marker_x, marker_y = self._latlon_to_scene_point(self.vehicle_lat, self.vehicle_lon)
         self._draw_route()
+        self._draw_lap_line()
         self._draw_trail(self.base_tile_x, self.base_tile_y)
         if marker_x is not None and marker_y is not None:
             self._draw_vehicle_marker(marker_x, marker_y)
@@ -400,6 +489,33 @@ class GPSMapTab(QWidget):
             route = QGraphicsPathItem(path)
             route.setPen(QPen(QColor("#f59e0b"), 4))
             self.scene.addItem(route)
+
+    def _draw_lap_line(self):
+        if not self.lap_start_point:
+            return
+        start_x, start_y = self._latlon_to_scene_point(*self.lap_start_point)
+        if start_x is None or start_y is None:
+            return
+
+        start_marker = QGraphicsEllipseItem(start_x - 7, start_y - 7, 14, 14)
+        start_marker.setPen(QPen(QColor("#ffffff"), 2))
+        start_marker.setBrush(QBrush(QColor("#22c55e")))
+        self.scene.addItem(start_marker)
+
+        if not self.lap_end_point:
+            return
+        end_x, end_y = self._latlon_to_scene_point(*self.lap_end_point)
+        if end_x is None or end_y is None:
+            return
+
+        line = QGraphicsLineItem(start_x, start_y, end_x, end_y)
+        line.setPen(QPen(QColor("#22c55e"), 5))
+        self.scene.addItem(line)
+
+        end_marker = QGraphicsEllipseItem(end_x - 7, end_y - 7, 14, 14)
+        end_marker.setPen(QPen(QColor("#ffffff"), 2))
+        end_marker.setBrush(QBrush(QColor("#16a34a")))
+        self.scene.addItem(end_marker)
 
     def _draw_trail(self, base_tile_x, base_tile_y):
         if len(self.trail) < 2:
@@ -620,6 +736,154 @@ class GPSMapTab(QWidget):
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0]: round(checkpoint_remaining, 2),
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0]: eta,
         }
+
+    def _build_navigation_metrics(self, speed_mph, update_laps=False, lat=None, lon=None):
+        metrics = self._build_route_metrics(speed_mph)
+        if update_laps and lat is not None and lon is not None:
+            self._update_lap_counter(lat, lon, speed_mph)
+        metrics.update(self._build_lap_metrics())
+        return metrics
+
+    def _build_lap_metrics(self):
+        current_seconds = None
+        if self.lap_started_at is not None:
+            current_seconds = time.monotonic() - self.lap_started_at
+        self._refresh_lap_label(current_seconds=current_seconds)
+        return {
+            TelemetryKey.NAV_LAP_COUNT.value[0]: self.lap_count,
+            TelemetryKey.NAV_CURRENT_LAP_TIME.value[0]: self._format_duration(current_seconds),
+            TelemetryKey.NAV_LAST_LAP_TIME.value[0]: self._format_duration(self.last_lap_seconds),
+            TelemetryKey.NAV_BEST_LAP_TIME.value[0]: self._format_duration(self.best_lap_seconds),
+            TelemetryKey.NAV_LAP_STATUS.value[0]: self.lap_status,
+        }
+
+    def _update_lap_counter(self, lat, lon, speed_mph):
+        current_point = (lat, lon)
+        if not self._lap_line_ready():
+            self.previous_lap_point = current_point
+            self.lap_status = "Set start/end line"
+            return
+
+        if self.previous_lap_point is None:
+            self.previous_lap_point = current_point
+            self.lap_status = "Ready"
+            return
+
+        now = time.monotonic()
+        if self._safe_float(speed_mph) < 1.0:
+            self.previous_lap_point = current_point
+            self.lap_status = "Waiting for movement"
+            return
+
+        crossed = self._movement_crossed_lap_line(self.previous_lap_point, current_point)
+        self.previous_lap_point = current_point
+        if not crossed:
+            if self.lap_started_at is not None:
+                self.lap_status = "Timing"
+            return
+
+        if self.last_crossing_at is not None and now - self.last_crossing_at < 8.0:
+            self.lap_status = "Crossing cooldown"
+            return
+
+        self.last_crossing_at = now
+        if self.lap_started_at is None:
+            self.lap_started_at = now
+            self.lap_status = "Timing started"
+            return
+
+        lap_seconds = now - self.lap_started_at
+        if lap_seconds < 10.0:
+            self.lap_status = "Lap ignored: too short"
+            return
+
+        self.lap_count += 1
+        self.last_lap_seconds = lap_seconds
+        if self.best_lap_seconds is None or lap_seconds < self.best_lap_seconds:
+            self.best_lap_seconds = lap_seconds
+        self.lap_started_at = now
+        self.lap_status = f"Lap {self.lap_count} complete"
+
+    def _refresh_lap_label(self, current_seconds=None):
+        if not hasattr(self, "lap_label"):
+            return
+        line_state = "line set" if self._lap_line_ready() else "set start/end line"
+        current = self._format_duration(current_seconds)
+        last = self._format_duration(self.last_lap_seconds)
+        best = self._format_duration(self.best_lap_seconds)
+        self.lap_label.setText(
+            f"Laps: {self.lap_count} | Current {current} | Last {last} | Best {best} | {line_state} | {self.lap_status}"
+        )
+
+    def _lap_line_ready(self):
+        return self.lap_start_point is not None and self.lap_end_point is not None
+
+    def _movement_crossed_lap_line(self, previous_point, current_point):
+        ref_lat = (self.lap_start_point[0] + self.lap_end_point[0] + previous_point[0] + current_point[0]) / 4.0
+        ref_lon = (self.lap_start_point[1] + self.lap_end_point[1] + previous_point[1] + current_point[1]) / 4.0
+        a = self._project_to_meters(previous_point, ref_lat, ref_lon)
+        b = self._project_to_meters(current_point, ref_lat, ref_lon)
+        c = self._project_to_meters(self.lap_start_point, ref_lat, ref_lon)
+        d = self._project_to_meters(self.lap_end_point, ref_lat, ref_lon)
+        return self._segments_intersect(a, b, c, d)
+
+    @staticmethod
+    def _project_to_meters(point, ref_lat, ref_lon):
+        radius_meters = 6371008.8
+        lat, lon = point
+        x = math.radians(lon - ref_lon) * math.cos(math.radians(ref_lat)) * radius_meters
+        y = math.radians(lat - ref_lat) * radius_meters
+        return x, y
+
+    @staticmethod
+    def _segments_intersect(a, b, c, d):
+        def orientation(p, q, r):
+            value = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+            if abs(value) < 1e-9:
+                return 0
+            return 1 if value > 0 else 2
+
+        def on_segment(p, q, r):
+            return (
+                min(p[0], r[0]) <= q[0] <= max(p[0], r[0])
+                and min(p[1], r[1]) <= q[1] <= max(p[1], r[1])
+            )
+
+        o1 = orientation(a, b, c)
+        o2 = orientation(a, b, d)
+        o3 = orientation(c, d, a)
+        o4 = orientation(c, d, b)
+
+        if o1 != o2 and o3 != o4:
+            return True
+        if o1 == 0 and on_segment(a, c, b):
+            return True
+        if o2 == 0 and on_segment(a, d, b):
+            return True
+        if o3 == 0 and on_segment(c, a, d):
+            return True
+        if o4 == 0 and on_segment(c, b, d):
+            return True
+        return False
+
+    @staticmethod
+    def _format_duration(seconds):
+        if seconds is None:
+            return "N/A"
+        try:
+            total_seconds = int(max(0, round(float(seconds))))
+        except (TypeError, ValueError):
+            return "N/A"
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    @staticmethod
+    def _safe_float(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     def _nearest_route_position(self, lat, lon):
         # This intentionally checks the sampled GPX points directly. It is

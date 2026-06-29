@@ -32,6 +32,7 @@ limit_flags_desc = [
 ]
 
 PLACEHOLDER_MARKERS = {"ABCDEF", "UVWXYZ"}  # Define placeholders to ignore
+BAD_HEX_MARKERS = {"HHHHHHHH", "0XHHHHHHHH"}
 
 class DataProcessor:
     def __init__(self, endianness='big'):
@@ -98,6 +99,7 @@ class DataProcessor:
             '0x00000000': 'none',
             '0xHHHHHHHH': 'nonexistent'
         }
+        self.bad_packet_count = 0
         self.logger.info("DataProcessor initialized with endianness: {}".format(endianness))
         self.endianness = endianness  # 'big' or 'little'
 
@@ -361,7 +363,11 @@ class DataProcessor:
         # Skip invalid hex data
         if hex1 in ['N/A', None] or hex2 in ['N/A', None]:
             self.logger.warning(f"Skipping invalid hex data: {data_line}")
-            return {}
+            return self._bad_telemetry_packet("Invalid hex data", data_line)
+
+        if self._contains_bad_hex_marker(parts[1:]):
+            self.logger.warning(f"Bad placeholder hex data: {data_line}")
+            return self._bad_telemetry_packet("Placeholder hex data received", data_line)
 
         self.logger.debug(f"Parsing data line for key: {key}")
         try:
@@ -496,3 +502,22 @@ class DataProcessor:
             processed_data[key] = "Error"
 
         return processed_data
+
+    def _bad_telemetry_packet(self, reason, raw_line):
+        self.bad_packet_count += 1
+        return {
+            TelemetryKey.TELEMETRY_STATUS.value[0]: "BAD_PACKET",
+            TelemetryKey.TELEMETRY_ERROR.value[0]: reason,
+            TelemetryKey.TELEMETRY_BAD_PACKET_COUNT.value[0]: self.bad_packet_count,
+            TelemetryKey.TELEMETRY_LAST_BAD_RAW.value[0]: str(raw_line),
+        }
+
+    @staticmethod
+    def _contains_bad_hex_marker(values):
+        for value in values:
+            normalized = str(value).strip().upper()
+            if normalized.startswith("0X"):
+                normalized = normalized[2:]
+            if normalized in BAD_HEX_MARKERS or (normalized and set(normalized) == {"H"}):
+                return True
+        return False

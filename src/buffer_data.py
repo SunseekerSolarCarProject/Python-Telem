@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 import logging
 from extra_calculations import ExtraCalculations
+from key_name_definitions import TelemetryKey
 
 class BufferData:
     def __init__(self, csv_handler, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
@@ -124,6 +125,7 @@ class BufferData:
         # schema even when a flush happens before every sensor has reported.
         for field in self.csv_headers:
             self.combined_data.setdefault(field, "N/A")
+        self._update_telemetry_health_for_flush()
 
         # Add derived battery metrics. The shunt current is integrated over a
         # fixed interval inside ExtraCalculations.update_used_Ah, while BP_PVS_Ah
@@ -178,6 +180,34 @@ class BufferData:
         self.logger.debug("Data buffer cleared and last_flush_time reset.")
         self.logger.debug(f"Final combined_data after processing: {self.combined_data}")
         return self.combined_data
+
+    def _update_telemetry_health_for_flush(self):
+        status_key = TelemetryKey.TELEMETRY_STATUS.value[0]
+        error_key = TelemetryKey.TELEMETRY_ERROR.value[0]
+        count_key = TelemetryKey.TELEMETRY_BAD_PACKET_COUNT.value[0]
+        raw_key = TelemetryKey.TELEMETRY_LAST_BAD_RAW.value[0]
+
+        bad_entries = [
+            entry for entry in self.data_buffer
+            if str(entry.get(status_key, "")).upper() == "BAD_PACKET"
+        ]
+        if bad_entries:
+            last_bad = bad_entries[-1]
+            self.combined_data[status_key] = "BAD_PACKET"
+            self.combined_data[error_key] = last_bad.get(error_key, "Bad telemetry packet")
+            self.combined_data[count_key] = last_bad.get(
+                count_key,
+                self.combined_data.get(count_key, 0),
+            )
+            self.combined_data[raw_key] = last_bad.get(raw_key, self.combined_data.get(raw_key, ""))
+            return
+
+        self.combined_data[status_key] = "OK"
+        self.combined_data[error_key] = ""
+        if self.combined_data.get(count_key) in (None, "N/A"):
+            self.combined_data[count_key] = 0
+        if self.combined_data.get(raw_key) in (None, "N/A"):
+            self.combined_data[raw_key] = ""
 
     def save_training_data(self):
         """

@@ -98,6 +98,10 @@ class TelemetryKey(Enum):
     TOTAL_VOLTAGE = ("Total_Voltage", "V")
     DEVICE_TIMESTAMP = ("device_timestamp", "hh:mm:ss")
     TIMESTAMP = ("timestamp", "year-Month-day hh:mm:ss")
+    TELEMETRY_STATUS = ("Telemetry_Status", "")
+    TELEMETRY_ERROR = ("Telemetry_Error", "")
+    TELEMETRY_BAD_PACKET_COUNT = ("Telemetry_Bad_Packet_Count", "")
+    TELEMETRY_LAST_BAD_RAW = ("Telemetry_Last_Bad_Raw", "")
 
     # Ambient sensor data
     BME_TEMPERATURE_C = ("BME_Temperature_C", "°C")
@@ -146,6 +150,11 @@ class TelemetryKey(Enum):
     NAV_ROUTE_DISTANCE_REMAINING_MI = ("NAV_Route_Distance_Remaining", "mi")
     NAV_CHECKPOINT_DISTANCE_REMAINING_MI = ("NAV_Checkpoint_Distance_Remaining", "mi")
     NAV_CHECKPOINT_ETA = ("NAV_Checkpoint_ETA", "hh:mm:ss")
+    NAV_LAP_COUNT = ("NAV_Lap_Count", "laps")
+    NAV_CURRENT_LAP_TIME = ("NAV_Current_Lap_Time", "hh:mm:ss")
+    NAV_LAST_LAP_TIME = ("NAV_Last_Lap_Time", "hh:mm:ss")
+    NAV_BEST_LAP_TIME = ("NAV_Best_Lap_Time", "hh:mm:ss")
+    NAV_LAP_STATUS = ("NAV_Lap_Status", "")
 
     # Remaining Capacity
     REMAINING_CAPACITY_AH = ("Remaining_Capacity_Ah", "Ah")
