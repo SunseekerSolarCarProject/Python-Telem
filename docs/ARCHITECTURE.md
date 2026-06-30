@@ -15,8 +15,11 @@ This project is a PyQt telemetry dashboard for live vehicle data, simulation rep
 1. `SerialReaderThread` in `src/serial_reader.py` reads raw serial lines.
 2. `DataProcessor` in `src/data_processor.py` parses raw telemetry formats into canonical `TelemetryKey` field names.
 3. `TelemetryApplication.process_data()` adds a timestamp and pushes parsed data into `BufferData`.
-4. `BufferData` creates complete snapshots from partial packet updates and writes CSV rows through `CSVHandler`.
-5. `TelemetryApplication` adds prediction and route fields, emits the combined snapshot to all GUI tabs, then sends it to HTTP/database storage when not in simulation mode.
+4. `BufferData` creates complete latest-known snapshots from partial packet updates.
+5. `TelemetryApplication` adds prediction, GPS route, lap timing, and static battery fields.
+6. Non-simulation snapshots are written to local CSV/training data.
+7. The enriched snapshot is emitted to every GUI tab.
+8. Online HTTP/database storage receives throttled snapshots every 5 seconds by default.
 
 ## Main Modules
 
@@ -38,7 +41,7 @@ GUI classes should display state, gather user input, and emit signals. Applicati
 
 ## Storage Boundaries
 
-CSV output is handled by `CSVHandler` and `BufferData`. HTTP/API sending is currently in `TelemetryApplication` and should move to a future `telemetry_sender.py` when that file is split. Database writing already lives behind `TelemetryDBWriter`.
+CSV file mechanics are handled by `CSVHandler`; snapshot assembly is handled by `BufferData`; final enriched CSV writes are coordinated by `TelemetryApplication`. HTTP/API sending is currently in `TelemetryApplication` and should move to a future `telemetry_sender.py` when that file is split. Database writing already lives behind `TelemetryDBWriter`.
 
 ## Suggested Future Split
 

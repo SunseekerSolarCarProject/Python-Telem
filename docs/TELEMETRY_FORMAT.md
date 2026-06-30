@@ -76,10 +76,30 @@ NAV_Checkpoint_Distance_Remaining
 NAV_Checkpoint_ETA
 ```
 
+The GPS map tab may also add lap timing fields after a start/end line is set:
+
+```text
+NAV_Lap_Count
+NAV_Current_Lap_Time
+NAV_Last_Lap_Time
+NAV_Best_Lap_Time
+NAV_Lap_Status
+```
+
 `TL_TIM,12:34:56` produces:
 
 ```text
 device_timestamp
+```
+
+Placeholder or bad telemetry packets such as `0xHHHHHHHH` are converted into
+telemetry health fields instead of silently becoming normal numeric data:
+
+```text
+Telemetry_Status
+Telemetry_Error
+Telemetry_Bad_Packet_Count
+Telemetry_Last_Bad_Raw
 ```
 
 ## Canonical Keys

@@ -120,9 +120,12 @@ python src/main_app.py
 - `learning_datasets/` – machine-learning pipelines and quality diagnostics.
 - `gui_files/` – modular PyQt tabs (data display, graphs, images, simulation, settings, CSV management).
 - `simulation.py` – worker threads for replaying recorded telemetry and generating synthetic scenarios.
+- `docs/START_HERE.md` – maintainer handoff map and recommended reading order.
 - `docs/ARCHITECTURE.md` – higher-level module boundaries and future split notes.
 - `docs/TELEMETRY_FORMAT.md` – serial packet examples and parser output keys.
 - `docs/WEBSITE_INTEGRATION.md` – backend/API handoff contract for website telemetry.
+- `docs/ONLINE_TELEMETRY_SCHEMA.md` – online payload shapes and field dictionary.
+- `docs/TELEMETRY_DB_SETUP.sql` – database table, optional generated columns, and query view.
 
 ### Building & Releases
 1. Run unit/system smoke tests locally (e.g., simulation replay, bundle export/import).  

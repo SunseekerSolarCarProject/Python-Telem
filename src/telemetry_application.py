@@ -6,6 +6,7 @@ import re
 import math
 import requests
 import threading
+import time
 from pathlib import Path
 from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
@@ -68,6 +69,7 @@ API_PAYLOAD_FORMAT = (os.getenv('TELEMETRY_INGESTION_PAYLOAD_FORMAT') or 'legacy
 API_SESSION_ID = (os.getenv('TELEMETRY_INGESTION_SESSION_ID') or 'live-session').strip()
 API_VEHICLE = (os.getenv('TELEMETRY_INGESTION_VEHICLE') or '').strip()
 API_EXPECT_JSON = (os.getenv('TELEMETRY_INGESTION_EXPECT_JSON') or 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS = os.getenv('TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS', '5')
 SOLCAST_API_KEY = os.getenv('SOLCAST_API_KEY')
 SOLCAST_LATITUDE = os.getenv('SOLCAST_LATITUDE')
 SOLCAST_LONGITUDE = os.getenv('SOLCAST_LONGITUDE')
@@ -101,6 +103,8 @@ class TelemetryApplication(QObject):
         self.telemetry_ingestion_session_id = API_SESSION_ID
         self.telemetry_ingestion_vehicle = API_VEHICLE
         self.telemetry_ingestion_expect_json = API_EXPECT_JSON
+        self.telemetry_online_send_interval_seconds = self._parse_float( TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS, 5.0,)
+        self._last_online_send_monotonic = None
         self.serial_reader_thread = None
         self.signals_connected = False
         self.used_Ah = 0
@@ -154,6 +158,30 @@ class TelemetryApplication(QObject):
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    def _parse_float(self, value, default):
+        try:
+            parsed = float(value)
+            if math.isfinite(parsed) and parsed >= 0:
+                return parsed
+        except (TypeError, ValueError):
+            pass
+        return default
+
+    def _should_send_online_telemetry(self):
+        interval = self.telemetry_online_send_interval_seconds
+        if interval <= 0:
+            return True
+
+        now = time.monotonic()
+        if self._last_online_send_monotonic is None:
+            self._last_online_send_monotonic = now
+            return True
+
+        if now - self._last_online_send_monotonic >= interval:
+            self._last_online_send_monotonic = now
+            return True
+        return False
 
     def _load_db_config(self) -> DBConfig | None:
         host = os.getenv("TELEMETRY_DB_HOST")
@@ -1225,7 +1253,7 @@ class TelemetryApplication(QObject):
 
                     # --- emit to GUI & server ---
                     self.update_data_signal.emit(combined_data)
-                    if not self._simulation_mode:
+                    if not self._simulation_mode and self._should_send_online_telemetry():
                         self.send_telemetry_data_to_server_async(combined_data, device_tag="device1")
                     self.logger.debug(f"Emitted combined_data: {combined_data}")
         except Exception as e:
