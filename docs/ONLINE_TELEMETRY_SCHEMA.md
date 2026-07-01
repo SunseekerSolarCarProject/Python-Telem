@@ -172,7 +172,7 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | Field | Unit | Meaning |
 | --- | --- | --- |
 | `timestamp` | local datetime string | App-side timestamp in the combined telemetry fields. |
-| `device_timestamp` | `hh:mm:ss` | Timestamp reported by the telemetry device, when available. |
+| `device_timestamp` | uptime / local time | `TL_TIM` value reported by the telemetry device. Uptime-only values display as `hh:mm:ss uptime`; ISO datetime values display as local time plus UTC. |
 | `Telemetry_Status` | status | `OK` or `BAD_PACKET`. |
 | `Telemetry_Error` | text | Last bad telemetry reason in the current flush interval. |
 | `Telemetry_Bad_Packet_Count` | count | Cumulative bad packet count from the parser. |
@@ -328,11 +328,13 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | `Solcast_Live_GHI` | W/m² |
 | `Solcast_Live_DNI` | W/m² |
 | `Solcast_Live_Temp` | °C |
-| `Solcast_Live_Time` | ISO time |
+| `Solcast_Live_Time` | local / UTC |
+| `Solcast_Live_Fetched_At` | local / UTC |
 | `Solcast_Fcst_GHI` | W/m² |
 | `Solcast_Fcst_DNI` | W/m² |
 | `Solcast_Fcst_Temp` | °C |
-| `Solcast_Fcst_Time` | ISO time |
+| `Solcast_Fcst_Time` | local / UTC |
+| `Solcast_Fcst_Fetched_At` | local / UTC |
 
 ### GPS, Route, And Lap Timing
 

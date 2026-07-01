@@ -2,6 +2,8 @@
 
 import struct
 import logging
+import re
+from datetime import datetime, timezone
 import numpy as np
 from extra_calculations import ExtraCalculations
 from key_name_definitions import TelemetryKey, KEY_UNITS
@@ -100,8 +102,41 @@ class DataProcessor:
             '0xHHHHHHHH': 'nonexistent'
         }
         self.bad_packet_count = 0
-        self.logger.info("DataProcessor initialized with endianness: {}".format(endianness))
         self.endianness = endianness  # 'big' or 'little'
+        self.logger.info("DataProcessor initialized with endianness: {}".format(endianness))
+
+    def _format_device_timestamp(self, value):
+        """Normalize TL_TIM into a readable uptime or timestamp value."""
+        text = str(value).strip()
+        if not text:
+            return text
+
+        status = ""
+        if "_" in text:
+            possible_time, possible_status = text.rsplit("_", 1)
+            if possible_status.upper() in {"VALID", "INVALID"}:
+                text = possible_time.strip()
+                status = possible_status.upper()
+
+        if re.fullmatch(r"\d{1,3}:\d{2}:\d{2}", text):
+            hours, minutes, seconds = (int(part) for part in text.split(":"))
+            if minutes < 60 and seconds < 60:
+                normalized = f"{hours:02d}:{minutes:02d}:{seconds:02d} uptime"
+                return f"{normalized} ({status})" if status else normalized
+
+        try:
+            timestamp = text
+            if timestamp.endswith("Z"):
+                timestamp = timestamp[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(timestamp)
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+            local_text = parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+            utc_text = parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            normalized = f"{local_text} / {utc_text}"
+            return f"{normalized} ({status})" if status else normalized
+        except ValueError:
+            return f"{text} ({status})" if status else text
 
     def set_endianness(self, endianness):
         """
@@ -374,7 +409,7 @@ class DataProcessor:
             # Handle TL_TIM (device_timestamp) case
             if key == "TL_TIM":
                 if len(parts) >= 2:
-                    processed_data[TelemetryKey.DEVICE_TIMESTAMP.value[0]] = parts[1].strip()
+                    processed_data[TelemetryKey.DEVICE_TIMESTAMP.value[0]] = self._format_device_timestamp(parts[1])
                     self.logger.debug(f"Processed device_timestamp: {processed_data[TelemetryKey.DEVICE_TIMESTAMP.value[0]]}")
                 else:
                     self.logger.warning(f"TL_TIM data line is incomplete: {data_line}")

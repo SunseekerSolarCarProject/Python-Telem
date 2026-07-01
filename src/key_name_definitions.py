@@ -96,7 +96,7 @@ class TelemetryKey(Enum):
     TOTAL_CAPACITY_AH = ("Total_Capacity_Ah", "Ah")
     TOTAL_CAPACITY_WH = ("Total_Capacity_Wh", "Wh")
     TOTAL_VOLTAGE = ("Total_Voltage", "V")
-    DEVICE_TIMESTAMP = ("device_timestamp", "hh:mm:ss")
+    DEVICE_TIMESTAMP = ("device_timestamp", "uptime / local time")
     TIMESTAMP = ("timestamp", "year-Month-day hh:mm:ss")
     TELEMETRY_STATUS = ("Telemetry_Status", "")
     TELEMETRY_ERROR = ("Telemetry_Error", "")
@@ -128,12 +128,14 @@ class TelemetryKey(Enum):
     SOLCAST_LIVE_GHI    = ("Solcast_Live_GHI",   "W/m²")
     SOLCAST_LIVE_DNI    = ("Solcast_Live_DNI",   "W/m²")
     SOLCAST_LIVE_TEMP   = ("Solcast_Live_Temp",  "°C")
-    SOLCAST_LIVE_TIME   = ("Solcast_Live_Time",  "ISO")
+    SOLCAST_LIVE_TIME   = ("Solcast_Live_Time",  "local / UTC")
+    SOLCAST_LIVE_FETCHED_AT = ("Solcast_Live_Fetched_At", "local / UTC")
 
     SOLCAST_FCST_GHI    = ("Solcast_Fcst_GHI",   "W/m²")
     SOLCAST_FCST_DNI    = ("Solcast_Fcst_DNI",   "W/m²")
     SOLCAST_FCST_TEMP   = ("Solcast_Fcst_Temp",  "°C")
-    SOLCAST_FCST_TIME   = ("Solcast_Fcst_Time",  "ISO")
+    SOLCAST_FCST_TIME   = ("Solcast_Fcst_Time",  "local / UTC")
+    SOLCAST_FCST_FETCHED_AT = ("Solcast_Fcst_Fetched_At", "local / UTC")
 
     # Navigation / GPS
     NAV_IMU_MPH = ("NAV_IMU_MPH", "mph")

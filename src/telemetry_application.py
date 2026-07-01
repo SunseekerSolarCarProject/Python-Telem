@@ -8,7 +8,7 @@ import requests
 import threading
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -105,6 +105,7 @@ class TelemetryApplication(QObject):
         self.telemetry_ingestion_expect_json = API_EXPECT_JSON
         self.telemetry_online_send_interval_seconds = self._parse_float( TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS, 5.0,)
         self._last_online_send_monotonic = None
+        self._solcast_initial_fetch_pending = False
         self.serial_reader_thread = None
         self.signals_connected = False
         self.used_Ah = 0
@@ -326,10 +327,12 @@ class TelemetryApplication(QObject):
             TelemetryKey.SOLCAST_LIVE_DNI.value[0],
             TelemetryKey.SOLCAST_LIVE_TEMP.value[0],
             TelemetryKey.SOLCAST_LIVE_TIME.value[0],
+            TelemetryKey.SOLCAST_LIVE_FETCHED_AT.value[0],
             TelemetryKey.SOLCAST_FCST_GHI.value[0],
             TelemetryKey.SOLCAST_FCST_DNI.value[0],
             TelemetryKey.SOLCAST_FCST_TEMP.value[0],
             TelemetryKey.SOLCAST_FCST_TIME.value[0],
+            TelemetryKey.SOLCAST_FCST_FETCHED_AT.value[0],
             TelemetryKey.MC1_BUS_POWER_W.value[0], TelemetryKey.MC1_MECHANICAL_POWER_W.value[0], TelemetryKey.MC1_EFFICIENCY_PCT.value[0],
             TelemetryKey.MC2_BUS_POWER_W.value[0], TelemetryKey.MC2_MECHANICAL_POWER_W.value[0], TelemetryKey.MC2_EFFICIENCY_PCT.value[0],
             TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0], TelemetryKey.MOTORS_TOTAL_MECHANICAL_POWER_W.value[0], TelemetryKey.MOTORS_AVERAGE_EFFICIENCY_PCT.value[0],
@@ -425,6 +428,7 @@ class TelemetryApplication(QObject):
             self.logger.error(f"Failed to initialize Solcast integration: {exc}")
 
     def init_solcast(self):
+        self._solcast_initial_fetch_pending = False
         key = getattr(self, 'solcast_key', None) or os.getenv("SOLCAST_API_KEY")
         lat = getattr(self, 'solcast_lat', None) or os.getenv("SOLCAST_LATITUDE")
         lon = getattr(self, 'solcast_lon', None) or os.getenv("SOLCAST_LONGITUDE")
@@ -447,7 +451,17 @@ class TelemetryApplication(QObject):
         self.solcast_timer = QTimer(self)
         self.solcast_timer.timeout.connect(self.fetch_solcast_data)
         self.solcast_timer.start(5 * 60 * 1000)  # 5 min
-        self.fetch_solcast_data()  # initial fetch
+        self._solcast_initial_fetch_pending = True
+        if self.signals_connected:
+            self._schedule_initial_solcast_fetch()
+        else:
+            self.logger.info("Solcast configured; initial fetch will run after GUI signals connect.")
+
+    def _schedule_initial_solcast_fetch(self):
+        if not getattr(self, '_solcast_initial_fetch_pending', False):
+            return
+        self._solcast_initial_fetch_pending = False
+        QTimer.singleShot(0, self.fetch_solcast_data)
 
     def init_machine_learning(self):
         """
@@ -482,6 +496,7 @@ class TelemetryApplication(QObject):
             if hasattr(self.gui.settings_tab, 'telemetry_ingestion_config_changed'):
                 self.gui.settings_tab.telemetry_ingestion_config_changed.connect(self.on_telemetry_ingestion_config_changed)
             self.signals_connected = True
+            self._schedule_initial_solcast_fetch()
             self.logger.debug("Connected GUI signals.")
 
     def send_telemetry_data_to_server_async(self, data, device_tag="device1"):
@@ -643,9 +658,54 @@ class TelemetryApplication(QObject):
         if not sent:
             self.logger.debug("No telemetry storage backend configured; skipping send.")
 
+    def _parse_iso_datetime(self, value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            match = re.match(r"^(.*?\.\d{6})\d+([+-]\d{2}:\d{2})$", text)
+            if match:
+                try:
+                    return datetime.fromisoformat("".join(match.groups()))
+                except ValueError:
+                    return None
+            return None
+
+    def _format_solcast_period_end(self, period_end):
+        parsed = self._parse_iso_datetime(period_end)
+        if not parsed:
+            return period_end
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local_time = parsed.astimezone()
+        utc_time = parsed.astimezone(timezone.utc)
+        return (
+            f"{local_time:%Y-%m-%d %H:%M:%S %Z} "
+            f"({self._format_utc_offset(local_time)}) / {utc_time:%Y-%m-%d %H:%M:%S UTC}"
+        )
+
+    def _format_fetch_time(self, fetched_at):
+        local_time = fetched_at.astimezone()
+        utc_time = fetched_at.astimezone(timezone.utc)
+        return (
+            f"{local_time:%Y-%m-%d %H:%M:%S %Z} "
+            f"({self._format_utc_offset(local_time)}) / {utc_time:%Y-%m-%d %H:%M:%S UTC}"
+        )
+
+    def _format_utc_offset(self, dt):
+        offset = dt.strftime("%z")
+        if len(offset) == 5:
+            return f"UTC{offset[:3]}:{offset[3:]}"
+        return f"UTC{offset}" if offset else "UTC"
+
     def fetch_solcast_data(self):
         """Fetch both live and forecast irradiance & emit into the GUI."""
         headers = {"Authorization": f"Bearer {self.solcast_key}"}
+        fetched_at_text = self._format_fetch_time(datetime.now(timezone.utc))
 
         try:
             # Live estimated actuals (last 7 days): get most recent point
@@ -663,7 +723,8 @@ class TelemetryApplication(QObject):
                     "Solcast_Live_GHI":   last.get("ghi"),
                     "Solcast_Live_DNI":   last.get("dni"),
                     "Solcast_Live_Temp":  last.get("air_temp"),
-                    "Solcast_Live_Time":  last.get("period_end")
+                    "Solcast_Live_Time":  self._format_solcast_period_end(last.get("period_end")),
+                    "Solcast_Live_Fetched_At": fetched_at_text,
                 })
 
             # Forecast (next 24 h): get the first forecast interval
@@ -682,7 +743,8 @@ class TelemetryApplication(QObject):
                     "Solcast_Fcst_GHI":   nxt.get("ghi"),
                     "Solcast_Fcst_DNI":   nxt.get("dni"),
                     "Solcast_Fcst_Temp":  nxt.get("air_temp"),
-                    "Solcast_Fcst_Time":  nxt.get("period_end")
+                    "Solcast_Fcst_Time":  self._format_solcast_period_end(nxt.get("period_end")),
+                    "Solcast_Fcst_Fetched_At": fetched_at_text,
                 })
 
             self.logger.info("Solcast data fetched and emitted.")

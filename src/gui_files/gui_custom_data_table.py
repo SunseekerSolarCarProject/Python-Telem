@@ -70,8 +70,8 @@ class CustomizableDataTableTab(QWidget):
         for group_name, keys in self.groups.items():
             # Add group header row
             header_item = QTableWidgetItem(group_name)
-            header_item.setBackground(QBrush(QColor("#2C3E50")))  # Dark blue background
-            header_item.setForeground(QBrush(QColor("#FFFFFF")))  # White text
+            header_item.setBackground(QBrush(QColor("#34312A")))
+            header_item.setForeground(QBrush(QColor("#FFD400")))
             header_item.setFont(QFont("Arial", 14, QFont.Weight.Bold))
             self.table.setItem(current_row, 0, header_item)
             

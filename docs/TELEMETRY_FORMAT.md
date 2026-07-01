@@ -86,11 +86,14 @@ NAV_Best_Lap_Time
 NAV_Lap_Status
 ```
 
-`TL_TIM,12:34:56` produces:
+`TL_TIM,12:34:56` produces an uptime-style device timestamp:
 
 ```text
-device_timestamp
+device_timestamp = 12:34:56 uptime
 ```
+
+If firmware sends an ISO datetime instead, the app displays it as local time
+plus UTC so the timezone is explicit.
 
 Placeholder or bad telemetry packets such as `0xHHHHHHHH` are converted into
 telemetry health fields instead of silently becoming normal numeric data:

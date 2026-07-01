@@ -2,7 +2,16 @@
 # src/gui_files/telemetry_gui.py
 # -------------------------
 import sys
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QMessageBox, QProgressBar
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QWidget,
+    QVBoxLayout,
+    QTabWidget,
+    QMessageBox,
+    QProgressBar,
+)
 from PyQt6.QtCore import QSettings, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import pyqtSignal, QTimer
@@ -225,10 +234,13 @@ class TelemetryGUI(QWidget):
             self.logger.error(f"Failed to save color mapping to {self.config_file}: {e}")
 
     def init_ui(self):
-        self.setWindowTitle("Telemetry Data Visualization")
+        self.setWindowTitle("Sunseeker Telemetry")
         self.resize(1280, 720)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        layout.addWidget(self._build_brand_header())
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.tabs.setMovable(True)
@@ -394,12 +406,14 @@ class TelemetryGUI(QWidget):
             ],
             "Solar Data (Live)": [
                 TelemetryKey.SOLCAST_LIVE_TIME.value[0],
+                TelemetryKey.SOLCAST_LIVE_FETCHED_AT.value[0],
                 TelemetryKey.SOLCAST_LIVE_GHI.value[0],
                 TelemetryKey.SOLCAST_LIVE_DNI.value[0],
                 TelemetryKey.SOLCAST_LIVE_TEMP.value[0],
             ],
             "Solar Data (Forecast)": [
                 TelemetryKey.SOLCAST_FCST_TIME.value[0],
+                TelemetryKey.SOLCAST_FCST_FETCHED_AT.value[0],
                 TelemetryKey.SOLCAST_FCST_GHI.value[0],
                 TelemetryKey.SOLCAST_FCST_DNI.value[0],
                 TelemetryKey.SOLCAST_FCST_TEMP.value[0],
@@ -479,6 +493,7 @@ class TelemetryGUI(QWidget):
         self.simulation_tab.start_scenario.connect(self.start_simulation_scenario_requested.emit)
         self.simulation_tab.stop_requested.connect(self.stop_simulation_requested.emit)
         self.tools_tabs.addTab(self.simulation_tab, "Simulation")
+
         self.tabs.addTab(self.tools_tabs, "Tools")
 
         # Settings Tab
@@ -501,6 +516,39 @@ class TelemetryGUI(QWidget):
             pass
 
         self.restore_gui_state()
+
+    def _build_brand_header(self):
+        header = QFrame()
+        header.setObjectName("BrandHeader")
+        row = QHBoxLayout(header)
+        row.setContentsMargins(16, 12, 16, 12)
+        row.setSpacing(12)
+
+        mark = QLabel("S")
+        mark.setObjectName("BrandMark")
+        mark.setFixedSize(42, 42)
+
+        title_group = QVBoxLayout()
+        title_group.setContentsMargins(0, 0, 0, 0)
+        title_group.setSpacing(0)
+        wordmark = QLabel("SUNSEEKER")
+        wordmark.setObjectName("BrandWordmark")
+        subtitle = QLabel(f"Telemetry Operations  |  v{VERSION}")
+        subtitle.setObjectName("BrandSubtitle")
+        title_group.addWidget(wordmark)
+        title_group.addWidget(subtitle)
+
+        self.header_connection_label = QLabel("Connection: Starting")
+        self.header_connection_label.setObjectName("HeaderStatusPill")
+        self.header_mode_label = QLabel("Mode: Live")
+        self.header_mode_label.setObjectName("HeaderStatusPill")
+
+        row.addWidget(mark)
+        row.addLayout(title_group)
+        row.addStretch()
+        row.addWidget(self.header_mode_label)
+        row.addWidget(self.header_connection_label)
+        return header
 
     def apply_dark_mode(self):
         """
@@ -695,10 +743,14 @@ class TelemetryGUI(QWidget):
         self.logger.info(f"Units changed to {units_choice}. Updated units: {self.units}")
 
     def set_connection_status(self, status: str):
+        if hasattr(self, "header_connection_label"):
+            self.header_connection_label.setText(f"Connection: {status or 'Unknown'}")
         if hasattr(self, "dashboard_tab"):
             self.dashboard_tab.set_connection_status(status)
 
     def set_simulation_status(self, mode: str | None):
+        if hasattr(self, "header_mode_label"):
+            self.header_mode_label.setText(f"Mode: {mode or 'Live'}")
         if hasattr(self, "dashboard_tab"):
             self.dashboard_tab.set_mode(mode or "Live")
 

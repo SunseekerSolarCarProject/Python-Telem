@@ -152,7 +152,7 @@ class DataTableTab(QWidget):
             hdr = QTableWidgetItem(group)
             hdr.setTextAlignment(Qt.AlignmentFlag.AlignLeft |
                                  Qt.AlignmentFlag.AlignVCenter)
-            hdr.setForeground(QBrush(QColor("#1e90ff")))
+            hdr.setForeground(QBrush(QColor("#FFD400")))
             hdr.setFont(QFont("Arial", 14, QFont.Weight.Bold))
             hdr.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 0, hdr)
