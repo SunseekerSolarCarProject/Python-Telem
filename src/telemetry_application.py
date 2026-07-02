@@ -26,6 +26,7 @@ from simulation import TelemetrySimulator
 from db_writer import TelemetryDBWriter, DBConfig
 
 from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
+from unit_conversion import convert_value
 from Version import VERSION  # Import the version number
 from dotenv import load_dotenv
 
@@ -702,6 +703,21 @@ class TelemetryApplication(QObject):
             return f"UTC{offset[:3]}:{offset[3:]}"
         return f"UTC{offset}" if offset else "UTC"
 
+    def _build_primary_csv_row(self, combined_data):
+        units_mode = getattr(self.gui, "units_mode", "metric") if self.gui else "metric"
+        units_map = getattr(self.gui, "units", KEY_UNITS) if self.gui else KEY_UNITS
+        row = dict(combined_data)
+        for key, target_unit in units_map.items():
+            if key not in row:
+                continue
+            row[key] = convert_value(key, row[key], target_unit)
+        row["csv_units_mode"] = units_mode
+        row["csv_units_note"] = (
+            "Telemetry values in this row were converted to the selected application "
+            f"{units_mode} units where a conversion is defined."
+        )
+        return row
+
     def fetch_solcast_data(self):
         """Fetch both live and forecast irradiance & emit into the GUI."""
         headers = {"Authorization": f"Bearer {self.solcast_key}"}
@@ -891,7 +907,7 @@ class TelemetryApplication(QObject):
                 repo_name="Python-Telem",
                 version=VERSION,
                 app_install_dir=app_install_dir,
-                target_asset="telemetry.exe",   # must match your release asset name
+                target_asset="telemetry.exe" if sys.platform.startswith("win") else None,
                 initial_config=existing_settings,
             )
             config_dialog.config_data_signal.connect(self.set_battery_info)
@@ -1310,7 +1326,8 @@ class TelemetryApplication(QObject):
                             combined_data.update(nav_metrics)
 
                     if not self._simulation_mode:
-                        self.csv_handler.append_to_csv(self.csv_handler.get_csv_file_path(), combined_data)
+                        csv_row = self._build_primary_csv_row(combined_data)
+                        self.csv_handler.append_to_csv(self.csv_handler.get_csv_file_path(), csv_row)
                         self.buffer.save_training_data()
 
                     # --- emit to GUI & server ---

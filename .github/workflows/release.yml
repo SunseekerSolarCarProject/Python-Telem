@@ -212,6 +212,22 @@ jobs:
         run: |
           echo "::group::Metadata"; ls -la release/metadata; echo "::endgroup::"
           echo "::group::Targets";  ls -la release/targets;  echo "::endgroup::"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          version = "${{ github.ref_name }}".lstrip("v")
+          required = {
+              f"telemetry-windows-{version}.tar.gz",
+              f"telemetry-macos-{version}.tar.gz",
+              f"telemetry-linux-{version}.tar.gz",
+          }
+          targets = set(json.loads(Path("release/metadata/targets.json").read_text())["signed"]["targets"])
+          missing = sorted(required - targets)
+          if missing:
+              raise SystemExit(f"TUF targets.json is missing required platform bundle(s): {missing}")
+          print("TUF targets include all platform bundles:", ", ".join(sorted(required)))
+          PY
 
       - name: Create GitHub Release (TUF metadata + targets)
         uses: softprops/action-gh-release@v2

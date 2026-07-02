@@ -27,9 +27,10 @@ class CustomizableDataTableTab(QWidget):
         self.units_map = units_map
         self.units_mode = units_mode
         # Load custom layout or use defaults
-        self.groups = self._load_layout(default_groups)
+        self.groups = {}
         self._last_raw = {}
         self.unit_overrides = {}
+        self.groups = self._load_layout(default_groups)
 
         self.metric_map   = build_metric_units_dict()
         self.imperial_map = build_imperial_units_dict()
@@ -78,7 +79,7 @@ class CustomizableDataTableTab(QWidget):
             # Span header across all columns
             self.table.setSpan(current_row, 0, 1, 3)
             current_row += 1
-            
+
             # Add parameters under the group
             for idx, key in enumerate(keys):
                 self._row_key_map[current_row] = (group_name, idx)
@@ -91,18 +92,24 @@ class CustomizableDataTableTab(QWidget):
                 p.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 p.setForeground(QBrush(QColor("#FFF")))
                 self.table.setItem(current_row, 0, p)
-                
+
                 # Value cell
                 v = QTableWidgetItem(str(disp))
                 v.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(current_row, 1, v)
-                
+
                 # Unit cell
                 u = QTableWidgetItem(target)
                 u.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(current_row, 2, u)
-                
+
                 current_row += 1
+
+    def set_units_map(self, units_map, units_mode):
+        self.units_map = units_map
+        self.units_mode = units_mode
+        if self._last_raw:
+            self.update_data(self._last_raw)
 
     def _on_cell_double_clicked(self, row, col):
         if row not in self._row_key_map:
@@ -128,7 +135,10 @@ class CustomizableDataTableTab(QWidget):
             orig = KEY_UNITS.get(key, "")
             m = self.metric_map.get(key, orig)
             i = self.imperial_map.get(key, orig)
-            choices = [u for u in (orig, m, i) if u]
+            choices = []
+            for unit_choice in (orig, m, i):
+                if unit_choice and unit_choice not in choices:
+                    choices.append(unit_choice)
             current_unit = self.unit_overrides.get(key, self.units_map.get(key, ""))
             unit, ok = QInputDialog.getItem(
                 self, f"Select Unit for {key}", "Unit:", choices,
@@ -367,6 +377,7 @@ class CustomizableDataTableTab(QWidget):
                     os.remove(self.layout_path)
                 except Exception:
                     pass
+            self.unit_overrides.clear()
             self.groups = self._load_layout(self.default_groups)
             self.update_data(self._last_raw)
 
@@ -376,7 +387,11 @@ class CustomizableDataTableTab(QWidget):
             if os.path.exists(self.layout_path):
                 with open(self.layout_path, 'r') as f:
                     data = json.load(f)
-                # Validate structure: must be dict of lists
+                if isinstance(data, dict) and isinstance(data.get("groups"), dict):
+                    overrides = data.get("unit_overrides", {})
+                    self.unit_overrides = overrides if isinstance(overrides, dict) else {}
+                    return data["groups"]
+                # Backward compatibility: old files were just the groups dict.
                 if isinstance(data, dict):
                     return data
         except Exception:
@@ -384,9 +399,16 @@ class CustomizableDataTableTab(QWidget):
         return defaults.copy()
 
     def _save_layout(self):
-        # Persist the current groups dict to JSON
+        # Persist the current groups dict and per-key unit overrides to JSON.
         try:
             with open(self.layout_path, 'w') as f:
-                json.dump(self.groups, f, indent=2)
+                json.dump(
+                    {
+                        "groups": self.groups,
+                        "unit_overrides": self.unit_overrides,
+                    },
+                    f,
+                    indent=2,
+                )
         except Exception as e:
             print(f"Failed to save custom table layout: {e}")

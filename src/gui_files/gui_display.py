@@ -2,6 +2,7 @@
 # src/gui_files/telemetry_gui.py
 # -------------------------
 import sys
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -71,6 +72,7 @@ class TelemetryGUI(QWidget):
         self.units = self.metric_map  
         self.config_file = config_file
         self.last_telemetry_data = {}
+        self.last_update = None
         self.logger = logging.getLogger(__name__)
 
         # Load or create color mapping
@@ -79,6 +81,9 @@ class TelemetryGUI(QWidget):
 
         self.init_ui()
         self.apply_dark_mode()
+        self.header_age_timer = QTimer(self)
+        self.header_age_timer.timeout.connect(self._refresh_header_age)
+        self.header_age_timer.start(1000)
         self.logger.info("Telemetry GUI Initialized")
         
         # Instantiate with (repo_owner, repo_name, version, app_install_dir)
@@ -538,16 +543,19 @@ class TelemetryGUI(QWidget):
         title_group.addWidget(wordmark)
         title_group.addWidget(subtitle)
 
-        self.header_connection_label = QLabel("Connection: Starting")
+        self.header_connection_label = QLabel("Starting")
         self.header_connection_label.setObjectName("HeaderStatusPill")
-        self.header_mode_label = QLabel("Mode: Live")
+        self.header_mode_label = QLabel("Live")
         self.header_mode_label.setObjectName("HeaderStatusPill")
+        self.header_age_label = QLabel("Data age: --")
+        self.header_age_label.setObjectName("HeaderStatusPill")
 
         row.addWidget(mark)
         row.addLayout(title_group)
         row.addStretch()
         row.addWidget(self.header_mode_label)
         row.addWidget(self.header_connection_label)
+        row.addWidget(self.header_age_label)
         return header
 
     def apply_dark_mode(self):
@@ -639,6 +647,8 @@ class TelemetryGUI(QWidget):
         try:
             # Exclude 'Errors' and 'Limits' or anything you don't want to graph
 
+            self.last_update = datetime.now()
+            self._refresh_header_age()
             enriched_data = telemetry_data.copy()
             lap_already_computed = TelemetryKey.NAV_LAP_STATUS.value[0] in enriched_data
             route_metrics = self.gps_map_tab.update_data(
@@ -726,6 +736,7 @@ class TelemetryGUI(QWidget):
 
         # inside on_units_changed
         for tab in (self.data_table_tab,
+                    self.custom_data_table_tab,
                     self.data_display_tab,
                     self.dashboard_tab,
                     self.mc1_tab,
@@ -744,15 +755,49 @@ class TelemetryGUI(QWidget):
 
     def set_connection_status(self, status: str):
         if hasattr(self, "header_connection_label"):
-            self.header_connection_label.setText(f"Connection: {status or 'Unknown'}")
+            connection = self._format_header_connection(status)
+            self.header_connection_label.setText(connection)
+            state = "warning" if any(word in connection.lower() for word in ("stopped", "paused", "disconnected", "error")) else "normal"
+            self.header_connection_label.setProperty("state", state)
+            self.header_connection_label.style().unpolish(self.header_connection_label)
+            self.header_connection_label.style().polish(self.header_connection_label)
         if hasattr(self, "dashboard_tab"):
             self.dashboard_tab.set_connection_status(status)
 
     def set_simulation_status(self, mode: str | None):
         if hasattr(self, "header_mode_label"):
-            self.header_mode_label.setText(f"Mode: {mode or 'Live'}")
+            mode_text = mode or "Live"
+            self.header_mode_label.setText(mode_text)
+            state = "simulation" if any(word in mode_text for word in ("Simulation", "Replay", "Scenario")) else "normal"
+            self.header_mode_label.setProperty("state", state)
+            self.header_mode_label.style().unpolish(self.header_mode_label)
+            self.header_mode_label.style().polish(self.header_mode_label)
         if hasattr(self, "dashboard_tab"):
             self.dashboard_tab.set_mode(mode or "Live")
+
+    def _format_header_connection(self, status: str | None) -> str:
+        text = (status or "Unknown").strip()
+        if text.lower().startswith("live on "):
+            return f"Connected: {text[8:]}"
+        if text.lower().startswith("connecting to "):
+            return f"Connecting: {text[14:]}"
+        if text.lower() == "live":
+            return "Connected"
+        return text
+
+    def _refresh_header_age(self):
+        if not hasattr(self, "header_age_label"):
+            return
+        if not self.last_update:
+            self.header_age_label.setText("Data age: --")
+            state = "warning"
+        else:
+            age = max(0, int((datetime.now() - self.last_update).total_seconds()))
+            self.header_age_label.setText(f"Data age: {age}s")
+            state = "danger" if age > 10 else "warning" if age > 3 else "normal"
+        self.header_age_label.setProperty("state", state)
+        self.header_age_label.style().unpolish(self.header_age_label)
+        self.header_age_label.style().polish(self.header_age_label)
 
     def restore_gui_state(self):
         # Persist only view preferences here. Operational settings remain in

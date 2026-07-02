@@ -55,6 +55,17 @@ QLabel#HeaderStatusPill {
     font-weight: bold;
 }
 
+QLabel#HeaderStatusPill[state="warning"] {
+    background-color: #3a2426;
+    border-color: #ff1f2d;
+}
+
+QLabel#HeaderStatusPill[state="simulation"] {
+    background-color: #34312a;
+    border-color: #ffd400;
+    color: #ffd400;
+}
+
 /* ================================
    QTabWidget Styles
    ================================ */

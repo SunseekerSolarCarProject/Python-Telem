@@ -9,9 +9,11 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
 )
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QSettings, Qt
+import json
 import logging
 import math
+import re
 import pyqtgraph as pg
 
 from gui_files.custom_plot_widget import CustomPlotWidget
@@ -30,7 +32,7 @@ class BaseGraphTab(QWidget):
         self.color_mapping = color_mapping.copy()
         self.logger = logging.getLogger(__name__)
 
-        self.unit_overrides = {}
+        self.unit_overrides = self._load_unit_overrides()
         self._last_raw = {}
         self._metric_map = build_metric_units_dict()
         self._imperial_map = build_imperial_units_dict()
@@ -125,7 +127,6 @@ class BaseGraphTab(QWidget):
 
     def set_units_map(self, units_map, units_mode=None):
         self.units_map = units_map.copy()
-        self.unit_overrides.clear()
         for key, pw in self.graph_widgets.items():
             pw.setLabel("left", self._display_unit(key))
         if self._last_raw:
@@ -153,10 +154,28 @@ class BaseGraphTab(QWidget):
             self.unit_overrides.pop(key, None)
         else:
             self.unit_overrides[key] = unit
+        self._save_unit_overrides()
 
         self.graph_widgets[key].setLabel("left", unit)
         if self._last_raw:
             self.update_graphs(self._last_raw, force=True)
+
+    def _settings_key(self):
+        safe_title = re.sub(r"[^A-Za-z0-9_]+", "_", self.title).strip("_") or "graph"
+        return f"units/graph_overrides/{safe_title}"
+
+    def _load_unit_overrides(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        raw = settings.value(self._settings_key(), "{}")
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_unit_overrides(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        settings.setValue(self._settings_key(), json.dumps(self.unit_overrides))
 
     def _toggle_zoom(self, pw):
         if self.current_zoom_plot and self.current_zoom_plot != pw:

@@ -58,3 +58,7 @@ class DataDisplayTab(QWidget):
             self.data_display.moveCursor(QTextCursor.MoveOperation.End)
 
         self.logger.info("Data Display updated.")
+
+    def set_units_map(self, units_map, units_mode=None):
+        self.units = units_map
+        self.data_display_instance = DataDisplay(units_map)

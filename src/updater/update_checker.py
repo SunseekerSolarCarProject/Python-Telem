@@ -4,6 +4,7 @@ import sys
 import shutil
 import subprocess
 import hashlib
+import json
 import textwrap
 import tempfile
 from packaging.version import Version as SemVer
@@ -105,6 +106,16 @@ class UpdateChecker(QObject):
             if ti is not None:
                 return name, ti
         return None, None
+
+    def _signed_target_names(self) -> list[str]:
+        targets_path = os.path.join(self.metadata_dir, "targets.json")
+        try:
+            with open(targets_path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            targets = data.get("signed", {}).get("targets", {})
+            return sorted(targets.keys()) if isinstance(targets, dict) else []
+        except Exception:
+            return []
 
     def _bundle_name_for(self, version: str) -> str:
         """
@@ -266,8 +277,10 @@ class UpdateChecker(QObject):
 
             bundle_name, ti = self._resolve_bundle(updater, version)
             if ti is None or not bundle_name:
+                signed_targets = self._signed_target_names()
+                suffix = f" Signed TUF targets: {', '.join(signed_targets)}." if signed_targets else ""
                 self.update_error.emit(
-                    f"No bundle matching '{self._bundle_base(version)}(*.tar.gz|*.zip)' found in TUF metadata for v{version}."
+                    f"No bundle matching '{self._bundle_base(version)}(*.tar.gz|*.zip)' found in TUF metadata for v{version}.{suffix}"
                 )
                 return False
 
@@ -313,6 +326,12 @@ class UpdateChecker(QObject):
                 return False
 
             new_exe_path = os.path.join(staged_root, binary_name)
+            if os.name != "nt":
+                try:
+                    os.chmod(new_exe_path, os.stat(new_exe_path).st_mode | 0o755)
+                except OSError as e:
+                    self.update_error.emit(f"Failed to make updated binary executable: {e}")
+                    return False
 
             old_exe = self._running_binary_path()
             if not old_exe:

@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QInputDialog
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QColor, QBrush, QFont
 import json, logging
 
@@ -26,7 +26,7 @@ class DataTableTab(QWidget):
 
         # remember last raw data + per-key unit overrides
         self._last_raw      = {}
-        self.unit_overrides = {}
+        self.unit_overrides = self._load_unit_overrides()
 
         self.units_map  = units_map
         self.units_mode = units_mode
@@ -80,8 +80,6 @@ class DataTableTab(QWidget):
         self.setLayout(layout)
 
     def set_units_map(self, units_map, units_mode):
-        # clear any old per-key choices
-        self.unit_overrides.clear()
         self.units_map  = units_map
         self.units_mode = units_mode
         if self._last_raw:
@@ -222,6 +220,20 @@ class DataTableTab(QWidget):
             self.unit_overrides.pop(key, None)
         else:
             self.unit_overrides[key] = unit
+        self._save_unit_overrides()
 
         if self._last_raw:
             self.update_data(self._last_raw)
+
+    def _load_unit_overrides(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        raw = settings.value("units/data_table_overrides", "{}")
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_unit_overrides(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        settings.setValue("units/data_table_overrides", json.dumps(self.unit_overrides))

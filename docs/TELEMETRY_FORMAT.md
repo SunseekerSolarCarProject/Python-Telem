@@ -109,6 +109,14 @@ Telemetry_Last_Bad_Raw
 
 Use `TelemetryKey` in `src/key_name_definitions.py` instead of hard-coded strings when adding GUI fields, CSV columns, or parser outputs. `KEY_UNITS` is generated from the same enum and should be treated as the canonical units map.
 
+## CSV Unit Metadata
+
+Primary telemetry CSV rows include `csv_units_mode` and `csv_units_note`.
+Numeric telemetry values are converted to the selected application unit mode
+when the row is written where a conversion is defined. Because the unit mode can
+be changed while the app is running, read `csv_units_mode` per row instead of
+assuming the entire file stayed metric or imperial.
+
 ## Adding a New Packet
 
 1. Add canonical output fields to `TelemetryKey`.

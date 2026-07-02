@@ -108,6 +108,19 @@ def add_platform(app_name: str, bundle_dir: str, platform_tag: str):
         skip_patch=True,
         custom_metadata={"platform": platform_tag},
     )
+    # tufup's get_latest_archive() is repo-wide, not app-name-specific. In this
+    # multi-platform repo all bundles share one version, so the second and third
+    # platform archives can be created but skipped because the first archive has
+    # the same version. Make the intended platform archive an explicit TUF target
+    # so Windows, macOS, and Linux are all signed in targets.json.
+    archive_path = targets_dir / f"{app_name}-{version}.tar.gz"
+    if not archive_path.exists():
+        print(f"ERROR: Expected bundle archive was not created: {archive_path}", file=sys.stderr)
+        sys.exit(1)
+    repo.roles.add_or_update_target(
+        local_path=archive_path,
+        custom={"tufup": {"required": False}, "user": {"platform": platform_tag}},
+    )
     version_counter = _version_counter(version)
     repo.roles.targets.signed.version = version_counter
     repo.roles.snapshot.signed.version = version_counter

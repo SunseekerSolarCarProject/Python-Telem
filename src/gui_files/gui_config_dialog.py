@@ -60,7 +60,7 @@ class ConfigDialog(QDialog):
             repo_name=repo_name,
             version=version,
             app_install_dir=app_install_dir,
-            target_name= target_asset
+            target_name=target_asset
         )
         self.updater.update_available.connect(self.on_update_available)
         self.updater.update_progress.connect(self.on_update_progress)

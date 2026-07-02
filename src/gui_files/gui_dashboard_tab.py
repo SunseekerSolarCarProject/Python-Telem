@@ -1,12 +1,13 @@
-from datetime import datetime
 import math
+import json
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QSettings, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QSizePolicy,
@@ -15,10 +16,17 @@ from PyQt6.QtWidgets import (
 )
 
 from key_name_definitions import TelemetryKey
-from unit_conversion import convert_value
+from key_name_definitions import KEY_UNITS
+from unit_conversion import (
+    build_imperial_units_dict,
+    build_metric_units_dict,
+    convert_value,
+)
 
 
 class MetricCard(QFrame):
+    unit_change_requested = pyqtSignal(str)
+
     def __init__(self, title, key, unit="", parent=None):
         super().__init__(parent)
         self.key = key
@@ -51,6 +59,10 @@ class MetricCard(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
 
+    def mouseDoubleClickEvent(self, event):
+        self.unit_change_requested.emit(self.key)
+        super().mouseDoubleClickEvent(event)
+
 
 class DashboardTab(QWidget):
     # This tab is the race-day cockpit: it surfaces the values and warnings
@@ -61,34 +73,23 @@ class DashboardTab(QWidget):
     def __init__(self, units_map):
         super().__init__()
         self.units_map = units_map.copy()
-        self.last_update = None
+        self.unit_overrides = self._load_unit_overrides()
+        self._metric_map = build_metric_units_dict()
+        self._imperial_map = build_imperial_units_dict()
         self.last_telemetry_data = {}
         self.mode = "Live"
         self.connection = "Starting"
         self.speed_source = self.SPEED_SOURCE_NAV
         self._init_ui()
 
-        self.age_timer = QTimer(self)
-        self.age_timer.timeout.connect(self._refresh_age)
-        self.age_timer.start(1000)
-
     def _init_ui(self):
         layout = QVBoxLayout(self)
 
         status_row = QHBoxLayout()
-        self.mode_label = QLabel("Mode: Live")
-        self.mode_label.setObjectName("StatusPill")
-        self.connection_label = QLabel("Connection: Starting")
-        self.connection_label.setObjectName("StatusPill")
-        self.age_label = QLabel("Data age: --")
-        self.age_label.setObjectName("StatusPill")
         self.speed_source_selector = QComboBox()
         self.speed_source_selector.addItem("Nav", self.SPEED_SOURCE_NAV)
         self.speed_source_selector.addItem("Motor Avg", self.SPEED_SOURCE_MOTOR_AVG)
         self.speed_source_selector.currentIndexChanged.connect(self._on_speed_source_changed)
-        status_row.addWidget(self.mode_label)
-        status_row.addWidget(self.connection_label)
-        status_row.addWidget(self.age_label)
         status_row.addWidget(QLabel("Speed Source:"))
         status_row.addWidget(self.speed_source_selector)
         status_row.addStretch()
@@ -120,7 +121,8 @@ class DashboardTab(QWidget):
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(12)
         for index, (title, key) in enumerate(card_specs):
-            card = MetricCard(title, key, self.units_map.get(key, ""))
+            card = MetricCard(title, key, self._display_unit(key))
+            card.unit_change_requested.connect(self._on_card_unit_change)
             self.cards[key] = card
             grid.addWidget(card, index // 4, index % 4)
         layout.addLayout(grid)
@@ -135,27 +137,22 @@ class DashboardTab(QWidget):
     def set_units_map(self, units_map, units_mode=None):
         self.units_map = units_map.copy()
         for key, card in self.cards.items():
-            card.unit = self.units_map.get(key, "")
+            card.unit = self._display_unit(key)
             card.unit_label.setText(card.unit)
+        if self.last_telemetry_data:
+            self.update_data(self.last_telemetry_data)
+
+    def _display_unit(self, key):
+        return self.unit_overrides.get(key) or self.units_map.get(key) or KEY_UNITS.get(key, "")
 
     def set_mode(self, mode):
         self.mode = mode or "Live"
-        self.mode_label.setText(f"Mode: {self.mode}")
-        self.mode_label.setProperty("state", "simulation" if "Simulation" in self.mode or "Replay" in self.mode or "Scenario" in self.mode else "normal")
-        self.mode_label.style().unpolish(self.mode_label)
-        self.mode_label.style().polish(self.mode_label)
 
     def set_connection_status(self, status):
         self.connection = status or "Unknown"
-        self.connection_label.setText(f"Connection: {self.connection}")
-        state = "warning" if any(word in self.connection.lower() for word in ("stopped", "paused", "disconnected", "error")) else "normal"
-        self.connection_label.setProperty("state", state)
-        self.connection_label.style().unpolish(self.connection_label)
-        self.connection_label.style().polish(self.connection_label)
 
     def update_data(self, telemetry_data):
         self.last_telemetry_data = telemetry_data.copy()
-        self.last_update = datetime.now()
         for key, card in self.cards.items():
             if key == TelemetryKey.NAV_VEHICLE_MPH.value[0]:
                 display, target, state = self._speed_card_display(telemetry_data, card.unit)
@@ -163,14 +160,13 @@ class DashboardTab(QWidget):
                 continue
 
             raw = telemetry_data.get(key)
-            target = self.units_map.get(key, card.unit)
+            target = self._display_unit(key)
             try:
                 display = convert_value(key, raw, target)
             except Exception:
                 display = raw
             card.set_value(display, target, self._state_for_value(key, raw))
         self._update_alerts(telemetry_data)
-        self._refresh_age()
 
     def _on_speed_source_changed(self):
         self.speed_source = self.speed_source_selector.currentData() or self.SPEED_SOURCE_NAV
@@ -178,7 +174,7 @@ class DashboardTab(QWidget):
             self.update_data(self.last_telemetry_data)
 
     def _speed_card_display(self, telemetry_data, fallback_unit):
-        target = self.units_map.get(TelemetryKey.NAV_VEHICLE_MPH.value[0], fallback_unit)
+        target = self._display_unit(TelemetryKey.NAV_VEHICLE_MPH.value[0]) or fallback_unit
         if self.speed_source == self.SPEED_SOURCE_MOTOR_AVG:
             raw = self._average_motor_velocity_mps(telemetry_data)
             return self._mps_to_speed_unit(raw, target), target, self._state_for_value(
@@ -192,6 +188,50 @@ class DashboardTab(QWidget):
         except Exception:
             display = raw
         return display, target, self._state_for_value(key, raw)
+
+    def _on_card_unit_change(self, key):
+        orig = KEY_UNITS.get(key, "")
+        metric_u = self._metric_map.get(key, orig)
+        imperial_u = self._imperial_map.get(key, orig)
+        choices = []
+        for unit in (orig, metric_u, imperial_u):
+            if unit and unit not in choices:
+                choices.append(unit)
+        if not choices:
+            return
+
+        current = self._display_unit(key)
+        idx = choices.index(current) if current in choices else 0
+        unit, ok = QInputDialog.getItem(self, f"Select unit for {key}", "Unit:", choices, idx, False)
+        if not ok:
+            return
+
+        default = self.units_map.get(key, orig)
+        if unit == default:
+            self.unit_overrides.pop(key, None)
+        else:
+            self.unit_overrides[key] = unit
+        self._save_unit_overrides()
+
+        card = self.cards.get(key)
+        if card:
+            card.unit = self._display_unit(key)
+            card.unit_label.setText(card.unit)
+        if self.last_telemetry_data:
+            self.update_data(self.last_telemetry_data)
+
+    def _load_unit_overrides(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        raw = settings.value("units/dashboard_overrides", "{}")
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_unit_overrides(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        settings.setValue("units/dashboard_overrides", json.dumps(self.unit_overrides))
 
     def _average_motor_velocity_mps(self, telemetry_data):
         values = []
@@ -265,14 +305,3 @@ class DashboardTab(QWidget):
             self.alerts.addItems(alerts)
         else:
             self.alerts.addItem("No active alerts.")
-
-    def _refresh_age(self):
-        if not self.last_update:
-            self.age_label.setText("Data age: --")
-            return
-        age = max(0, int((datetime.now() - self.last_update).total_seconds()))
-        self.age_label.setText(f"Data age: {age}s")
-        state = "danger" if age > 10 else "warning" if age > 3 else "normal"
-        self.age_label.setProperty("state", state)
-        self.age_label.style().unpolish(self.age_label)
-        self.age_label.style().polish(self.age_label)

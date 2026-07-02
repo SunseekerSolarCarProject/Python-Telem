@@ -3,6 +3,7 @@
 import re
 import logging
 from key_name_definitions import TelemetryKey
+from unit_conversion import convert_value
 
 class DataDisplay:
     def __init__(self, units):
@@ -19,6 +20,7 @@ class DataDisplay:
         """
         unit = self.units.get(key.value[0], '')  # Retrieve the unit or default to empty
         try:
+            value = convert_value(key.value[0], value, unit)
             if isinstance(value, (int, float)):
                 formatted_value = f"{value:.2f}"
             else:
