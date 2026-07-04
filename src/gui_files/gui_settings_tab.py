@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QInputDialog,
     QScrollArea,
     QSizePolicy,
     QTabWidget,
@@ -21,6 +22,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 import logging
+import os
+import sys
+from pathlib import Path
 from serial_reader import SerialReaderThread
 
 
@@ -33,6 +37,7 @@ class SettingsTab(QWidget):
     additional_files_selected = pyqtSignal(list)
     solcast_config_changed = pyqtSignal(str, str, str)
     telemetry_ingestion_config_changed = pyqtSignal(dict)
+    vehicle_year_changed_signal = pyqtSignal(str)
     refresh_versions_requested = pyqtSignal()
     install_version_requested = pyqtSignal(str)
 
@@ -43,6 +48,8 @@ class SettingsTab(QWidget):
         self.color_mapping = color_mapping.copy()
         self.color_buttons = {}
         self.color_displays = {}
+        self._running_from_bundle = getattr(sys, "frozen", False)
+        self.vehicle_years_file = os.path.join(self._execution_dir(), "vehicle_years.txt")
         self.init_ui()
 
     def init_ui(self):
@@ -119,6 +126,17 @@ class SettingsTab(QWidget):
         self.log_level_dropdown.currentTextChanged.connect(self.on_log_level_changed)
         display_form.addRow("Log Level:", self.log_level_dropdown)
         layout.addWidget(display_group)
+
+        vehicle_group = QGroupBox("Vehicle")
+        vehicle_form = QFormLayout(vehicle_group)
+        vehicle_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self.vehicle_year_dropdown = QComboBox()
+        self.vehicle_year_dropdown.setEditable(True)
+        self._populate_vehicle_years()
+        self.vehicle_year_dropdown.activated.connect(self.handle_vehicle_year_activated)
+        vehicle_form.addRow("Vehicle Year:", self.vehicle_year_dropdown)
+        layout.addWidget(vehicle_group)
 
         layout.addStretch()
         self.populate_com_ports()
@@ -290,6 +308,51 @@ class SettingsTab(QWidget):
             self.logger.error(f"Error populating COM ports: {e}")
             QMessageBox.critical(self, "Error", f"Failed to populate COM ports: {e}")
 
+    def _execution_dir(self) -> str:
+        if self._running_from_bundle:
+            return os.path.dirname(sys.executable)
+        return str(Path.cwd())
+
+    def _populate_vehicle_years(self):
+        self.vehicle_year_dropdown.clear()
+        for year in self.load_vehicle_years():
+            if self.vehicle_year_dropdown.findText(year) == -1:
+                self.vehicle_year_dropdown.addItem(year)
+        self.vehicle_year_dropdown.addItem("Add New")
+
+    def load_vehicle_years(self):
+        if os.path.exists(self.vehicle_years_file):
+            with open(self.vehicle_years_file, "r", encoding="utf-8") as file:
+                return [line.strip() for line in file if line.strip()]
+        return []
+
+    def save_vehicle_year(self, new_year):
+        new_year = str(new_year or "").strip()
+        if not new_year:
+            return
+        existing = set(self.load_vehicle_years())
+        if new_year in existing:
+            return
+        with open(self.vehicle_years_file, "a", encoding="utf-8") as file:
+            file.write(new_year + "\n")
+
+    def _current_vehicle_year(self) -> str:
+        vehicle_year = self.vehicle_year_dropdown.currentText().strip()
+        return "" if vehicle_year == "Add New" else vehicle_year
+
+    def handle_vehicle_year_activated(self, index):
+        current_text = self.vehicle_year_dropdown.itemText(index)
+        if current_text != "Add New":
+            return
+        new_year, ok = QInputDialog.getText(self, "Add Vehicle Year", "Enter the vehicle year:")
+        new_year = str(new_year or "").strip()
+        if ok and new_year:
+            insert_pos = max(0, self.vehicle_year_dropdown.count() - 1)
+            if self.vehicle_year_dropdown.findText(new_year) == -1:
+                self.vehicle_year_dropdown.insertItem(insert_pos, new_year)
+                self.save_vehicle_year(new_year)
+            self.vehicle_year_dropdown.setCurrentText(new_year)
+
     def choose_color(self, key, color_display_label):
         color = QColorDialog.getColor()
         if color.isValid():
@@ -333,6 +396,14 @@ class SettingsTab(QWidget):
         self.units_changed_signal.emit(units_choice)
         self.log_level_signal.emit(selected_log_level)
 
+        vehicle_year = self._current_vehicle_year()
+        if vehicle_year:
+            existing_years = [self.vehicle_year_dropdown.itemText(i) for i in range(self.vehicle_year_dropdown.count())]
+            if vehicle_year not in existing_years:
+                insert_pos = max(0, self.vehicle_year_dropdown.count() - 1)
+                self.vehicle_year_dropdown.insertItem(insert_pos, vehicle_year)
+            self.save_vehicle_year(vehicle_year)
+
         solcast_key = self.solcast_key_edit.text().strip()
         solcast_lat = self.solcast_lat_edit.text().strip()
         solcast_lon = self.solcast_lon_edit.text().strip()
@@ -375,13 +446,15 @@ class SettingsTab(QWidget):
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
         self.solcast_config_changed.emit(solcast_key, solcast_lat, solcast_lon)
         self.telemetry_ingestion_config_changed.emit(telemetry_config)
+        self.vehicle_year_changed_signal.emit(vehicle_year)
         status = "set" if solcast_key else "empty"
         self.logger.info(
-            "Applied settings: COM Port=%s, Baud Rate=%s, Log Level=%s, Endianness=%s, Solcast Key=%s",
+            "Applied settings: COM Port=%s, Baud Rate=%s, Log Level=%s, Endianness=%s, Vehicle Year=%s, Solcast Key=%s",
             com_port,
             baud_rate,
             selected_log_level,
             endianness,
+            vehicle_year,
             status,
         )
 
@@ -467,6 +540,13 @@ class SettingsTab(QWidget):
 
             endianness = config_data.get("endianness", "big")
             self._set_combo_text(self.endianness_dropdown, "Big Endian" if endianness == "big" else "Little Endian")
+
+            vehicle_year = str(config_data.get("vehicle_year", "") or "").strip()
+            if vehicle_year:
+                if self.vehicle_year_dropdown.findText(vehicle_year) == -1:
+                    insert_pos = max(0, self.vehicle_year_dropdown.count() - 1)
+                    self.vehicle_year_dropdown.insertItem(insert_pos, vehicle_year)
+                self._set_combo_text(self.vehicle_year_dropdown, vehicle_year)
 
             units_mode = str(config_data.get("units_mode", "metric")).lower()
             self._set_combo_text(self.units_dropdown, "Imperial" if units_mode == "imperial" else "Metric (SI)")

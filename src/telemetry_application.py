@@ -8,8 +8,8 @@ import requests
 import threading
 import time
 from pathlib import Path
-from datetime import datetime, timezone
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from datetime import datetime, timedelta, timezone
+from PyQt6.QtCore import QObject, pyqtSignal, QSettings, QTimer
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from serial_reader import SerialReaderThread
@@ -25,7 +25,13 @@ from learning_datasets.quality_diagnostics import QualityDiagnostics
 from simulation import TelemetrySimulator
 from db_writer import TelemetryDBWriter, DBConfig
 
-from key_name_definitions import TelemetryKey, KEY_UNITS  # Updated import
+from key_name_definitions import (
+    KEY_UNITS,
+    SOLCAST_PARAMETER_SPECS,
+    TelemetryKey,
+    solcast_keys_for_prefix,
+    solcast_output_parameters,
+)  # Updated import
 from unit_conversion import convert_value
 from Version import VERSION  # Import the version number
 from dotenv import load_dotenv
@@ -70,7 +76,7 @@ API_PAYLOAD_FORMAT = (os.getenv('TELEMETRY_INGESTION_PAYLOAD_FORMAT') or 'legacy
 API_SESSION_ID = (os.getenv('TELEMETRY_INGESTION_SESSION_ID') or 'live-session').strip()
 API_VEHICLE = (os.getenv('TELEMETRY_INGESTION_VEHICLE') or '').strip()
 API_EXPECT_JSON = (os.getenv('TELEMETRY_INGESTION_EXPECT_JSON') or 'true').strip().lower() in ('1', 'true', 'yes', 'on')
-TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS = os.getenv('TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS', '5')
+TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS = os.getenv('TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS', '1')
 SOLCAST_API_KEY = os.getenv('SOLCAST_API_KEY')
 SOLCAST_LATITUDE = os.getenv('SOLCAST_LATITUDE')
 SOLCAST_LONGITUDE = os.getenv('SOLCAST_LONGITUDE')
@@ -107,6 +113,14 @@ class TelemetryApplication(QObject):
         self.telemetry_online_send_interval_seconds = self._parse_float( TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS, 5.0,)
         self._last_online_send_monotonic = None
         self._solcast_initial_fetch_pending = False
+        self.solcast_location_update_interval_seconds = 60 * 60
+        self.solcast_location_min_update_miles = 15.0
+        self.solcast_location_max_update_miles = 30.0
+        self.solcast_location_daily_limit = 10
+        self._solcast_location_usage_date = datetime.now().date().isoformat()
+        self._solcast_location_updates_today = self._load_solcast_location_updates_today()
+        self._last_solcast_location_update_monotonic = None
+        self._solcast_location_anchor = self._current_solcast_location_tuple()
         self.serial_reader_thread = None
         self.signals_connected = False
         self.used_Ah = 0
@@ -128,6 +142,7 @@ class TelemetryApplication(QObject):
             self.solcast_key = existing_settings.get('solcast_api_key', self.solcast_key)
             self.solcast_lat = existing_settings.get('solcast_latitude', self.solcast_lat)
             self.solcast_lon = existing_settings.get('solcast_longitude', self.solcast_lon)
+            self._solcast_location_anchor = self._current_solcast_location_tuple()
             self._apply_telemetry_ingestion_settings(existing_settings, save=False)
 
         self.init_buffer()
@@ -324,16 +339,11 @@ class TelemetryApplication(QObject):
             TelemetryKey.MC2IVC_IQ_VECTOR.value[0],
             TelemetryKey.MC2BEM_BEMFD_VECTOR.value[0],
             TelemetryKey.MC2BEM_BEMFQ_VECTOR.value[0],
-            TelemetryKey.SOLCAST_LIVE_GHI.value[0],
-            TelemetryKey.SOLCAST_LIVE_DNI.value[0],
-            TelemetryKey.SOLCAST_LIVE_TEMP.value[0],
-            TelemetryKey.SOLCAST_LIVE_TIME.value[0],
-            TelemetryKey.SOLCAST_LIVE_FETCHED_AT.value[0],
-            TelemetryKey.SOLCAST_FCST_GHI.value[0],
-            TelemetryKey.SOLCAST_FCST_DNI.value[0],
-            TelemetryKey.SOLCAST_FCST_TEMP.value[0],
-            TelemetryKey.SOLCAST_FCST_TIME.value[0],
-            TelemetryKey.SOLCAST_FCST_FETCHED_AT.value[0],
+            *solcast_keys_for_prefix("Solcast_Live"),
+            *solcast_keys_for_prefix("Solcast_Fcst"),
+            *solcast_keys_for_prefix("Solcast_Fcst_30m"),
+            *solcast_keys_for_prefix("Solcast_Fcst_1h"),
+            *solcast_keys_for_prefix("Solcast_Fcst_24h"),
             TelemetryKey.MC1_BUS_POWER_W.value[0], TelemetryKey.MC1_MECHANICAL_POWER_W.value[0], TelemetryKey.MC1_EFFICIENCY_PCT.value[0],
             TelemetryKey.MC2_BUS_POWER_W.value[0], TelemetryKey.MC2_MECHANICAL_POWER_W.value[0], TelemetryKey.MC2_EFFICIENCY_PCT.value[0],
             TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0], TelemetryKey.MOTORS_TOTAL_MECHANICAL_POWER_W.value[0], TelemetryKey.MOTORS_AVERAGE_EFFICIENCY_PCT.value[0],
@@ -437,6 +447,7 @@ class TelemetryApplication(QObject):
         self.solcast_key = key
         self.solcast_lat = lat
         self.solcast_lon = lon
+        self._solcast_location_anchor = self._current_solcast_location_tuple()
 
         if not all((self.solcast_key, self.solcast_lat, self.solcast_lon)):
             self.logger.warning("Missing Solcast configuration; skipping solar data fetch.")
@@ -482,6 +493,7 @@ class TelemetryApplication(QObject):
             self.gui.save_csv_signal.connect(self.finalize_csv)
             self.gui.change_log_level_signal.connect(self.update_logging_level)
             self.gui.settings_applied_signal.connect(self.handle_settings_applied)
+            self.gui.vehicle_year_changed_signal.connect(self.on_vehicle_year_changed)
             self.update_data_signal.connect(self.buffer.add_data)
             self.update_data_signal.connect(self.gui.update_all_tabs)
             self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
@@ -490,6 +502,7 @@ class TelemetryApplication(QObject):
             self.gui.import_bundle_requested.connect(self.handle_import_bundle)
             if hasattr(self.gui, 'simulation_tab'):
                 self.gui.start_simulation_replay_requested.connect(self.start_simulation_replay)
+                self.gui.simulation_replay_speed_changed.connect(self.set_simulation_replay_speed)
                 self.gui.start_simulation_scenario_requested.connect(self.start_simulation_scenario)
                 self.gui.stop_simulation_requested.connect(self.stop_simulation)
             if hasattr(self.gui.settings_tab, 'solcast_config_changed'):
@@ -718,50 +731,206 @@ class TelemetryApplication(QObject):
         )
         return row
 
+    def _solcast_output_parameters(self) -> str:
+        return solcast_output_parameters()
+
+    def _build_solcast_payload(self, prefix: str, sample: dict, fetched_at_text: str) -> dict:
+        payload = {
+            f"{prefix}_Time": self._format_solcast_period_end(sample.get("period_end")),
+            f"{prefix}_Fetched_At": fetched_at_text,
+        }
+        for api_name, suffix, _unit in SOLCAST_PARAMETER_SPECS:
+            payload[f"{prefix}_{suffix}"] = sample.get(api_name)
+        return payload
+
+    def _select_solcast_forecast(self, forecasts: list[dict], target_time: datetime) -> dict | None:
+        candidates = []
+        for forecast in forecasts:
+            parsed = self._parse_iso_datetime(forecast.get("period_end"))
+            if parsed is None:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            candidates.append((parsed.astimezone(timezone.utc), forecast))
+        if not candidates:
+            return forecasts[0] if forecasts else None
+
+        target_utc = target_time.astimezone(timezone.utc)
+        future = [item for item in candidates if item[0] >= target_utc]
+        if future:
+            return min(future, key=lambda item: item[0])[1]
+        return min(candidates, key=lambda item: abs((item[0] - target_utc).total_seconds()))[1]
+
+    def _current_solcast_location_tuple(self) -> tuple[float, float] | None:
+        try:
+            lat = float(self.solcast_lat)
+            lon = float(self.solcast_lon)
+        except (TypeError, ValueError):
+            return None
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
+        return None
+
+    def _load_solcast_location_updates_today(self) -> int:
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        today = datetime.now().date().isoformat()
+        saved_date = str(settings.value("solcast/location_update_date", "") or "")
+        if saved_date != today:
+            settings.setValue("solcast/location_update_date", today)
+            settings.setValue("solcast/location_update_count", 0)
+            return 0
+        try:
+            return int(settings.value("solcast/location_update_count", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _record_solcast_location_update(self) -> None:
+        today = datetime.now().date().isoformat()
+        if self._solcast_location_usage_date != today:
+            self._solcast_location_usage_date = today
+            self._solcast_location_updates_today = 0
+        self._solcast_location_updates_today += 1
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        settings.setValue("solcast/location_update_date", self._solcast_location_usage_date)
+        settings.setValue("solcast/location_update_count", self._solcast_location_updates_today)
+
+    @staticmethod
+    def _haversine_miles(lat1, lon1, lat2, lon2) -> float:
+        radius_miles = 3958.7613
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        d_phi = math.radians(lat2 - lat1)
+        d_lambda = math.radians(lon2 - lon1)
+        a = (
+            math.sin(d_phi / 2) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+        )
+        return 2 * radius_miles * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _valid_gps_location_from_snapshot(self, data: dict) -> tuple[float, float] | None:
+        try:
+            lat = float(data.get(TelemetryKey.NAV_LATITUDE.value[0]))
+            lon = float(data.get(TelemetryKey.NAV_LONGITUDE.value[0]))
+        except (TypeError, ValueError):
+            return None
+        valid = str(data.get(TelemetryKey.NAV_GPS_VALID.value[0], "")).strip().lower()
+        try:
+            fix = int(float(data.get(TelemetryKey.NAV_FIX.value[0], 0)))
+        except (TypeError, ValueError):
+            fix = 0
+        if valid not in ("1", "true", "valid") or fix <= 0:
+            return None
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            return None
+        if abs(lat) < 0.000001 and abs(lon) < 0.000001:
+            return None
+        return lat, lon
+
+    def _maybe_update_solcast_location_from_gps(self, data: dict) -> None:
+        if not all((self.solcast_key, self.solcast_lat, self.solcast_lon)):
+            return
+        gps_location = self._valid_gps_location_from_snapshot(data)
+        if gps_location is None:
+            return
+
+        now = time.monotonic()
+        if (
+            self._last_solcast_location_update_monotonic is not None
+            and now - self._last_solcast_location_update_monotonic < self.solcast_location_update_interval_seconds
+        ):
+            return
+        if self._load_solcast_location_updates_today() >= self.solcast_location_daily_limit:
+            self.logger.warning(
+                "Skipping Solcast GPS location update: daily auto-location limit of %d reached.",
+                self.solcast_location_daily_limit,
+            )
+            return
+
+        anchor = self._solcast_location_anchor or self._current_solcast_location_tuple()
+        if anchor is None:
+            distance_miles = 0.0
+        else:
+            distance_miles = self._haversine_miles(anchor[0], anchor[1], gps_location[0], gps_location[1])
+
+        if anchor is not None and distance_miles < self.solcast_location_min_update_miles:
+            return
+        if anchor is not None and distance_miles > self.solcast_location_max_update_miles:
+            self.logger.warning(
+                "Skipping Solcast GPS location update: moved %.1f mi, outside %.0f-%.0f mi update band.",
+                distance_miles,
+                self.solcast_location_min_update_miles,
+                self.solcast_location_max_update_miles,
+            )
+            return
+
+        self.solcast_lat = f"{gps_location[0]:.6f}"
+        self.solcast_lon = f"{gps_location[1]:.6f}"
+        self._solcast_location_anchor = gps_location
+        self._last_solcast_location_update_monotonic = now
+        self._record_solcast_location_update()
+        if self.config_data_copy is None:
+            self.config_data_copy = {}
+        self.config_data_copy["solcast_latitude"] = self.solcast_lat
+        self.config_data_copy["solcast_longitude"] = self.solcast_lon
+        self._save_app_settings()
+        self.logger.info(
+            "Updated Solcast location from GPS: %s, %s (moved %.1f mi).",
+            self.solcast_lat,
+            self.solcast_lon,
+            distance_miles,
+        )
+        QTimer.singleShot(0, self.fetch_solcast_data)
+
     def fetch_solcast_data(self):
-        """Fetch both live and forecast irradiance & emit into the GUI."""
+        """Fetch live and forecast irradiance/weather data and emit into the GUI."""
         headers = {"Authorization": f"Bearer {self.solcast_key}"}
-        fetched_at_text = self._format_fetch_time(datetime.now(timezone.utc))
+        fetched_at = datetime.now(timezone.utc)
+        fetched_at_text = self._format_fetch_time(fetched_at)
+        output_parameters = self._solcast_output_parameters()
 
         try:
             # Live estimated actuals (last 7 days): get most recent point
             url_live = (
                 f"https://api.solcast.com.au/data/live/radiation_and_weather"
                 f"?latitude={self.solcast_lat}&longitude={self.solcast_lon}"
-                f"&hours=1&period=PT5M&output_parameters=ghi,dni,air_temp&format=json"
+                f"&hours=1&period=PT5M&output_parameters={output_parameters}&format=json"
             )
             r_live = requests.get(url_live, headers=headers, timeout=10)
             r_live.raise_for_status()
             live = r_live.json().get("estimated_actuals", [])
             if live:
                 last = live[0]
-                self.update_data_signal.emit({
-                    "Solcast_Live_GHI":   last.get("ghi"),
-                    "Solcast_Live_DNI":   last.get("dni"),
-                    "Solcast_Live_Temp":  last.get("air_temp"),
-                    "Solcast_Live_Time":  self._format_solcast_period_end(last.get("period_end")),
-                    "Solcast_Live_Fetched_At": fetched_at_text,
-                })
+                self.update_data_signal.emit(self._build_solcast_payload("Solcast_Live", last, fetched_at_text))
 
-            # Forecast (next 24 h): get the first forecast interval
+            # Forecasts: keep legacy Solcast_Fcst_* as the 30-minute horizon,
+            # and also emit explicit 30m, 1h, and 24h fields.
             url_fc = (
                 f"https://api.solcast.com.au/data/forecast/radiation_and_weather"
                 f"?latitude={self.solcast_lat}&longitude={self.solcast_lon}"
-                f"&hours=24&period=PT30M"
-                f"&output_parameters=ghi,dni,air_temp&format=json"
+                f"&hours=48&period=PT30M"
+                f"&output_parameters={output_parameters}&format=json"
             )
             r_fc = requests.get(url_fc, headers=headers, timeout=10)
             r_fc.raise_for_status()
             fc = r_fc.json().get("forecasts", [])
             if fc:
-                nxt = fc[0]
-                self.update_data_signal.emit({
-                    "Solcast_Fcst_GHI":   nxt.get("ghi"),
-                    "Solcast_Fcst_DNI":   nxt.get("dni"),
-                    "Solcast_Fcst_Temp":  nxt.get("air_temp"),
-                    "Solcast_Fcst_Time":  self._format_solcast_period_end(nxt.get("period_end")),
-                    "Solcast_Fcst_Fetched_At": fetched_at_text,
-                })
+                payload = {}
+                horizons = (
+                    ("Solcast_Fcst_30m", timedelta(minutes=30)),
+                    ("Solcast_Fcst_1h", timedelta(hours=1)),
+                    ("Solcast_Fcst_24h", timedelta(hours=24)),
+                )
+                for prefix, offset in horizons:
+                    sample = self._select_solcast_forecast(fc, fetched_at + offset)
+                    if sample:
+                        payload.update(self._build_solcast_payload(prefix, sample, fetched_at_text))
+
+                sample_30m = self._select_solcast_forecast(fc, fetched_at + timedelta(minutes=30))
+                if sample_30m:
+                    payload.update(self._build_solcast_payload("Solcast_Fcst", sample_30m, fetched_at_text))
+
+                if payload:
+                    self.update_data_signal.emit(payload)
 
             self.logger.info("Solcast data fetched and emitted.")
         except Exception as e:
@@ -784,6 +953,8 @@ class TelemetryApplication(QObject):
             self.solcast_lat = solcast_lat
         if solcast_lon:
             self.solcast_lon = solcast_lon
+        self._solcast_location_anchor = self._current_solcast_location_tuple()
+        self._last_solcast_location_update_monotonic = None
 
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")
@@ -837,6 +1008,8 @@ class TelemetryApplication(QObject):
         self.config_data_copy['solcast_api_key'] = self.solcast_key
         self.config_data_copy['solcast_latitude'] = self.solcast_lat
         self.config_data_copy['solcast_longitude'] = self.solcast_lon
+        self._solcast_location_anchor = self._current_solcast_location_tuple()
+        self._last_solcast_location_update_monotonic = None
 
         self._save_app_settings()
         self._apply_solcast_settings()
@@ -888,6 +1061,14 @@ class TelemetryApplication(QObject):
             self.telemetry_ingestion_api_url,
             self.telemetry_ingestion_payload_format,
         )
+
+    def on_vehicle_year_changed(self, vehicle_year: str):
+        self.vehicle_year = str(vehicle_year or "").strip()
+        if self.config_data_copy is None:
+            self.config_data_copy = {}
+        self.config_data_copy["vehicle_year"] = self.vehicle_year
+        self._save_app_settings()
+        self.logger.info("Vehicle year updated via Settings tab: %s", self.vehicle_year or "(empty)")
 
     def start(self):
         return self.run_application()
@@ -999,10 +1180,13 @@ class TelemetryApplication(QObject):
         try:
             if os.path.exists(training_path) and os.path.getsize(training_path) > 0:
                 self.logger.info("Retraining machine learning models using training data...")
-                self.ml_model.train_battery_life_model(training_path)
-                self.ml_model.train_break_even_model(training_path)
+                batt_ok = self.ml_model.train_battery_life_model(training_path)
+                be_ok = self.ml_model.train_break_even_model(training_path)
+                if not batt_ok or not be_ok:
+                    raise RuntimeError("Training data did not contain enough valid numeric rows for both models.")
             else:
                 self.logger.warning(f"Training data file {training_path} is empty or does not exist. Cannot train model.")
+                raise FileNotFoundError(f"Training data file {training_path} is empty or does not exist.")
         except Exception as e:
             error = e
             self.logger.error(f"Error during model training: {e}")
@@ -1023,15 +1207,9 @@ class TelemetryApplication(QObject):
         self.logger.info("Retraining machine learning model with additional files...")
         self.gui.settings_tab.set_retrain_button_enabled(False)
 
-        old_data_file = os.path.join(self.csv_handler.root_directory, 'training_data.csv')
+        old_data_file = self.csv_handler.get_training_data_csv_path()
         combined_file = self.ml_model.combine_and_retrain(old_data_file, new_files)
         if combined_file:
-            # train both models on the combined data
-            self.ml_model.train_battery_life_model(combined_file)
-            self.ml_model.train_break_even_model(combined_file)
-            # finally emit completion so button is re-enabled
-            self.training_complete_signal.emit(None)
-            # before re-enabling, let on_training_complete know we succeeded
             self.training_complete_signal.emit(None)
         else:
             self.logger.error("Failed to combine and retrain with additional files.")
@@ -1113,6 +1291,14 @@ class TelemetryApplication(QObject):
             self.stop_serial_reader()
         self._simulation_mode = f"Replay ({os.path.basename(file_path)})"
         self.simulator.start_replay(file_path, speed)
+
+    def set_simulation_replay_speed(self, speed):
+        try:
+            self.simulator.set_replay_speed(speed)
+            if self._simulation_mode and self._simulation_mode.startswith("Replay") and hasattr(self.gui, 'simulation_tab'):
+                self.gui.simulation_tab.set_status(f"Replay speed set to {float(speed):g}×.")
+        except Exception as exc:
+            self.logger.error(f"Failed to update replay speed: {exc}")
 
     def start_simulation_scenario(self, scenario, speed, profile=None):
         if not scenario:
@@ -1324,6 +1510,8 @@ class TelemetryApplication(QObject):
                         )
                         if nav_metrics:
                             combined_data.update(nav_metrics)
+
+                    self._maybe_update_solcast_location_from_gps(combined_data)
 
                     if not self._simulation_mode:
                         csv_row = self._build_primary_csv_row(combined_data)

@@ -1,14 +1,16 @@
+import json
 import math
 import os
 import time
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 
-from PyQt6.QtCore import QStandardPaths, Qt, QUrl
+from PyQt6.QtCore import QSettings, QStandardPaths, Qt, QUrl
 from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPixmapCache
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkDiskCache, QNetworkReply, QNetworkRequest
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGraphicsEllipseItem,
@@ -19,6 +21,7 @@ from PyQt6.QtWidgets import (
     QGraphicsTextItem,
     QGraphicsView,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -89,6 +92,7 @@ class GPSMapTab(QWidget):
         self.visible_tile_keys = set()
         self.pending_tiles = set()
         self.pending_replies = {}
+        self.saved_locations = self._load_saved_locations()
 
         self.network = QNetworkAccessManager(self)
         self.network.setCache(self._create_tile_disk_cache())
@@ -145,6 +149,19 @@ class GPSMapTab(QWidget):
         kalamazoo_button = QPushButton("Kalamazoo")
         kalamazoo_button.clicked.connect(self._set_kalamazoo_location)
         manual_layout.addWidget(kalamazoo_button)
+        manual_layout.addWidget(QLabel("Saved:"))
+        self.saved_location_dropdown = QComboBox()
+        self.saved_location_dropdown.setMinimumWidth(180)
+        manual_layout.addWidget(self.saved_location_dropdown)
+        go_saved_button = QPushButton("Go")
+        go_saved_button.clicked.connect(self._go_to_saved_location)
+        manual_layout.addWidget(go_saved_button)
+        save_location_button = QPushButton("Save")
+        save_location_button.clicked.connect(self._save_current_location)
+        manual_layout.addWidget(save_location_button)
+        delete_location_button = QPushButton("Delete")
+        delete_location_button.clicked.connect(self._delete_saved_location)
+        manual_layout.addWidget(delete_location_button)
         load_gpx_button = QPushButton("Load GPX")
         load_gpx_button.clicked.connect(self._load_gpx_route)
         manual_layout.addWidget(load_gpx_button)
@@ -162,6 +179,7 @@ class GPSMapTab(QWidget):
         manual_layout.addWidget(self.follow_vehicle_checkbox)
         manual_layout.addStretch()
         layout.addWidget(manual_bar)
+        self._refresh_saved_locations_dropdown()
 
         self.route_label = QLabel("Route: none")
         layout.addWidget(self.route_label)
@@ -291,6 +309,105 @@ class GPSMapTab(QWidget):
             speed=0.0,
             reset_trail=True,
         )
+
+    def _load_saved_locations(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        raw = settings.value("map/saved_locations", "{}")
+        if not isinstance(raw, str):
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        locations = {}
+        for name, item in data.items():
+            if not isinstance(item, dict):
+                continue
+            lat = self._as_float(item.get("lat"))
+            lon = self._as_float(item.get("lon"))
+            if lat is None or lon is None or not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+                continue
+            clean_name = str(name or "").strip()
+            if clean_name:
+                locations[clean_name] = {"lat": lat, "lon": lon}
+        return dict(sorted(locations.items(), key=lambda entry: entry[0].lower()))
+
+    def _persist_saved_locations(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        settings.setValue("map/saved_locations", json.dumps(self.saved_locations, sort_keys=True))
+
+    def _refresh_saved_locations_dropdown(self):
+        if not hasattr(self, "saved_location_dropdown"):
+            return
+        current = self.saved_location_dropdown.currentText()
+        self.saved_location_dropdown.blockSignals(True)
+        self.saved_location_dropdown.clear()
+        self.saved_location_dropdown.addItems(sorted(self.saved_locations, key=str.lower))
+        if current:
+            index = self.saved_location_dropdown.findText(current)
+            if index != -1:
+                self.saved_location_dropdown.setCurrentIndex(index)
+        self.saved_location_dropdown.blockSignals(False)
+
+    def _current_location_for_save(self):
+        if self.vehicle_lat is not None and self.vehicle_lon is not None:
+            return self.vehicle_lat, self.vehicle_lon
+        lat = self._as_float(self.manual_lat_edit.text())
+        lon = self._as_float(self.manual_lon_edit.text())
+        if lat is None or lon is None or not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            return None
+        return lat, lon
+
+    def _save_current_location(self):
+        point = self._current_location_for_save()
+        if point is None:
+            QMessageBox.warning(self, "Saved Location", "Set a valid vehicle or manual location first.")
+            return
+        default_name = self.saved_location_dropdown.currentText().strip() or "Saved Location"
+        name, ok = QInputDialog.getText(self, "Save Location", "Location name:", text=default_name)
+        name = str(name or "").strip()
+        if not ok or not name:
+            return
+        lat, lon = point
+        self.saved_locations[name] = {"lat": lat, "lon": lon}
+        self.saved_locations = dict(sorted(self.saved_locations.items(), key=lambda entry: entry[0].lower()))
+        self._persist_saved_locations()
+        self._refresh_saved_locations_dropdown()
+        self.saved_location_dropdown.setCurrentText(name)
+        self.status_label.setText(f"Saved location | {name}")
+
+    def _go_to_saved_location(self):
+        name = self.saved_location_dropdown.currentText().strip()
+        location = self.saved_locations.get(name)
+        if not location:
+            QMessageBox.information(self, "Saved Location", "No saved location is selected.")
+            return
+        self.follow_vehicle_checkbox.setChecked(False)
+        self._set_location(
+            location["lat"],
+            location["lon"],
+            status=f"Saved location | {name}",
+            speed=0.0,
+            reset_trail=True,
+        )
+
+    def _delete_saved_location(self):
+        name = self.saved_location_dropdown.currentText().strip()
+        if not name or name not in self.saved_locations:
+            QMessageBox.information(self, "Saved Location", "No saved location is selected.")
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete Location",
+            f"Delete saved location '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.saved_locations.pop(name, None)
+        self._persist_saved_locations()
+        self._refresh_saved_locations_dropdown()
+        self.status_label.setText("Saved location deleted")
 
     def _set_lap_start(self):
         point = self._current_lap_point()

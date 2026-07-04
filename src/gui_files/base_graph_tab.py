@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QToolTip,
     QWidget,
     QVBoxLayout,
 )
@@ -40,6 +41,7 @@ class BaseGraphTab(QWidget):
         self.max_points = 361
         self.paused = False
         self.graph_widgets = {}
+        self._hover_proxies = {}
         self.current_zoom_plot = None
 
         self._init_ui()
@@ -95,6 +97,19 @@ class BaseGraphTab(QWidget):
         pw.showGrid(x=True, y=True, alpha=0.35)
         pw.setFixedHeight(300)
         pw.graph_curve = pw.plot(pen=pg.mkPen(color=color, width=2))
+        pw.hover_values = []
+        pw.hover_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#facc15", width=1))
+        pw.hover_hline = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen("#facc15", width=1))
+        pw.hover_label = pg.TextItem("", anchor=(0, 1), color="#ffffff", fill=pg.mkBrush(20, 24, 31, 220))
+        for item in (pw.hover_vline, pw.hover_hline, pw.hover_label):
+            item.setZValue(100)
+            item.hide()
+            pw.addItem(item, ignoreBounds=True)
+        self._hover_proxies[key] = pg.SignalProxy(
+            pw.scene().sigMouseMoved,
+            rateLimit=60,
+            slot=lambda event, key=key, pw=pw: self._on_plot_hover(event, key, pw),
+        )
         pw.double_clicked.connect(lambda ev, pw=pw, key=key: self._on_dblclick(ev, pw, key))
 
         self.graph_widgets[key] = pw
@@ -227,7 +242,48 @@ class BaseGraphTab(QWidget):
 
     def _redraw_plot(self, key, pw):
         clean = [v for v in self.data_buffers[key] if isinstance(v, (int, float)) and math.isfinite(v)]
+        pw.hover_values = clean
         pw.graph_curve.setData(clean)
+        if not clean:
+            self._hide_hover(pw)
+
+    def _on_plot_hover(self, event, key, pw):
+        pos = event[0] if isinstance(event, tuple) else event
+        if not pw.sceneBoundingRect().contains(pos):
+            self._hide_hover(pw)
+            return
+        values = getattr(pw, "hover_values", [])
+        if not values:
+            self._hide_hover(pw)
+            return
+
+        mouse_point = pw.plotItem.vb.mapSceneToView(pos)
+        idx = int(round(mouse_point.x()))
+        if idx < 0 or idx >= len(values):
+            self._hide_hover(pw)
+            return
+
+        value = values[idx]
+        unit = self._display_unit(key)
+        label = f"{key}\nSample {idx + 1}/{len(values)}: {value:.3f} {unit}".rstrip()
+        pw.hover_vline.setPos(idx)
+        pw.hover_hline.setPos(value)
+        pw.hover_label.setText(label)
+        pw.hover_label.setPos(idx, value)
+        for item in (pw.hover_vline, pw.hover_hline, pw.hover_label):
+            item.show()
+        widget_pos = pw.mapFromScene(pos)
+        if hasattr(widget_pos, "toPoint"):
+            widget_pos = widget_pos.toPoint()
+        QToolTip.showText(pw.mapToGlobal(widget_pos), label, pw)
+
+    @staticmethod
+    def _hide_hover(pw):
+        for attr in ("hover_vline", "hover_hline", "hover_label"):
+            item = getattr(pw, attr, None)
+            if item is not None:
+                item.hide()
+        QToolTip.hideText()
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Type.MouseButtonPress:

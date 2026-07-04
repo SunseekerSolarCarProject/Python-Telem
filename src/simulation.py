@@ -3,7 +3,7 @@ import os
 import random
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
@@ -25,28 +25,80 @@ def _coerce_value(value):
         return value
 
 
+def _parse_replay_timestamp(value):
+    text = str(value or "").strip()
+    if not text or text.upper() == "N/A":
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    for parser in (
+        lambda item: datetime.fromisoformat(item),
+        lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M:%S"),
+        lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M:%S.%f"),
+    ):
+        try:
+            parsed = parser(text)
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            continue
+    return None
+
+
+def _scaled_delay(previous_timestamp, current_timestamp, speed: float, fallback_interval: float) -> float:
+    speed = max(0.1, float(speed or 1.0))
+    if previous_timestamp is None or current_timestamp is None:
+        return fallback_interval / speed
+    delta = (current_timestamp - previous_timestamp).total_seconds()
+    if delta < 0:
+        return 0.0
+    return delta / speed
+
+
 class _ReplayWorker(QObject):
     data_ready = pyqtSignal(dict)
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, file_path: str, interval: float, stop_event: threading.Event):
+    def __init__(self, file_path: str, speed_getter, stop_event: threading.Event):
         super().__init__()
         self.file_path = file_path
-        self.interval = max(0.05, interval)
+        self.speed_getter = speed_getter
+        self.fallback_interval = 1.0
         self.stop_event = stop_event
+
+    def _current_speed(self) -> float:
+        try:
+            return max(0.1, float(self.speed_getter()))
+        except Exception:
+            return 1.0
 
     def run(self):
         try:
             with open(self.file_path, "r", newline="", encoding="utf-8") as fh:
                 reader = csv.DictReader(fh)
+                previous_timestamp = None
+                first_row = True
                 for row in reader:
                     if self.stop_event.is_set():
                         break
+                    current_timestamp = _parse_replay_timestamp(row.get("timestamp"))
+                    delay = _scaled_delay(
+                        previous_timestamp,
+                        current_timestamp,
+                        self._current_speed(),
+                        self.fallback_interval,
+                    )
+                    if not first_row and delay > 0:
+                        self.stop_event.wait(delay)
+                        if self.stop_event.is_set():
+                            break
                     data = {k: _coerce_value(v) for k, v in row.items()}
                     data.setdefault("timestamp", datetime.utcnow().isoformat(timespec="seconds"))
                     self.data_ready.emit(data)
-                    time.sleep(self.interval)
+                    previous_timestamp = current_timestamp
+                    first_row = False
         except Exception as exc:
             self.error.emit(str(exc))
         finally:
@@ -135,6 +187,7 @@ class TelemetrySimulator(QObject):
         self._thread: QThread | None = None
         self._worker: QObject | None = None
         self._stop_event = threading.Event()
+        self._replay_speed = 1.0
 
     def stop(self):
         self._stop_event.set()
@@ -150,9 +203,12 @@ class TelemetrySimulator(QObject):
             self.error.emit(f"Replay file not found: {file_path}")
             return
         self.stop()
-        interval = max(0.05, 1.0 / max(0.1, speed))
-        worker = _ReplayWorker(file_path, interval, self._stop_event)
+        self.set_replay_speed(speed)
+        worker = _ReplayWorker(file_path, lambda: self._replay_speed, self._stop_event)
         self._start_worker(worker, mode="replay")
+
+    def set_replay_speed(self, speed: float):
+        self._replay_speed = max(0.1, float(speed or 1.0))
 
     def start_synthetic(self, scenario: str, speed: float = 1.0, profile: dict | None = None):
         self.stop()

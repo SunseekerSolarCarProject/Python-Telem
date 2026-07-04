@@ -21,7 +21,7 @@ import os
 import logging
 
 # Make sure this import is correct in your environment.
-from key_name_definitions import TelemetryKey
+from key_name_definitions import TelemetryKey, solcast_keys_for_prefix
 
 # Import for updating the application
 from updater.update_checker import UpdateChecker
@@ -48,11 +48,13 @@ class TelemetryGUI(QWidget):
     save_csv_signal = pyqtSignal()
     change_log_level_signal = pyqtSignal(str)
     settings_applied_signal = pyqtSignal(str, int, str, str)  
+    vehicle_year_changed_signal = pyqtSignal(str)
     machine_learning_retrain_signal = pyqtSignal()  # Retrain button for ML model
     machine_learning_retrain_signal_with_files = pyqtSignal(list)
     export_bundle_requested = pyqtSignal(str, str)
     import_bundle_requested = pyqtSignal(str, bool)
     start_simulation_replay_requested = pyqtSignal(str, float)
+    simulation_replay_speed_changed = pyqtSignal(float)
     start_simulation_scenario_requested = pyqtSignal(str, float, dict)
     stop_simulation_requested = pyqtSignal()
 
@@ -409,20 +411,10 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.MC2LIM_ACTIVE_MOTOR_INFO.value[0],
                 TelemetryKey.MC2LIM_ERRORS.value[0], TelemetryKey.MC2LIM_LIMITS.value[0]
             ],
-            "Solar Data (Live)": [
-                TelemetryKey.SOLCAST_LIVE_TIME.value[0],
-                TelemetryKey.SOLCAST_LIVE_FETCHED_AT.value[0],
-                TelemetryKey.SOLCAST_LIVE_GHI.value[0],
-                TelemetryKey.SOLCAST_LIVE_DNI.value[0],
-                TelemetryKey.SOLCAST_LIVE_TEMP.value[0],
-            ],
-            "Solar Data (Forecast)": [
-                TelemetryKey.SOLCAST_FCST_TIME.value[0],
-                TelemetryKey.SOLCAST_FCST_FETCHED_AT.value[0],
-                TelemetryKey.SOLCAST_FCST_GHI.value[0],
-                TelemetryKey.SOLCAST_FCST_DNI.value[0],
-                TelemetryKey.SOLCAST_FCST_TEMP.value[0],
-            ],
+            "Solar Data (Live)": solcast_keys_for_prefix("Solcast_Live"),
+            "Solar Data (Forecast 30m)": solcast_keys_for_prefix("Solcast_Fcst"),
+            "Solar Data (Forecast 1h)": solcast_keys_for_prefix("Solcast_Fcst_1h"),
+            "Solar Data (Forecast 24h)": solcast_keys_for_prefix("Solcast_Fcst_24h"),
             "Ambient Sensor": [
                 TelemetryKey.BME_TEMPERATURE_C.value[0],
                 TelemetryKey.BME_PRESSURE_PA.value[0],
@@ -495,6 +487,7 @@ class TelemetryGUI(QWidget):
 
         self.simulation_tab = SimulationTab()
         self.simulation_tab.start_replay.connect(self.start_simulation_replay_requested.emit)
+        self.simulation_tab.replay_speed_changed.connect(self.simulation_replay_speed_changed.emit)
         self.simulation_tab.start_scenario.connect(self.start_simulation_scenario_requested.emit)
         self.simulation_tab.stop_requested.connect(self.stop_simulation_requested.emit)
         self.tools_tabs.addTab(self.simulation_tab, "Simulation")
@@ -507,6 +500,7 @@ class TelemetryGUI(QWidget):
         self.settings_tab.color_changed_signal.connect(self.update_color_mapping)
         self.settings_tab.units_changed_signal.connect(self.on_units_changed)
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)
+        self.settings_tab.vehicle_year_changed_signal.connect(self.vehicle_year_changed_signal.emit)
         self.settings_tab.machine_learning_retrain_signal.connect(self.machine_learning_retrain_signal.emit)
         self.settings_tab.additional_files_selected.connect(self.machine_learning_retrain_signal_with_files.emit)
         # Updater version management wiring

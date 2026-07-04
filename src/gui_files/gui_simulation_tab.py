@@ -19,6 +19,7 @@ class SimulationTab(QWidget):
     """
 
     start_replay = pyqtSignal(str, float)
+    replay_speed_changed = pyqtSignal(float)
     start_scenario = pyqtSignal(str, float, dict)
     stop_requested = pyqtSignal()
 
@@ -53,8 +54,13 @@ class SimulationTab(QWidget):
         self.speed_spin.setRange(0.1, 10.0)
         self.speed_spin.setSingleStep(0.1)
         self.speed_spin.setValue(1.0)
+        self.speed_spin.valueChanged.connect(lambda value: self.replay_speed_changed.emit(float(value)))
         speed_row.addWidget(self.speed_spin)
         replay_layout.addLayout(speed_row)
+
+        replay_help = QLabel("Replay uses CSV timestamp gaps: 10× is one tenth the recorded delay; 0.5× is twice as long.")
+        replay_help.setWordWrap(True)
+        replay_layout.addWidget(replay_help)
 
         start_replay_btn = QPushButton("Start Replay")
         start_replay_btn.clicked.connect(self._emit_replay)
@@ -152,7 +158,9 @@ class SimulationTab(QWidget):
             self.file_path_edit.setText(path)
 
     def _emit_replay(self):
-        self.start_replay.emit(self.file_path_edit.text().strip(), float(self.speed_spin.value()))
+        speed = float(self.speed_spin.value())
+        self.set_status(f"Starting replay at {speed:g}× using recorded CSV timestamp spacing.")
+        self.start_replay.emit(self.file_path_edit.text().strip(), speed)
 
     def _emit_scenario(self):
         scenario = self.scenario_combo.currentText()

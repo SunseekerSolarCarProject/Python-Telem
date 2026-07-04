@@ -117,6 +117,51 @@ when the row is written where a conversion is defined. Because the unit mode can
 be changed while the app is running, read `csv_units_mode` per row instead of
 assuming the entire file stayed metric or imperial.
 
+## Prediction Fields
+
+After the buffer has a complete enough live snapshot, the app adds local
+machine-learning predictions:
+
+```text
+Predicted_Remaining_Time
+Predicted_Exact_Time
+Predicted_BreakEven_Speed
+Predicted_Remaining_Time_Uncertainty
+Predicted_BreakEven_Speed_Uncertainty
+Prediction_Data_Age_s
+Prediction_Quality_Flags
+```
+
+These fields are derived from `training_data.csv` and the models in
+`src/learning_datasets/`. They are not raw serial packets. See
+`docs/MACHINE_LEARNING.md` for the feature columns, target columns, retraining
+workflow, and interpretation of quality flags.
+
+## Solcast Weather Fields
+
+When Solcast is configured, the app writes live weather fields and forecast
+horizons into the normal telemetry stream and CSV. Forecasts are captured at
+30 minutes, 1 hour, and 24 hours ahead using these prefixes:
+
+```text
+Solcast_Fcst_30m_*
+Solcast_Fcst_1h_*
+Solcast_Fcst_24h_*
+```
+
+The legacy `Solcast_Fcst_*` fields mirror the 30-minute forecast. Each Solcast
+prefix may include `GHI`, `DNI`, `DHI`, `GTI`, `Temp`, `Time`, `Fetched_At`,
+`Weather_Type`, `CAPE`, `Cloud_Opacity`, `Relative_Humidity`,
+`Dewpoint_Temp`, `Wind_Direction_10m`, `Wind_Speed_10m`, `Wind_Gust`,
+`Precipitable_Water`, `Precipitation_Rate`, `Surface_Pressure`,
+`Clearsky_GHI`, `Clearsky_DNI`, `Zenith`, and `Azimuth`.
+
+During live racing, the Solcast query location may be updated from valid GPS
+telemetry no more than once per hour. The update is accepted only when the car
+has moved 15 to 30 miles from the previous Solcast query point, and the app
+persists a daily auto-location cap of 10 updates to protect the Solcast
+site/location budget while still following the route.
+
 ## Adding a New Packet
 
 1. Add canonical output fields to `TelemetryKey`.

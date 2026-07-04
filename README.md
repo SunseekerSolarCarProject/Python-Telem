@@ -64,6 +64,12 @@ Replay recorded telemetry CSVs or generate synthetic scenarios (Nominal Cruise, 
 ### Settings
 Configure COM port, baud rate, log level, Solcast credentials, unit system, and colour themes. Includes machine-learning retrain controls, Solcast key management, and an integrated updater to install tagged releases.
 
+### Machine-Learning Predictions
+The app trains local scikit-learn random-forest models from `training_data.csv`
+to estimate remaining battery time and break-even speed. See
+`docs/MACHINE_LEARNING.md` for the model inputs, outputs, quality flags, and
+step-by-step retraining workflow.
+
 ---
 
 ## Battery Configuration Files
@@ -122,6 +128,7 @@ python src/main_app.py
 - `simulation.py` – worker threads for replaying recorded telemetry and generating synthetic scenarios.
 - `docs/START_HERE.md` – maintainer handoff map and recommended reading order.
 - `docs/ARCHITECTURE.md` – higher-level module boundaries and future split notes.
+- `docs/MACHINE_LEARNING.md` – prediction model behavior, training data, and retraining workflow.
 - `docs/TELEMETRY_FORMAT.md` – serial packet examples and parser output keys.
 - `docs/WEBSITE_INTEGRATION.md` – backend/API handoff contract for website telemetry.
 - `docs/ONLINE_TELEMETRY_SCHEMA.md` – online payload shapes and field dictionary.

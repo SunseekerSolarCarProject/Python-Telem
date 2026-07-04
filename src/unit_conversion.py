@@ -8,6 +8,7 @@ calc = ExtraCalculations()
 # metric and imperial modes without mutating the canonical KEY_UNITS table.
 def build_metric_units_dict():
     m = KEY_UNITS.copy()
+    solcast_prefixes = ("Solcast_Live", "Solcast_Fcst", "Solcast_Fcst_30m", "Solcast_Fcst_1h", "Solcast_Fcst_24h")
     overrides = {
       # Speed keys use km/h in metric views.
       "MC1VEL_Speed":       "km/h",
@@ -29,11 +30,18 @@ def build_metric_units_dict():
       "BME_Pressure_Pa": "Pa",
       "Wh_per_Mile": "Wh/km",
     }
+    for prefix in solcast_prefixes:
+      overrides[f"{prefix}_Wind_Speed_10m"] = "m/s"
+      overrides[f"{prefix}_Wind_Gust"] = "m/s"
+      overrides[f"{prefix}_Temp"] = "°C"
+      overrides[f"{prefix}_Dewpoint_Temp"] = "°C"
+      overrides[f"{prefix}_Surface_Pressure"] = "hPa"
     m.update(overrides)
     return m
 
 def build_imperial_units_dict():
     i = KEY_UNITS.copy()
+    solcast_prefixes = ("Solcast_Live", "Solcast_Fcst", "Solcast_Fcst_30m", "Solcast_Fcst_1h", "Solcast_Fcst_24h")
     overrides = {
       # velocity m/s → ft/s
       "MC1VEL_Velocity":    "ft/s",
@@ -63,6 +71,12 @@ def build_imperial_units_dict():
       "BME_Pressure_Pa": "psi",
       "Wh_per_Mile": "Wh/mi",
     }
+    for prefix in solcast_prefixes:
+      overrides[f"{prefix}_Wind_Speed_10m"] = "mph"
+      overrides[f"{prefix}_Wind_Gust"] = "mph"
+      overrides[f"{prefix}_Temp"] = "°F"
+      overrides[f"{prefix}_Dewpoint_Temp"] = "°F"
+      overrides[f"{prefix}_Surface_Pressure"] = "psi"
     i.update(overrides)
     return i
 
@@ -119,6 +133,10 @@ _conversion_map = {
     # pressure
     ("Pa", "psi"): lambda pa: pa * 0.0001450377377,
     ("psi", "Pa"): lambda psi: psi / 0.0001450377377,
+    ("hPa", "psi"): lambda hpa: hpa * 0.01450377377,
+    ("psi", "hPa"): lambda psi: psi / 0.01450377377,
+    ("m/s", "mph"): lambda mps: mps * 2.2369362921,
+    ("mph", "m/s"): lambda mph: mph / 2.2369362921,
 }
 
 def convert_value(key: str, raw_value, target_unit: str):

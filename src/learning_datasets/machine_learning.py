@@ -45,6 +45,20 @@ class MachineLearningModel:
       - Battery life:   RF([PV_Ah, PV_V]) -> Used_Ah_Remaining_Time
       - Break-even:     RF([PV_mA_s, PV_V])       -> BreakEvenSpeed
     """
+    TRAINING_COLUMNS = [
+        'BP_PVS_milliamp*s',
+        'BP_PVS_Ah',
+        'BP_PVS_Voltage',
+        'Used_Ah_Remaining_Time',
+        'BreakEvenSpeed',
+    ]
+    BREAK_EVEN_LABEL_ALIASES = [
+        'MC1VEL_Speed',
+        'MC1VEL_Velocity',
+        'NAV_VEHICLE_MPH',
+        'NAV_GPS_MPH',
+        'NAV_IMU_MPH',
+    ]
 
     def __init__(self, model_dir: str = None):
         # --- Logger ---
@@ -106,12 +120,19 @@ class MachineLearningModel:
                 return
             except Exception:
                 self.log.warning(f"Could not load fitted model at {path}; retraining.")
-        # retrain if CSV available
-        td = os.path.join(os.path.dirname(path), '..', 'application_data', 'training_data.csv')
-        if os.path.exists(td) and os.path.getsize(td) > 0:
-            train_fn(td)
-        else:
-            self.log.warning(f"No training_data.csv at {td} to train model.")
+        # Retrain if a CSV is available near the model directory. Normal app
+        # runs store models under <data-dir>/models and training_data.csv in
+        # <data-dir>; keep the legacy application_data candidate as a fallback.
+        model_parent = os.path.abspath(os.path.join(os.path.dirname(path), '..'))
+        candidates = [
+            os.path.join(model_parent, 'training_data.csv'),
+            os.path.join(model_parent, 'application_data', 'training_data.csv'),
+        ]
+        for td in candidates:
+            if os.path.exists(td) and os.path.getsize(td) > 0:
+                train_fn(td)
+                return
+        self.log.warning(f"No training_data.csv found near {os.path.dirname(path)} to train model.")
 
 
     def _clean_data(self, df: pd.DataFrame, cols: list) -> pd.DataFrame:
@@ -181,6 +202,9 @@ class MachineLearningModel:
             return
 
         df = self._clean_data(df, feats + [target])
+        if df.empty:
+            self.log.error("Battery-life training skipped: no valid numeric rows after cleaning.")
+            return False
         X = df[feats]
         y = df[target]
 
@@ -194,6 +218,7 @@ class MachineLearningModel:
         self.batt_meta.clear()
         self.batt_meta.update(meta)
         self.log.info(f"Trained battery-life model -> {self.batt_path}")
+        return True
 
 
     def predict_battery_life_details(self, data: dict) -> dict:
@@ -304,6 +329,9 @@ class MachineLearningModel:
             return
 
         df = self._clean_data(df, feats + [target])
+        if df.empty:
+            self.log.error("Break-even training skipped: no valid numeric rows after cleaning.")
+            return False
         X = df[feats]
         y = df[target]
 
@@ -317,6 +345,7 @@ class MachineLearningModel:
         self.be_meta.clear()
         self.be_meta.update(meta)
         self.log.info(f"Trained break-even model -> {self.be_path}")
+        return True
 
 
     def predict_break_even_speed_details(self, data: dict) -> dict:
@@ -417,29 +446,105 @@ class MachineLearningModel:
     # -------------------------------------------------------------------------
     # SECTION: COMBINING & RETRAINING
     # -------------------------------------------------------------------------
+    def _normalize_training_frame(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
+        """
+        Convert either a sparse training CSV or a full telemetry CSV into the
+        exact numeric columns used by the saved model files.
+        """
+        normalized = df.copy()
+        if 'BreakEvenSpeed' not in normalized.columns:
+            for alias in self.BREAK_EVEN_LABEL_ALIASES:
+                if alias in normalized.columns:
+                    normalized['BreakEvenSpeed'] = normalized[alias]
+                    self.log.info(f"Using {alias} as BreakEvenSpeed label for {source}")
+                    break
+
+        missing = [col for col in self.TRAINING_COLUMNS if col not in normalized.columns]
+        if missing:
+            self.log.warning(f"Skipping {source}; missing training columns: {missing}")
+            return pd.DataFrame(columns=self.TRAINING_COLUMNS)
+
+        normalized = normalized[self.TRAINING_COLUMNS].copy()
+        for col in self.TRAINING_COLUMNS:
+            normalized[col] = pd.to_numeric(normalized[col], errors='coerce')
+
+        before = len(normalized)
+        normalized = normalized.replace([np.inf, -np.inf], np.nan).dropna(subset=self.TRAINING_COLUMNS)
+        dropped = before - len(normalized)
+        if dropped:
+            self.log.info(f"Dropped {dropped} incomplete/non-numeric training rows from {source}")
+
+        return normalized
+
+
     def combine_and_retrain(self, old_file: str, new_files: list) -> str:
         """
-        Merge old + new CSVs into combined_training_data.csv,
-        retrain both models, return the combined file path.
+        Merge current training data plus additional training or telemetry CSVs
+        into combined_training_data.csv, retrain both models, promote the
+        merged rows back into training_data.csv, and return the combined file
+        path.
         """
         try:
-            if not os.path.exists(old_file):
-                self.log.error(f"Old data missing: {old_file}")
+            frames = []
+            input_files = []
+            if old_file:
+                input_files.append(old_file)
+            input_files.extend(new_files or [])
+
+            seen = set()
+            for file_path in input_files:
+                if not file_path:
+                    continue
+                file_path = os.path.abspath(file_path)
+                if file_path in seen:
+                    continue
+                seen.add(file_path)
+
+                if not os.path.exists(file_path):
+                    self.log.warning(f"Skipping missing CSV: {file_path}")
+                    continue
+
+                try:
+                    raw = pd.read_csv(file_path)
+                except Exception as exc:
+                    self.log.warning(f"Skipping unreadable CSV {file_path}: {exc}")
+                    continue
+
+                normalized = self._normalize_training_frame(raw, file_path)
+                if normalized.empty:
+                    self.log.warning(f"No usable training rows found in {file_path}")
+                    continue
+                self.log.info(f"Accepted {len(normalized)} training rows from {file_path}")
+                frames.append(normalized)
+
+            if not frames:
+                self.log.error("No usable training rows found in selected CSV files.")
                 return None
 
-            combined = pd.read_csv(old_file)
-            for f in new_files:
-                if os.path.exists(f):
-                    combined = pd.concat([combined, pd.read_csv(f)], ignore_index=True)
-                else:
-                    self.log.warning(f"Skipping missing: {f}")
+            combined = pd.concat(frames, ignore_index=True)
+            combined = combined.drop_duplicates(ignore_index=True)
+            if combined.empty:
+                self.log.error("Combined training data is empty after normalization.")
+                return None
 
-            out = 'combined_training_data.csv'
+            out_dir = os.path.dirname(os.path.abspath(old_file)) if old_file else os.path.dirname(self.batt_path)
+            os.makedirs(out_dir, exist_ok=True)
+            out = os.path.join(out_dir, 'combined_training_data.csv')
             combined.to_csv(out, index=False)
-            self.log.info(f"Combined data → {out}")
+            self.log.info(f"Combined {len(combined)} usable training rows -> {out}")
 
-            self.train_battery_life_model(out)
-            self.train_break_even_model(out)
+            batt_ok = self.train_battery_life_model(out)
+            be_ok = self.train_break_even_model(out)
+            if not batt_ok or not be_ok:
+                return None
+
+            if old_file:
+                training_path = os.path.abspath(old_file)
+                tmp_training_path = f"{training_path}.tmp"
+                combined.to_csv(tmp_training_path, index=False)
+                os.replace(tmp_training_path, training_path)
+                self.log.info(f"Promoted combined training rows -> {training_path}")
+
             return out
 
         except Exception as e:

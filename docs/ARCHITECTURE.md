@@ -33,7 +33,7 @@ This project is a PyQt telemetry dashboard for live vehicle data, simulation rep
 - `src/db_writer.py`: database storage.
 - `src/simulation.py`: replay and synthetic telemetry generation.
 - `src/gui_files/`: PyQt tabs and dialogs.
-- `src/learning_datasets/`: prediction models and diagnostics.
+- `src/learning_datasets/`: prediction models and diagnostics. See `docs/MACHINE_LEARNING.md` for model inputs, targets, retraining, and interpretation.
 
 ## GUI Boundaries
 

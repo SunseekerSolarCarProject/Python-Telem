@@ -1,1 +1,1 @@
-VERSION = "2.2.0"  # Update this when releasing new versions
+VERSION = "2.3.0"  # Update this when releasing new versions

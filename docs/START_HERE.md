@@ -10,6 +10,8 @@ Use this page as the handoff map for a new maintainer.
    - How data moves through the app and which modules own each responsibility.
 3. `docs/TELEMETRY_FORMAT.md`
    - What raw serial lines look like and how they become canonical telemetry fields.
+4. `docs/MACHINE_LEARNING.md`
+   - How prediction models are trained, saved, evaluated, and used at runtime.
 
 ## Common Tasks
 
@@ -22,7 +24,7 @@ Use this page as the handoff map for a new maintainer.
 | Debug serial/PTY testing | `README.md` Linux virtual serial ports section |
 | Debug buffering or CSV output | `src/buffer_data.py`, `src/csv_handler.py` |
 | Debug HTTP/database telemetry | `docs/WEBSITE_INTEGRATION.md`, `docs/ONLINE_TELEMETRY_SCHEMA.md`, `docs/TELEMETRY_DB_SETUP.sql` |
-| Work on predictions | `src/learning_datasets/`, `src/telemetry_application.py` |
+| Work on predictions | `docs/MACHINE_LEARNING.md`, then `src/learning_datasets/`, `src/telemetry_application.py` |
 | Work on simulation | `src/simulation.py`, Simulation section in `README.md` |
 
 ## Runtime Data Flow

@@ -10,7 +10,7 @@ import threading
 import zipfile
 from datetime import datetime
 
-from key_name_definitions import TelemetryKey
+from key_name_definitions import TelemetryKey, solcast_keys_for_prefix
 
 
 class CSVHandler:
@@ -115,7 +115,12 @@ class CSVHandler:
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
             TelemetryKey.NAV_LAP_COUNT.value[0], TelemetryKey.NAV_CURRENT_LAP_TIME.value[0],
             TelemetryKey.NAV_LAST_LAP_TIME.value[0], TelemetryKey.NAV_BEST_LAP_TIME.value[0],
-            TelemetryKey.NAV_LAP_STATUS.value[0]
+            TelemetryKey.NAV_LAP_STATUS.value[0],
+            *solcast_keys_for_prefix("Solcast_Live"),
+            *solcast_keys_for_prefix("Solcast_Fcst"),
+            *solcast_keys_for_prefix("Solcast_Fcst_30m"),
+            *solcast_keys_for_prefix("Solcast_Fcst_1h"),
+            *solcast_keys_for_prefix("Solcast_Fcst_24h"),
         ]
         self.logger.debug(f"Primary headers generated: {ordered_keys}")
         return ordered_keys

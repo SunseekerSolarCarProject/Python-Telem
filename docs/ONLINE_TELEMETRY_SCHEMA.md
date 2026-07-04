@@ -330,11 +330,49 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | `Solcast_Live_Temp` | °C |
 | `Solcast_Live_Time` | local / UTC |
 | `Solcast_Live_Fetched_At` | local / UTC |
-| `Solcast_Fcst_GHI` | W/m² |
-| `Solcast_Fcst_DNI` | W/m² |
-| `Solcast_Fcst_Temp` | °C |
-| `Solcast_Fcst_Time` | local / UTC |
-| `Solcast_Fcst_Fetched_At` | local / UTC |
+| `Solcast_Live_Weather_Type` | text |
+| `Solcast_Live_CAPE` | J/kg |
+| `Solcast_Live_Cloud_Opacity` | % |
+| `Solcast_Live_Relative_Humidity` | % |
+| `Solcast_Live_Wind_Direction_10m` | deg |
+| `Solcast_Live_Precipitable_Water` | kg/m² |
+| `Solcast_Live_Precipitation_Rate` | mm/h |
+
+Forecast fields are emitted for `Solcast_Fcst_30m_*`, `Solcast_Fcst_1h_*`, and
+`Solcast_Fcst_24h_*`. The legacy `Solcast_Fcst_*` fields mirror the 30-minute
+forecast for compatibility.
+
+| Field Suffix | Unit |
+| --- | --- |
+| `Time` | local / UTC |
+| `Fetched_At` | local / UTC |
+| `GHI` | W/m² |
+| `DNI` | W/m² |
+| `Temp` | °C |
+| `Weather_Type` | text |
+| `CAPE` | J/kg |
+| `Cloud_Opacity` | % |
+| `Relative_Humidity` | % |
+| `DHI` | W/m² |
+| `GTI` | W/m² |
+| `Dewpoint_Temp` | °C |
+| `Wind_Direction_10m` | deg |
+| `Wind_Speed_10m` | m/s |
+| `Wind_Gust` | m/s |
+| `Precipitable_Water` | kg/m² |
+| `Precipitation_Rate` | mm/h |
+| `Surface_Pressure` | hPa |
+| `Clearsky_GHI` | W/m² |
+| `Clearsky_DNI` | W/m² |
+| `Zenith` | deg |
+| `Azimuth` | deg |
+
+When valid GPS telemetry is available, the desktop app can move the Solcast
+query point during a race. It checks once per flushed telemetry snapshot, but
+only updates Solcast coordinates after at least 1 hour and 15-30 miles of
+movement from the previous Solcast query point. A persisted daily cap of 10
+automatic location updates prevents restarts from accidentally exceeding the
+race-day location budget.
 
 ### GPS, Route, And Lap Timing
 
