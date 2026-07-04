@@ -147,7 +147,7 @@ class UpdateChecker(QObject):
         # Only self-update in frozen builds
         if getattr(sys, "frozen", False):
             return sys.executable
-        # Dev mode: donâ€™t try to rewrite python.exe; just no-op
+        # Dev mode: don't try to rewrite python.exe; just no-op
         return ""
 
     # ---------- public API ----------
@@ -359,14 +359,69 @@ class UpdateChecker(QObject):
                 subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000, env=env)
                 sys.exit(0)
             else:
-                backup = old_exe + ".bak"
-                try:
-                    os.replace(old_exe, backup)
-                except Exception:
-                    pass
-                os.replace(new_exe_path, old_exe)
+                script_path = os.path.join(self.download_dir, "apply_update.sh")
+                app_dir = os.path.dirname(old_exe)
+                script = textwrap.dedent("""\
+                #!/bin/sh
+                set -u
+
+                PID="$1"
+                NEW_DIR="$2"
+                OLD_EXE="$3"
+                APP_DIR="$4"
+                shift 4
+
+                LOG="$APP_DIR/tuf_downloads/apply_update.log"
+                mkdir -p "$(dirname "$LOG")"
+                {
+                  echo "---- $(date) ----"
+                  echo "Applying update"
+                  echo "PID=$PID"
+                  echo "NEW_DIR=$NEW_DIR"
+                  echo "OLD_EXE=$OLD_EXE"
+                  echo "APP_DIR=$APP_DIR"
+                } >> "$LOG" 2>&1
+
+                while kill -0 "$PID" 2>/dev/null; do
+                  sleep 0.5
+                done
+
+                if [ ! -d "$NEW_DIR" ]; then
+                  echo "Staged bundle missing: $NEW_DIR" >> "$LOG" 2>&1
+                  exit 1
+                fi
+
+                if [ -f "$OLD_EXE" ]; then
+                  cp -f "$OLD_EXE" "$OLD_EXE.bak" >> "$LOG" 2>&1 || true
+                fi
+
+                cp -a "$NEW_DIR"/. "$APP_DIR"/ >> "$LOG" 2>&1
+                STATUS=$?
+                if [ "$STATUS" -ne 0 ]; then
+                  echo "Copy failed with status $STATUS" >> "$LOG" 2>&1
+                  exit "$STATUS"
+                fi
+
+                chmod +x "$OLD_EXE" >> "$LOG" 2>&1 || true
+                echo "Launching updated app" >> "$LOG" 2>&1
+                cd "$APP_DIR" || exit 1
+                "$OLD_EXE" "$@" >> "$LOG" 2>&1 &
+                exit 0
+                """)
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(script)
+                os.chmod(script_path, 0o755)
                 env = os.environ.copy()
-                subprocess.Popen([old_exe] + sys.argv[1:], cwd=os.path.dirname(old_exe), env=env)
+                subprocess.Popen(
+                    ["/bin/sh", script_path, str(os.getpid()), staged_root, old_exe, app_dir] + sys.argv[1:],
+                    cwd=app_dir,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                    close_fds=True,
+                )
                 sys.exit(0)
 
         except Exception as e:

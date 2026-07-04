@@ -143,6 +143,13 @@ python src/main_app.py
 ### Updating the Updater
 The application uses TUF for signed updates. When publishing new artifacts, ensure you upload the freshly generated `release/metadata/*.json` and `release/targets/*.tar.gz`. Timestamp validity defaults to 60 days; rerun the pipeline for each release.
 
+On Linux/macOS packaged builds, the updater stages the full PyInstaller
+`--onedir` bundle, waits for the running process to exit, copies the complete
+bundle into the install directory, and relaunches the app. If a packaged update
+downloads but the app does not reopen, check `tuf_downloads/apply_update.log`
+inside the install directory. A mismatched `telemetry` binary and `_internal/`
+folder usually means the full bundle copy did not complete.
+
 ### Simulation & Data Integrity
 Simulated data never touches the on-disk CSVs or training corpus and is not forwarded to the remote ingestion endpoint. The core buffer pipeline still runs so derived metrics and predictions remain accurate during dry runs. When the simulation finishes, the app automatically resumes the serial reader if it was running before.
 

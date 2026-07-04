@@ -1,3 +1,11 @@
+"""
+Prediction quality summary helpers.
+
+The model layer returns detailed dictionaries for each prediction. This module
+turns those details into compact flags and numeric confidence values that can be
+stored in telemetry rows, shown in the GUI, and sent to downstream systems.
+"""
+
 import math
 from datetime import datetime
 from copy import deepcopy
@@ -10,11 +18,16 @@ class QualityDiagnostics:
     """
 
     def __init__(self, stale_threshold_seconds: float = 5.0):
+        # A flush should be fresh under normal live telemetry. If processing or
+        # replay creates older snapshots, expose that as a flag.
         self.stale_threshold_seconds = stale_threshold_seconds
 
     def _compute_age(self, timestamp_str: str | None) -> float | None:
+        """Return snapshot age in seconds for known timestamp formats."""
         if not timestamp_str:
             return None
+        # Accept both historical timestamp delimiters so old CSV replays still
+        # produce useful diagnostics.
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
             try:
                 ts = datetime.strptime(timestamp_str, fmt)
@@ -28,6 +41,8 @@ class QualityDiagnostics:
         """
         Build a diagnostics summary.
         """
+        # Copy the detail dictionaries before returning them so this helper does
+        # not accidentally mutate model-layer results held by callers.
         battery = deepcopy(battery) if battery else {}
         break_even = deepcopy(break_even) if break_even else {}
 
@@ -38,6 +53,7 @@ class QualityDiagnostics:
             flags.append(f"stale-data ({age:.1f}s old)")
 
         def _expand_flags(prefix: str, details: dict):
+            """Flatten one model's detail dictionary into human-readable flags."""
             if not details:
                 return
             missing = details.get("missing_features") or []
@@ -48,6 +64,8 @@ class QualityDiagnostics:
                 flags.append(f"{prefix} invalid: {', '.join(invalid)}")
             outliers = details.get("out_of_range") or {}
             if outliers:
+                # Out-of-range flags include the live value and training range so
+                # operators can tell how far outside the model's experience it is.
                 bad = ", ".join(f"{k} (got {v['value']:.2f}, expected {v['min']:.2f}-{v['max']:.2f})"
                                 for k, v in outliers.items())
                 flags.append(f"{prefix} out-of-range: {bad}")
@@ -60,6 +78,7 @@ class QualityDiagnostics:
         _expand_flags("break-even", break_even)
 
         def _confidence(details: dict):
+            """Return the model's one-sigma ensemble spread when it is usable."""
             sigma = details.get("sigma")
             if sigma is None:
                 return None
@@ -68,6 +87,8 @@ class QualityDiagnostics:
             return float(sigma)
 
         return {
+            # Keep both compact fields and full detail payloads. Compact fields
+            # are useful for CSV/UI columns; full payloads are useful for debug.
             "age_seconds": age,
             "flags": flags,
             "battery_sigma": _confidence(battery),
