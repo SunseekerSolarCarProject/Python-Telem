@@ -37,6 +37,7 @@ class SettingsTab(QWidget):
     additional_files_selected = pyqtSignal(list)
     solcast_config_changed = pyqtSignal(str, str, str)
     telemetry_ingestion_config_changed = pyqtSignal(dict)
+    driver_name_changed = pyqtSignal(str)
     vehicle_year_changed_signal = pyqtSignal(str)
     refresh_versions_requested = pyqtSignal()
     install_version_requested = pyqtSignal(str)
@@ -136,6 +137,10 @@ class SettingsTab(QWidget):
         self._populate_vehicle_years()
         self.vehicle_year_dropdown.activated.connect(self.handle_vehicle_year_activated)
         vehicle_form.addRow("Vehicle Year:", self.vehicle_year_dropdown)
+
+        self.driver_name_edit = QLineEdit()
+        self.driver_name_edit.setPlaceholderText("Driver name")
+        vehicle_form.addRow("Driver:", self.driver_name_edit)
         layout.addWidget(vehicle_group)
 
         layout.addStretch()
@@ -397,6 +402,7 @@ class SettingsTab(QWidget):
         self.log_level_signal.emit(selected_log_level)
 
         vehicle_year = self._current_vehicle_year()
+        driver_name = self.driver_name_edit.text().strip()
         if vehicle_year:
             existing_years = [self.vehicle_year_dropdown.itemText(i) for i in range(self.vehicle_year_dropdown.count())]
             if vehicle_year not in existing_years:
@@ -447,14 +453,16 @@ class SettingsTab(QWidget):
         self.solcast_config_changed.emit(solcast_key, solcast_lat, solcast_lon)
         self.telemetry_ingestion_config_changed.emit(telemetry_config)
         self.vehicle_year_changed_signal.emit(vehicle_year)
+        self.driver_name_changed.emit(driver_name)
         status = "set" if solcast_key else "empty"
         self.logger.info(
-            "Applied settings: COM Port=%s, Baud Rate=%s, Log Level=%s, Endianness=%s, Vehicle Year=%s, Solcast Key=%s",
+            "Applied settings: COM Port=%s, Baud Rate=%s, Log Level=%s, Endianness=%s, Vehicle Year=%s, Driver=%s, Solcast Key=%s",
             com_port,
             baud_rate,
             selected_log_level,
             endianness,
             vehicle_year,
+            driver_name or "(empty)",
             status,
         )
 
@@ -547,6 +555,8 @@ class SettingsTab(QWidget):
                     insert_pos = max(0, self.vehicle_year_dropdown.count() - 1)
                     self.vehicle_year_dropdown.insertItem(insert_pos, vehicle_year)
                 self._set_combo_text(self.vehicle_year_dropdown, vehicle_year)
+
+            self.driver_name_edit.setText(str(config_data.get("driver_name", "") or "").strip())
 
             units_mode = str(config_data.get("units_mode", "metric")).lower()
             self._set_combo_text(self.units_dropdown, "Imperial" if units_mode == "imperial" else "Metric (SI)")

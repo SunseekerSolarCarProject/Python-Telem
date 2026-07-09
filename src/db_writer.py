@@ -66,11 +66,15 @@ class TelemetryDBWriter:
                 "measurement VARCHAR(64) NULL, "
                 "device_tag VARCHAR(64) NULL, "
                 "vehicle_year VARCHAR(32) NULL, "
+                "driver_name VARCHAR(128) NULL, "
                 "payload JSON NOT NULL"
                 ")"
             )
             with conn.cursor() as cur:
                 cur.execute(create_sql)
+                cur.execute(f"SHOW COLUMNS FROM `{table}` LIKE 'driver_name'")
+                if cur.fetchone() is None:
+                    cur.execute(f"ALTER TABLE `{table}` ADD COLUMN driver_name VARCHAR(128) NULL AFTER vehicle_year")
             self._table_ready = True
 
     def insert_payload(self, payload: dict) -> None:
@@ -83,18 +87,19 @@ class TelemetryDBWriter:
             measurement = payload.get("measurement")
             device_tag = tags.get("device")
             vehicle_year = tags.get("vehicle_year")
+            driver_name = tags.get("driver")
             # Store the full event as JSON for replay/debugging, while also
             # breaking out the common query fields for simple database filters.
             payload_json = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
             insert_sql = (
                 f"INSERT INTO `{table}` "
-                "(event_time, measurement, device_tag, vehicle_year, payload) "
-                "VALUES (%s, %s, %s, %s, %s)"
+                "(event_time, measurement, device_tag, vehicle_year, driver_name, payload) "
+                "VALUES (%s, %s, %s, %s, %s, %s)"
             )
             with conn.cursor() as cur:
                 cur.execute(
                     insert_sql,
-                    (event_time, measurement, device_tag, vehicle_year, payload_json),
+                    (event_time, measurement, device_tag, vehicle_year, driver_name, payload_json),
                 )
         finally:
             conn.close()

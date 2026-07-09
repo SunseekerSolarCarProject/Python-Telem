@@ -49,6 +49,7 @@ class TelemetryGUI(QWidget):
     change_log_level_signal = pyqtSignal(str)
     settings_applied_signal = pyqtSignal(str, int, str, str)  
     vehicle_year_changed_signal = pyqtSignal(str)
+    driver_name_changed_signal = pyqtSignal(str)
     machine_learning_retrain_signal = pyqtSignal()  # Retrain button for ML model
     machine_learning_retrain_signal_with_files = pyqtSignal(list)
     export_bundle_requested = pyqtSignal(str, str)
@@ -445,6 +446,7 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0],
                 TelemetryKey.TOTAL_VOLTAGE.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
                 TelemetryKey.TIMESTAMP.value[0],
+                TelemetryKey.DRIVER.value[0],
                 TelemetryKey.TELEMETRY_STATUS.value[0],
                 TelemetryKey.TELEMETRY_ERROR.value[0],
                 TelemetryKey.TELEMETRY_BAD_PACKET_COUNT.value[0],
@@ -501,6 +503,7 @@ class TelemetryGUI(QWidget):
         self.settings_tab.units_changed_signal.connect(self.on_units_changed)
         self.settings_tab.settings_applied_signal.connect(self.settings_applied_signal.emit)
         self.settings_tab.vehicle_year_changed_signal.connect(self.vehicle_year_changed_signal.emit)
+        self.settings_tab.driver_name_changed.connect(self.driver_name_changed_signal.emit)
         self.settings_tab.machine_learning_retrain_signal.connect(self.machine_learning_retrain_signal.emit)
         self.settings_tab.additional_files_selected.connect(self.machine_learning_retrain_signal_with_files.emit)
         # Updater version management wiring

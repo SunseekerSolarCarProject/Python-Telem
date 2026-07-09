@@ -44,6 +44,7 @@ class AppSettings:
     baud_rate: int = 9600
     endianness: str = "little"
     vehicle_year: str = ""
+    driver_name: str = ""
     solcast_api_key: str = ""
     solcast_latitude: str = ""
     solcast_longitude: str = ""
@@ -66,6 +67,7 @@ class AppSettings:
     def normalize(self) -> None:
         self.selected_port = _clean_string(self.selected_port) or None
         self.vehicle_year = _clean_string(self.vehicle_year)
+        self.driver_name = _clean_string(self.driver_name)
         self.solcast_api_key = _clean_string(self.solcast_api_key)
         self.solcast_latitude = _clean_string(self.solcast_latitude)
         self.solcast_longitude = _clean_string(self.solcast_longitude)

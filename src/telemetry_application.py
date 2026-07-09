@@ -165,6 +165,7 @@ class TelemetryApplication(QObject):
         self.storage_folder = storage_folder
         self.log_file_path = log_file_path or (os.path.join(self.storage_folder, "telemetry_application.log") if self.storage_folder else None)
         self.vehicle_year = ""  # Vehicle/session label used in GUI settings and upload tags.
+        self.driver_name = ""  # Manually entered driver name stamped onto telemetry snapshots.
 
         # Keep model-training UI cleanup centralized, regardless of whether the
         # training path was triggered by the normal button or by added files.
@@ -184,6 +185,7 @@ class TelemetryApplication(QObject):
             self.solcast_key = existing_settings.get('solcast_api_key', self.solcast_key)
             self.solcast_lat = existing_settings.get('solcast_latitude', self.solcast_lat)
             self.solcast_lon = existing_settings.get('solcast_longitude', self.solcast_lon)
+            self.driver_name = existing_settings.get('driver_name', self.driver_name)
             self._solcast_location_anchor = self._current_solcast_location_tuple()
             self._apply_telemetry_ingestion_settings(existing_settings, save=False)
 
@@ -350,6 +352,7 @@ class TelemetryApplication(QObject):
             TelemetryKey.TOTAL_CAPACITY_WH.value[0],
             TelemetryKey.TOTAL_CAPACITY_AH.value[0],
             TelemetryKey.TOTAL_VOLTAGE.value[0],
+            TelemetryKey.DRIVER.value[0],
             TelemetryKey.BME_TEMPERATURE_C.value[0],
             TelemetryKey.BME_PRESSURE_PA.value[0],
             TelemetryKey.BME_HUMIDITY_PCT.value[0],
@@ -476,6 +479,7 @@ class TelemetryApplication(QObject):
                 "baud_rate": self.baudrate,
                 "endianness": self.endianness,
                 "vehicle_year": self.vehicle_year,
+                "driver_name": self.driver_name,
                 "solcast_api_key": self.solcast_key,
                 "solcast_latitude": self.solcast_lat,
                 "solcast_longitude": self.solcast_lon,
@@ -560,6 +564,7 @@ class TelemetryApplication(QObject):
             self.gui.change_log_level_signal.connect(self.update_logging_level)
             self.gui.settings_applied_signal.connect(self.handle_settings_applied)
             self.gui.vehicle_year_changed_signal.connect(self.on_vehicle_year_changed)
+            self.gui.driver_name_changed_signal.connect(self.on_driver_name_changed)
             self.update_data_signal.connect(self.buffer.add_data)
             self.update_data_signal.connect(self.gui.update_all_tabs)
             self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
@@ -725,7 +730,8 @@ class TelemetryApplication(QObject):
             "measurement": "telemetry",
             "tags": {
                 "device": device_tag,
-                "vehicle_year": self.vehicle_year
+                "vehicle_year": self.vehicle_year,
+                "driver": self.driver_name
             },
             "fields": data,
             "timestamp": datetime.utcnow().isoformat()
@@ -1041,6 +1047,7 @@ class TelemetryApplication(QObject):
         self.baudrate = config_data.get("baud_rate", 9600)
         self.endianness = config_data.get("endianness", "little")
         self.vehicle_year = config_data.get("vehicle_year", "")  # Capture vehicle year
+        self.driver_name = str(config_data.get("driver_name", self.driver_name) or "").strip()
 
         solcast_key = config_data.get("solcast_api_key")
         solcast_lat = config_data.get("solcast_latitude")
@@ -1060,6 +1067,7 @@ class TelemetryApplication(QObject):
         self.logger.info(f"Baud rate: {self.baudrate}")
         self.logger.info(f"Endianness: {self.endianness}")
         self.logger.info(f"Vehicle Year: {self.vehicle_year}")
+        self.logger.info(f"Driver: {self.driver_name or '(empty)'}")
 
         self.data_processor.set_endianness(self.endianness)
 
@@ -1084,6 +1092,7 @@ class TelemetryApplication(QObject):
         if "endianness" not in config_data_copy:
             config_data_copy["endianness"] = self.endianness
         config_data_copy.setdefault("solcast_api_key", self.solcast_key)
+        config_data_copy.setdefault("driver_name", self.driver_name)
         config_data_copy.setdefault("solcast_latitude", self.solcast_lat)
         config_data_copy.setdefault("solcast_longitude", self.solcast_lon)
         config_data_copy.setdefault("telemetry_ingestion_api_url", self.telemetry_ingestion_api_url)
@@ -1177,6 +1186,15 @@ class TelemetryApplication(QObject):
         self.config_data_copy["vehicle_year"] = self.vehicle_year
         self._save_app_settings()
         self.logger.info("Vehicle year updated via Settings tab: %s", self.vehicle_year or "(empty)")
+
+    def on_driver_name_changed(self, driver_name: str):
+        """Persist the manually entered driver name for CSV and online telemetry."""
+        self.driver_name = str(driver_name or "").strip()
+        if self.config_data_copy is None:
+            self.config_data_copy = {}
+        self.config_data_copy["driver_name"] = self.driver_name
+        self._save_app_settings()
+        self.logger.info("Driver updated via Settings tab: %s", self.driver_name or "(empty)")
 
     def start(self):
         """Entry point used by main_app.py."""
@@ -1280,12 +1298,12 @@ class TelemetryApplication(QObject):
 
     def clear_previous_data(self):
         """
-        (You can still use this if you want to clear any in-memory buffers;
-        but it should NOT trigger a retrain by itself.)
+        Clear in-memory telemetry buffers without touching CSV history or retraining.
         """
-        # This method is kept for older call sites/tests; current buffering
-        # normally flows through BufferData rather than data_collector.
-        self.data_collector.clear_data()
+        self.buffer.data_buffer.clear()
+        self.buffer.raw_data_buffer.clear()
+        self.buffer.combined_data.clear()
+        self.buffer.last_flush_time = time.time()
         self.logger.info("Previous data cleared.")
 
     def train_machine_learning_model(self):
@@ -1583,6 +1601,8 @@ class TelemetryApplication(QObject):
                         # a mapping of telemetry field names to values.
                         self.logger.error(f"Combined data is not a dict: {combined_data!r}")
                         return
+
+                    combined_data[TelemetryKey.DRIVER.value[0]] = self.driver_name or "N/A"
 
                     # The trained models expect exact column names and feature
                     # counts. Keep this narrow even though combined_data carries

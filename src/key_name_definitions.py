@@ -96,6 +96,7 @@ class TelemetryKey(Enum):
     TOTAL_CAPACITY_AH = ("Total_Capacity_Ah", "Ah")
     TOTAL_CAPACITY_WH = ("Total_Capacity_Wh", "Wh")
     TOTAL_VOLTAGE = ("Total_Voltage", "V")
+    DRIVER = ("Driver", "")
     DEVICE_TIMESTAMP = ("device_timestamp", "uptime / local time")
     TIMESTAMP = ("timestamp", "year-Month-day hh:mm:ss")
     TELEMETRY_STATUS = ("Telemetry_Status", "")

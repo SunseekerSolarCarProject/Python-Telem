@@ -21,12 +21,14 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
   measurement VARCHAR(64) NULL,
   device_tag VARCHAR(64) NULL,
   vehicle_year VARCHAR(32) NULL,
+  driver_name VARCHAR(128) NULL,
   payload JSON NOT NULL,
 
   INDEX idx_received_at (received_at),
   INDEX idx_event_time (event_time),
   INDEX idx_device_time (device_tag, received_at),
-  INDEX idx_vehicle_time (vehicle_year, received_at)
+  INDEX idx_vehicle_time (vehicle_year, received_at),
+  INDEX idx_driver_time (driver_name, received_at)
 );
 
 -- The payload stored by the app has this shape:
@@ -35,7 +37,8 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
 --   "measurement": "telemetry",
 --   "tags": {
 --     "device": "device1",
---     "vehicle_year": "2026"
+--     "vehicle_year": "2026",
+--     "driver": "Driver Name"
 --   },
 --   "fields": {
 --     "... all vehicle telemetry fields ...": "..."
@@ -115,6 +118,7 @@ SELECT
   measurement,
   device_tag,
   vehicle_year,
+  driver_name,
   CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.fields.NAV_LAT')) AS DECIMAL(10, 7)) AS nav_lat,
   CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.fields.NAV_LON')) AS DECIMAL(10, 7)) AS nav_lon,
   CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.fields.NAV_VEHICLE_MPH')) AS DOUBLE) AS nav_vehicle_mph,

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
   measurement VARCHAR(64) NULL,
   device_tag VARCHAR(64) NULL,
   vehicle_year VARCHAR(32) NULL,
+  driver_name VARCHAR(128) NULL,
   payload JSON NOT NULL
 );
 ```
@@ -41,6 +42,7 @@ The scalar columns are copied from the JSON for easy filtering:
 | `measurement` | `payload.measurement` |
 | `device_tag` | `payload.tags.device` |
 | `vehicle_year` | `payload.tags.vehicle_year` |
+| `driver_name` | `payload.tags.driver` |
 | `payload` | Full telemetry JSON event |
 
 ## Legacy/Database Payload
@@ -52,9 +54,11 @@ This is the payload stored in the direct database path, and it is also the defau
   "measurement": "telemetry",
   "tags": {
     "device": "device1",
-    "vehicle_year": "2026"
+    "vehicle_year": "2026",
+    "driver": "Driver Name"
   },
   "fields": {
+    "Driver": "Driver Name",
     "NAV_LAT": 42.291707,
     "NAV_LON": -85.587229,
     "NAV_VEHICLE_MPH": 35.2,
@@ -78,9 +82,12 @@ Same as the database payload:
   "measurement": "telemetry",
   "tags": {
     "device": "device1",
-    "vehicle_year": "2026"
+    "vehicle_year": "2026",
+    "driver": "Driver Name"
   },
-  "fields": {},
+  "fields": {
+    "Driver": "Driver Name"
+  },
   "timestamp": "2026-06-30T18:42:10.123456"
 }
 ```
@@ -105,9 +112,12 @@ Includes both shapes for compatibility:
   "measurement": "telemetry",
   "tags": {
     "device": "device1",
-    "vehicle_year": "2026"
+    "vehicle_year": "2026",
+    "driver": "Driver Name"
   },
-  "fields": {},
+  "fields": {
+    "Driver": "Driver Name"
+  },
   "timestamp": "2026-06-30T18:42:10.123456",
   "session_id": "live-session",
   "vehicle": "2026",
@@ -128,6 +138,7 @@ For most webpages, expose a smaller public read endpoint such as `GET /api/telem
   "timestamp": "2026-06-30T18:42:10.123456",
   "device": "device1",
   "vehicle_year": "2026",
+  "driver": "Driver Name",
   "position": {
     "lat": 42.291707,
     "lon": -85.587229,
@@ -177,6 +188,7 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | `Telemetry_Error` | text | Last bad telemetry reason in the current flush interval. |
 | `Telemetry_Bad_Packet_Count` | count | Cumulative bad packet count from the parser. |
 | `Telemetry_Last_Bad_Raw` | text | Last raw bad packet line. |
+| `Driver` | text | Manually entered driver name from the desktop Settings tab. |
 
 ### Motor Controller 1
 
