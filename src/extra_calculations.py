@@ -438,3 +438,86 @@ class ExtraCalculations:
             insights['Motors_Average_Efficiency_Pct'] = sum(efficiencies) / len(efficiencies)
 
         return insights
+
+    def compute_array_insights(self, data: Dict[str, object]) -> Dict[str, object]:
+        """Estimate solar-array contribution from the DC-bus power balance.
+
+        Battery current is positive while discharging and negative while
+        charging.  With that convention, and without a dedicated array sensor,
+        the observable balance is::
+
+            array power ~= motor-controller power - battery power
+
+        The estimate excludes unmeasured auxiliary loads, so it is normally a
+        lower bound on actual array output.  The raw current difference is also
+        retained for diagnostics, but wattage is calculated from each device's
+        own voltage instead of assuming every reported current is at exactly the
+        same voltage.
+        """
+        # Populate every output on every pass so an invalid sample replaces any
+        # valid value retained in BufferData's latest-known snapshot.
+        insights: Dict[str, object] = {
+            'Array_Current_Difference_A': 'N/A',
+            'Array_Estimated_Current_A': 'N/A',
+            'Array_Power_Balance_W': 'N/A',
+            'Array_Estimated_Power_W': 'N/A',
+            'Array_Estimated_Power_kW': 'N/A',
+            'Array_Estimate_Status': 'Unavailable: missing telemetry',
+        }
+        values = {
+            'mc1_voltage': self.safe_float(data.get('MC1BUS_Voltage')),
+            'mc1_current': self.safe_float(data.get('MC1BUS_Current')),
+            'mc2_voltage': self.safe_float(data.get('MC2BUS_Voltage')),
+            'mc2_current': self.safe_float(data.get('MC2BUS_Current')),
+            'pack_voltage': self.safe_float(data.get('BP_PVS_Voltage')),
+            'pack_current': self.safe_float(data.get('BP_ISH_Amps')),
+        }
+        if any(value is None or not math.isfinite(value) for value in values.values()):
+            return insights
+
+        mc1_voltage = values['mc1_voltage']
+        mc1_current = values['mc1_current']
+        mc2_voltage = values['mc2_voltage']
+        mc2_current = values['mc2_current']
+        pack_voltage = values['pack_voltage']
+        pack_current = values['pack_current']
+
+        current_difference = mc1_current + mc2_current - pack_current
+        insights['Array_Current_Difference_A'] = current_difference
+
+        if pack_voltage <= 0:
+            insights['Array_Estimate_Status'] = 'Unavailable: invalid pack voltage'
+            return insights
+
+        # All three measurements should describe the same high-voltage DC bus.
+        # Reject stale/startup values such as the 13 V controller readings seen
+        # beside a 136 V battery reading in the supplied historical CSV.
+        minimum_bus_voltage = pack_voltage * 0.75
+        maximum_bus_voltage = pack_voltage * 1.25
+        if not (
+            minimum_bus_voltage <= mc1_voltage <= maximum_bus_voltage
+            and minimum_bus_voltage <= mc2_voltage <= maximum_bus_voltage
+        ):
+            insights['Array_Estimate_Status'] = 'Unavailable: DC-bus voltage mismatch'
+            return insights
+
+        motor_power = mc1_voltage * mc1_current + mc2_voltage * mc2_current
+        battery_power = pack_voltage * pack_current
+        power_balance = motor_power - battery_power
+        insights['Array_Power_Balance_W'] = power_balance
+
+        # A materially negative balance cannot represent solar generation. Keep
+        # the signed balance for diagnosis, but do not publish it as array input.
+        if power_balance < -50.0:
+            insights['Array_Estimate_Status'] = 'Invalid: negative power balance'
+            return insights
+
+        estimated_power = max(0.0, power_balance)
+        insights['Array_Estimated_Current_A'] = estimated_power / pack_voltage
+        insights['Array_Estimated_Power_W'] = estimated_power
+        insights['Array_Estimated_Power_kW'] = estimated_power / 1000.0
+        if power_balance < 0:
+            insights['Array_Estimate_Status'] = 'Estimated: within zero tolerance'
+        else:
+            insights['Array_Estimate_Status'] = 'Estimated: motor loads only'
+        return insights

@@ -167,6 +167,9 @@ class BufferData:
         motor_insights = self.extra_calculations.compute_motor_insights(self.combined_data)
         if motor_insights:
             self.combined_data.update(motor_insights)
+        array_insights = self.extra_calculations.compute_array_insights(self.combined_data)
+        if array_insights:
+            self.combined_data.update(array_insights)
 
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 

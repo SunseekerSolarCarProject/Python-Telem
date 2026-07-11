@@ -104,6 +104,7 @@ class DashboardTab(QWidget):
             ("Min Cell Voltage", TelemetryKey.BP_VMN_VOLTAGE.value[0]),
             ("Pack Current", TelemetryKey.BP_ISH_AMPS.value[0]),
             ("Pack Power", TelemetryKey.BATTERY_PACK_POWER_KW.value[0]),
+            ("Array Power (est.)", TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0]),
             ("Battery Temp", TelemetryKey.BP_TMX_TEMPERATURE.value[0]),
             ("MC1 Temp", TelemetryKey.MC1TP1_MOTOR_TEMP.value[0]),
             ("MC2 Temp", TelemetryKey.MC2TP1_MOTOR_TEMP.value[0]),

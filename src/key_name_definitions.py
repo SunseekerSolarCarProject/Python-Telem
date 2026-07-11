@@ -78,6 +78,12 @@ class TelemetryKey(Enum):
     BATTERY_PACK_POWER_KW = ("Battery_Pack_Power_kW", "kW")
     BATTERY_POWER_DIRECTION = ("Battery_Power_Direction", "")
     BATTERY_C_RATE = ("Battery_C_Rate", "C")
+    ARRAY_CURRENT_DIFFERENCE_A = ("Array_Current_Difference_A", "A")
+    ARRAY_ESTIMATED_CURRENT_A = ("Array_Estimated_Current_A", "A")
+    ARRAY_POWER_BALANCE_W = ("Array_Power_Balance_W", "W")
+    ARRAY_ESTIMATED_POWER_W = ("Array_Estimated_Power_W", "W")
+    ARRAY_ESTIMATED_POWER_KW = ("Array_Estimated_Power_kW", "kW")
+    ARRAY_ESTIMATE_STATUS = ("Array_Estimate_Status", "")
 
     # MPPTs information
  

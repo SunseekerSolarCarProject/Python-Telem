@@ -180,6 +180,11 @@ class TelemetryGUI(QWidget):
             "Battery_Pack_Power_W": "steelblue",
             "Battery_Pack_Power_kW": "turquoise",
             "Battery_C_Rate": "chocolate",
+            "Array_Current_Difference_A": "darkgreen",
+            "Array_Estimated_Current_A": "limegreen",
+            "Array_Power_Balance_W": "darkgoldenrod",
+            "Array_Estimated_Power_W": "gold",
+            "Array_Estimated_Power_kW": "yellowgreen",
 
             # -----------------------------
             # Remaining Capacity
@@ -313,7 +318,10 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.MC2_BUS_POWER_W.value[0], TelemetryKey.MC2_MECHANICAL_POWER_W.value[0], TelemetryKey.MC2_EFFICIENCY_PCT.value[0],
                 TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0], TelemetryKey.MOTORS_TOTAL_MECHANICAL_POWER_W.value[0], TelemetryKey.MOTORS_AVERAGE_EFFICIENCY_PCT.value[0],
                 TelemetryKey.BATTERY_STRING_IMBALANCE_V.value[0], TelemetryKey.BATTERY_STRING_IMBALANCE_PCT.value[0],
-                TelemetryKey.BATTERY_PACK_POWER_W.value[0], TelemetryKey.BATTERY_PACK_POWER_KW.value[0], TelemetryKey.BATTERY_C_RATE.value[0]
+                TelemetryKey.BATTERY_PACK_POWER_W.value[0], TelemetryKey.BATTERY_PACK_POWER_KW.value[0], TelemetryKey.BATTERY_C_RATE.value[0],
+                TelemetryKey.ARRAY_CURRENT_DIFFERENCE_A.value[0], TelemetryKey.ARRAY_ESTIMATED_CURRENT_A.value[0],
+                TelemetryKey.ARRAY_POWER_BALANCE_W.value[0], TelemetryKey.ARRAY_ESTIMATED_POWER_W.value[0],
+                TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0]
             ]
         }
 
@@ -379,7 +387,10 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.BP_ISH_SOC.value[0], TelemetryKey.BP_ISH_AMPS.value[0],
                 TelemetryKey.BATTERY_STRING_IMBALANCE_V.value[0], TelemetryKey.BATTERY_STRING_IMBALANCE_PCT.value[0],
                 TelemetryKey.BATTERY_PACK_POWER_W.value[0], TelemetryKey.BATTERY_PACK_POWER_KW.value[0],
-                TelemetryKey.BATTERY_POWER_DIRECTION.value[0], TelemetryKey.BATTERY_C_RATE.value[0]
+                TelemetryKey.BATTERY_POWER_DIRECTION.value[0], TelemetryKey.BATTERY_C_RATE.value[0],
+                TelemetryKey.ARRAY_CURRENT_DIFFERENCE_A.value[0], TelemetryKey.ARRAY_ESTIMATED_CURRENT_A.value[0],
+                TelemetryKey.ARRAY_POWER_BALANCE_W.value[0], TelemetryKey.ARRAY_ESTIMATED_POWER_W.value[0],
+                TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0], TelemetryKey.ARRAY_ESTIMATE_STATUS.value[0]
             ],
             "Shunt Remaining": [
                 TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
