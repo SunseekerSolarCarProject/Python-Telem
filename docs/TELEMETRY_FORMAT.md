@@ -8,7 +8,8 @@ Raw serial telemetry is parsed by `src/data_processor.py`. The parser converts f
 MC1BUS,0x...,0x...
 BME,T=23.65,P=98110.73,H=52.43
 NAV,IMU_MPH=0.00,GPS_MPH=0.00,GPS_VALID=0,VEHICLE_MPH=0.00,SOURCE=NONE,LAT=0.000000,LON=0.000000,FIX=0,AGE_MS=4294967295
-TL_TIM,12:34:56
+TL_TIM,2026-07-12T12:34:56,UPTIME_MS=123456
+TL_UPT,0:00:02:03.456
 ```
 
 Most packets use this shape:
@@ -17,7 +18,7 @@ Most packets use this shape:
 KEY,HEX_FLOAT_1,HEX_FLOAT_2
 ```
 
-`HEX_FLOAT_1` and `HEX_FLOAT_2` are decoded as 32-bit floats using the configured endianness. `MC1LIM`, `MC2LIM`, `DC_SWC`, `NAV`, and `TL_TIM` have special parsing rules.
+`HEX_FLOAT_1` and `HEX_FLOAT_2` are decoded as 32-bit floats using the configured endianness. `MC1LIM`, `MC2LIM`, `DC_SWC`, `NAV`, `TL_TIM`, and `TL_UPT` have special parsing rules.
 
 ## Example Packet Outputs
 
@@ -94,6 +95,17 @@ device_timestamp = 12:34:56 uptime
 
 If firmware sends an ISO datetime instead, the app displays it as local time
 plus UTC so the timezone is explicit.
+
+New firmware may append the board's millisecond uptime counter and send a
+separate human-readable uptime line:
+
+```text
+TL_TIM,2026-07-12T12:34:56,UPTIME_MS=123456
+TL_UPT,0:00:02:03.456
+```
+
+These produce `device_timestamp`, `board_uptime_ms`, and `board_uptime`.
+The older `TL_TIM,12:34:56` form remains supported.
 
 Placeholder or bad telemetry packets such as `0xHHHHHHHH` are converted into
 telemetry health fields instead of silently becoming normal numeric data:

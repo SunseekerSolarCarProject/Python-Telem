@@ -7,13 +7,14 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QApplication,
     QWidget,
     QVBoxLayout,
     QTabWidget,
     QMessageBox,
     QProgressBar,
 )
-from PyQt6.QtCore import QSettings, QTimer
+from PyQt6.QtCore import QSettings, Qt, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import pyqtSignal, QTimer
 import json
@@ -248,16 +249,19 @@ class TelemetryGUI(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("Sunseeker Telemetry")
-        self.resize(1280, 720)
+        screen = QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen else None
+        initial_width = min(1280, int(available.width() * 0.92)) if available else 1280
+        initial_height = min(800, int(available.height() * 0.90)) if available else 720
+        self.resize(initial_width, initial_height)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-        layout.addWidget(self._build_brand_header())
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(12, 12, 12, 12)
+        self.main_layout.setSpacing(10)
+        self.main_layout.addWidget(self._build_brand_header())
         self.tabs = QTabWidget()
-        self.tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self.tabs.setMovable(True)
-        layout.addWidget(self.tabs)
+        self._configure_tab_widget(self.tabs)
+        self.main_layout.addWidget(self.tabs)
 
         self.dashboard_tab = DashboardTab(self.units)
         self.tabs.addTab(self.dashboard_tab, "Dashboard")
@@ -265,14 +269,14 @@ class TelemetryGUI(QWidget):
         # Top-level tabs stay broad; detailed feature areas live inside nested
         # tab widgets so the main navigation reads like an operator workflow.
         self.graph_tabs = QTabWidget()
-        self.graph_tabs.setMovable(True)
+        self._configure_tab_widget(self.graph_tabs)
         self.tabs.addTab(self.graph_tabs, "Graphs")
 
         self.data_tabs = QTabWidget()
-        self.data_tabs.setMovable(True)
+        self._configure_tab_widget(self.data_tabs)
 
         self.tools_tabs = QTabWidget()
-        self.tools_tabs.setMovable(True)
+        self._configure_tab_widget(self.tools_tabs)
 
         # Define graph-related groups (customize as needed)
         graph_groups = {
@@ -456,6 +460,7 @@ class TelemetryGUI(QWidget):
             "General": [
                 TelemetryKey.TOTAL_CAPACITY_AH.value[0], TelemetryKey.TOTAL_CAPACITY_WH.value[0],
                 TelemetryKey.TOTAL_VOLTAGE.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
+                TelemetryKey.BOARD_UPTIME.value[0], TelemetryKey.BOARD_UPTIME_MS.value[0],
                 TelemetryKey.TIMESTAMP.value[0],
                 TelemetryKey.DRIVER.value[0],
                 TelemetryKey.TELEMETRY_STATUS.value[0],
@@ -529,6 +534,16 @@ class TelemetryGUI(QWidget):
             pass
 
         self.restore_gui_state()
+        self._ensure_window_on_screen()
+
+    @staticmethod
+    def _configure_tab_widget(tab_widget):
+        """Keep long tab sets navigable instead of compressing their labels."""
+        tab_widget.setTabPosition(QTabWidget.TabPosition.North)
+        tab_widget.setMovable(True)
+        tab_widget.tabBar().setUsesScrollButtons(True)
+        tab_widget.tabBar().setExpanding(False)
+        tab_widget.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
 
     def _build_brand_header(self):
         header = QFrame()
@@ -537,19 +552,19 @@ class TelemetryGUI(QWidget):
         row.setContentsMargins(16, 12, 16, 12)
         row.setSpacing(12)
 
-        mark = QLabel("S")
-        mark.setObjectName("BrandMark")
-        mark.setFixedSize(42, 42)
+        self.header_mark = QLabel("S")
+        self.header_mark.setObjectName("BrandMark")
+        self.header_mark.setFixedSize(42, 42)
 
         title_group = QVBoxLayout()
         title_group.setContentsMargins(0, 0, 0, 0)
         title_group.setSpacing(0)
-        wordmark = QLabel("SUNSEEKER")
-        wordmark.setObjectName("BrandWordmark")
-        subtitle = QLabel(f"Telemetry Operations  |  v{VERSION}")
-        subtitle.setObjectName("BrandSubtitle")
-        title_group.addWidget(wordmark)
-        title_group.addWidget(subtitle)
+        self.header_wordmark = QLabel("SUNSEEKER")
+        self.header_wordmark.setObjectName("BrandWordmark")
+        self.header_subtitle = QLabel(f"Telemetry Operations  |  v{VERSION}")
+        self.header_subtitle.setObjectName("BrandSubtitle")
+        title_group.addWidget(self.header_wordmark)
+        title_group.addWidget(self.header_subtitle)
 
         self.header_connection_label = QLabel("Starting")
         self.header_connection_label.setObjectName("HeaderStatusPill")
@@ -558,13 +573,50 @@ class TelemetryGUI(QWidget):
         self.header_age_label = QLabel("Data age: --")
         self.header_age_label.setObjectName("HeaderStatusPill")
 
-        row.addWidget(mark)
+        row.addWidget(self.header_mark)
         row.addLayout(title_group)
         row.addStretch()
         row.addWidget(self.header_mode_label)
         row.addWidget(self.header_connection_label)
         row.addWidget(self.header_age_label)
+        self.header_layout = row
         return header
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = event.size().width()
+        compact = width < 900
+        very_compact = width < 700
+        if hasattr(self, "main_layout"):
+            margin = 6 if compact else 12
+            self.main_layout.setContentsMargins(margin, margin, margin, margin)
+            self.main_layout.setSpacing(6 if compact else 10)
+        if hasattr(self, "header_layout"):
+            self.header_layout.setContentsMargins(
+                8 if compact else 16,
+                7 if compact else 12,
+                8 if compact else 16,
+                7 if compact else 12,
+            )
+        if hasattr(self, "header_mark"):
+            self.header_mark.setVisible(not compact)
+            self.header_subtitle.setVisible(not very_compact)
+            self.header_mode_label.setVisible(not very_compact)
+            self.header_age_label.setVisible(width >= 780)
+
+    def _ensure_window_on_screen(self):
+        """Clamp restored geometry to the usable area of the current monitor."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if not screen:
+            return
+        available = screen.availableGeometry()
+        width = min(self.width(), available.width())
+        height = min(self.height(), available.height())
+        if width != self.width() or height != self.height():
+            self.resize(width, height)
+        x = min(max(self.x(), available.left()), available.right() - width + 1)
+        y = min(max(self.y(), available.top()), available.bottom() - height + 1)
+        self.move(x, y)
 
     def apply_dark_mode(self):
         """

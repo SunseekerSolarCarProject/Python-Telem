@@ -58,6 +58,7 @@ class CSVHandler:
         ordered_keys = [
             "csv_units_mode", "csv_units_note",
             TelemetryKey.TIMESTAMP.value[0], TelemetryKey.DEVICE_TIMESTAMP.value[0],
+            TelemetryKey.BOARD_UPTIME.value[0], TelemetryKey.BOARD_UPTIME_MS.value[0],
             TelemetryKey.MC1BUS_VOLTAGE.value[0], TelemetryKey.MC1BUS_CURRENT.value[0],
             TelemetryKey.MC1VEL_RPM.value[0], TelemetryKey.MC1VEL_VELOCITY.value[0], TelemetryKey.MC1VEL_SPEED.value[0],
             TelemetryKey.MC1TP1_HEATSINK_TEMP.value[0], TelemetryKey.MC1TP1_MOTOR_TEMP.value[0],

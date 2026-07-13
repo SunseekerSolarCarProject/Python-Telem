@@ -138,6 +138,36 @@ class DataProcessor:
         except ValueError:
             return f"{text} ({status})" if status else text
 
+    def _format_board_uptime(self, value):
+        """Normalize TL_UPT's day:hour:minute:second.millisecond value."""
+        text = str(value).strip()
+        match = re.fullmatch(
+            r"(?P<days>\d+):(?P<hours>\d{1,2}):(?P<minutes>\d{2}):"
+            r"(?P<seconds>\d{2})(?:\.(?P<milliseconds>\d{1,3}))?",
+            text,
+        )
+        if not match:
+            return text
+
+        days = int(match.group("days"))
+        hours = int(match.group("hours"))
+        minutes = int(match.group("minutes"))
+        seconds = int(match.group("seconds"))
+        if hours >= 24 or minutes >= 60 or seconds >= 60:
+            return text
+
+        milliseconds = (match.group("milliseconds") or "0").ljust(3, "0")
+        return f"{days}:{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds} uptime"
+
+    @staticmethod
+    def _format_uptime_ms(uptime_ms):
+        """Return the firmware millisecond counter in TL_UPT display form."""
+        total_seconds, milliseconds = divmod(uptime_ms, 1000)
+        days, day_seconds = divmod(total_seconds, 86400)
+        hours, hour_seconds = divmod(day_seconds, 3600)
+        minutes, seconds = divmod(hour_seconds, 60)
+        return f"{days}:{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d} uptime"
+
     def set_endianness(self, endianness):
         """
         Update the endianness setting.
@@ -411,8 +441,26 @@ class DataProcessor:
                 if len(parts) >= 2:
                     processed_data[TelemetryKey.DEVICE_TIMESTAMP.value[0]] = self._format_device_timestamp(parts[1])
                     self.logger.debug(f"Processed device_timestamp: {processed_data[TelemetryKey.DEVICE_TIMESTAMP.value[0]]}")
+                    for field in parts[2:]:
+                        name, separator, value = field.partition("=")
+                        if separator and name.strip().upper() == "UPTIME_MS":
+                            try:
+                                uptime_ms = int(value.strip())
+                                if uptime_ms < 0:
+                                    raise ValueError
+                                processed_data[TelemetryKey.BOARD_UPTIME_MS.value[0]] = uptime_ms
+                                processed_data[TelemetryKey.BOARD_UPTIME.value[0]] = self._format_uptime_ms(uptime_ms)
+                            except ValueError:
+                                self.logger.warning(f"Invalid TL_TIM UPTIME_MS value: {data_line}")
                 else:
                     self.logger.warning(f"TL_TIM data line is incomplete: {data_line}")
+                return processed_data
+
+            if key == "TL_UPT":
+                if len(parts) >= 2:
+                    processed_data[TelemetryKey.BOARD_UPTIME.value[0]] = self._format_board_uptime(parts[1])
+                else:
+                    self.logger.warning(f"TL_UPT data line is incomplete: {data_line}")
                 return processed_data
 
             if key == "NAV":

@@ -1,4 +1,4 @@
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QHBoxLayout,
     QGroupBox,
+    QScrollArea,
     QDoubleSpinBox,
     QComboBox,
 )
@@ -34,7 +35,16 @@ class SimulationTab(QWidget):
         self._apply_defaults("Nominal Cruise")
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer_layout.addWidget(scroll)
+
+        content = QWidget()
+        scroll.setWidget(content)
+        layout = QVBoxLayout(content)
         layout.setSpacing(12)
 
         # Replay group

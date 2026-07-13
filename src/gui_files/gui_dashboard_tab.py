@@ -1,7 +1,7 @@
 import math
 import json
 
-from PyQt6.QtCore import QSettings, pyqtSignal
+from PyQt6.QtCore import QSettings, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QListWidget,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -83,7 +84,18 @@ class DashboardTab(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer_layout.addWidget(self.scroll_area)
+
+        self.content = QWidget()
+        self.scroll_area.setWidget(self.content)
+        layout = QVBoxLayout(self.content)
 
         status_row = QHBoxLayout()
         self.speed_source_selector = QComboBox()
@@ -118,15 +130,18 @@ class DashboardTab(QWidget):
             ("Telemetry", TelemetryKey.TELEMETRY_STATUS.value[0]),
         ]
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(12)
+        self.card_grid = QGridLayout()
+        self.card_grid.setHorizontalSpacing(12)
+        self.card_grid.setVerticalSpacing(12)
+        self.card_order = []
         for index, (title, key) in enumerate(card_specs):
             card = MetricCard(title, key, self._display_unit(key))
             card.unit_change_requested.connect(self._on_card_unit_change)
             self.cards[key] = card
-            grid.addWidget(card, index // 4, index % 4)
-        layout.addLayout(grid)
+            self.card_order.append(card)
+        self._card_columns = 0
+        self._reflow_cards(4)
+        layout.addLayout(self.card_grid)
 
         self.alerts = QListWidget()
         self.alerts.setObjectName("AlertList")
@@ -134,6 +149,29 @@ class DashboardTab(QWidget):
         layout.addWidget(QLabel("<b>Operational Alerts</b>"))
         layout.addWidget(self.alerts)
         layout.addStretch()
+
+    def resizeEvent(self, event):
+        """Reflow metric cards instead of squeezing them on narrow screens."""
+        super().resizeEvent(event)
+        width = event.size().width()
+        if width >= 1180:
+            columns = 4
+        elif width >= 860:
+            columns = 3
+        elif width >= 560:
+            columns = 2
+        else:
+            columns = 1
+        self._reflow_cards(columns)
+
+    def _reflow_cards(self, columns):
+        if columns == self._card_columns:
+            return
+        self._card_columns = columns
+        for index, card in enumerate(self.card_order):
+            self.card_grid.addWidget(card, index // columns, index % columns)
+        for column in range(4):
+            self.card_grid.setColumnStretch(column, 1 if column < columns else 0)
 
     def set_units_map(self, units_map, units_mode=None):
         self.units_map = units_map.copy()

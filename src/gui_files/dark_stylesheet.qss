@@ -193,6 +193,26 @@ QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
     background: none;                /* Remove arrows */
 }
 
+QScrollBar:horizontal {
+    background: #292a2d;
+    height: 12px;
+    margin: 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #5b5750;
+    min-width: 20px;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #ff9f1a;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    background: none;
+}
+
 /* ================================
    QComboBox Styles
    ================================ */
@@ -316,7 +336,7 @@ QFrame#MetricCard {
     background-color: #292a2d;
     border: 1px solid #45484d;
     border-radius: 6px;
-    min-height: 108px;
+    min-height: 92px;
 }
 
 QFrame#MetricCard[state="warning"] {

@@ -184,6 +184,8 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | --- | --- | --- |
 | `timestamp` | local datetime string | App-side timestamp in the combined telemetry fields. |
 | `device_timestamp` | uptime / local time | `TL_TIM` value reported by the telemetry device. Uptime-only values display as `hh:mm:ss uptime`; ISO datetime values display as local time plus UTC. |
+| `board_uptime` | `d:hh:mm:ss.sss` | Human-readable board uptime reported by `TL_UPT` or derived from `TL_TIM`'s `UPTIME_MS`. |
+| `board_uptime_ms` | ms | Raw board uptime counter appended to `TL_TIM` by newer firmware. |
 | `Telemetry_Status` | status | `OK` or `BAD_PACKET`. |
 | `Telemetry_Error` | text | Last bad telemetry reason in the current flush interval. |
 | `Telemetry_Bad_Packet_Count` | count | Cumulative bad packet count from the parser. |

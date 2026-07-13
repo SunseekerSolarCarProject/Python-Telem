@@ -127,7 +127,8 @@ class DataDisplay:
             TelemetryKey.PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY,
             TelemetryKey.PREDICTION_DATA_AGE_S,
             TelemetryKey.PREDICTION_QUALITY_FLAGS,
-            TelemetryKey.DEVICE_TIMESTAMP, TelemetryKey.TIMESTAMP
+            TelemetryKey.DEVICE_TIMESTAMP, TelemetryKey.BOARD_UPTIME,
+            TelemetryKey.BOARD_UPTIME_MS, TelemetryKey.TIMESTAMP
         ]
 
         lines = []

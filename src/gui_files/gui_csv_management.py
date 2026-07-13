@@ -80,23 +80,27 @@ class CSVManagementTab(QWidget):
         layout.addWidget(paths_group)
 
         actions_group = QGroupBox("Actions")
-        buttons_layout = QHBoxLayout(actions_group)
+        buttons_layout = QGridLayout(actions_group)
         buttons_layout.setSpacing(8)
         buttons_layout.setContentsMargins(8, 8, 8, 8)
 
         def _btn(text, slot):
             btn = QPushButton(text)
-            btn.setMinimumWidth(150)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(slot)
             return btn
 
-        buttons_layout.addWidget(_btn("Save Primary CSV...", self.save_primary_csv_data))
-        buttons_layout.addWidget(_btn("Save Secondary CSV...", self.save_secondary_csv_data))
-        buttons_layout.addWidget(_btn("Change Save Folder...", self.change_csv_save_location))
-        buttons_layout.addWidget(_btn("Export Telemetry Bundle...", self.request_bundle_export))
-        buttons_layout.addWidget(_btn("Import Telemetry Bundle...", self.request_bundle_import))
-
-        buttons_layout.addStretch(1)
+        actions = [
+            ("Save Primary CSV...", self.save_primary_csv_data),
+            ("Save Secondary CSV...", self.save_secondary_csv_data),
+            ("Change Save Folder...", self.change_csv_save_location),
+            ("Export Telemetry Bundle...", self.request_bundle_export),
+            ("Import Telemetry Bundle...", self.request_bundle_import),
+        ]
+        for index, (text, slot) in enumerate(actions):
+            buttons_layout.addWidget(_btn(text, slot), index // 3, index % 3)
+        for column in range(3):
+            buttons_layout.setColumnStretch(column, 1)
         layout.addWidget(actions_group)
         layout.addStretch(1)
 

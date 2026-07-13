@@ -314,6 +314,8 @@ class TelemetryApplication(QObject):
         self.data_keys = [
             TelemetryKey.TIMESTAMP.value[0],
             TelemetryKey.DEVICE_TIMESTAMP.value[0],
+            TelemetryKey.BOARD_UPTIME.value[0],
+            TelemetryKey.BOARD_UPTIME_MS.value[0],
             TelemetryKey.MC1BUS_VOLTAGE.value[0],
             TelemetryKey.MC1BUS_CURRENT.value[0],
             TelemetryKey.MC1VEL_RPM.value[0],

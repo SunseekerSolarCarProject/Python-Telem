@@ -104,6 +104,8 @@ class TelemetryKey(Enum):
     TOTAL_VOLTAGE = ("Total_Voltage", "V")
     DRIVER = ("Driver", "")
     DEVICE_TIMESTAMP = ("device_timestamp", "uptime / local time")
+    BOARD_UPTIME = ("board_uptime", "d:hh:mm:ss.sss")
+    BOARD_UPTIME_MS = ("board_uptime_ms", "ms")
     TIMESTAMP = ("timestamp", "year-Month-day hh:mm:ss")
     TELEMETRY_STATUS = ("Telemetry_Status", "")
     TELEMETRY_ERROR = ("Telemetry_Error", "")
