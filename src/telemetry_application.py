@@ -18,7 +18,7 @@ import threading
 import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from PyQt6.QtCore import QObject, pyqtSignal, QSettings, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from serial_reader import SerialReaderThread
@@ -131,6 +131,7 @@ class TelemetryApplication(QObject):
         self.solcast_key = SOLCAST_API_KEY
         self.solcast_lat = SOLCAST_LATITUDE
         self.solcast_lon = SOLCAST_LONGITUDE
+        self.solcast_follow_gps = True
 
         # Online ingestion settings support multiple backends/payload shapes so
         # the same app can talk to development, website, and database targets.
@@ -144,18 +145,12 @@ class TelemetryApplication(QObject):
         self.telemetry_online_send_interval_seconds = self._parse_float( TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS, 5.0,)
         self._last_online_send_monotonic = None
 
-        # Solcast GPS auto-follow state. The app only moves the Solcast query
-        # point occasionally so it follows the race route without exhausting API
-        # site/location budgets.
+        # Solcast polls every five minutes. When GPS following is enabled, the
+        # newest valid telemetry position is used for that request; configured
+        # coordinates remain the startup/fallback location.
         self._solcast_initial_fetch_pending = False
-        self.solcast_location_update_interval_seconds = 60 * 60
-        self.solcast_location_min_update_miles = 15.0
-        self.solcast_location_max_update_miles = 30.0
-        self.solcast_location_daily_limit = 10
-        self._solcast_location_usage_date = datetime.now().date().isoformat()
-        self._solcast_location_updates_today = self._load_solcast_location_updates_today()
-        self._last_solcast_location_update_monotonic = None
-        self._solcast_location_anchor = self._current_solcast_location_tuple()
+        self.solcast_poll_interval_seconds = 5 * 60
+        self._latest_solcast_gps_location = None
 
         # Runtime workers and lifecycle flags.
         self.serial_reader_thread = None
@@ -185,8 +180,8 @@ class TelemetryApplication(QObject):
             self.solcast_key = existing_settings.get('solcast_api_key', self.solcast_key)
             self.solcast_lat = existing_settings.get('solcast_latitude', self.solcast_lat)
             self.solcast_lon = existing_settings.get('solcast_longitude', self.solcast_lon)
+            self.solcast_follow_gps = bool(existing_settings.get('solcast_follow_gps', True))
             self.driver_name = existing_settings.get('driver_name', self.driver_name)
-            self._solcast_location_anchor = self._current_solcast_location_tuple()
             self._apply_telemetry_ingestion_settings(existing_settings, save=False)
 
         self.init_buffer()
@@ -498,6 +493,7 @@ class TelemetryApplication(QObject):
                 "solcast_api_key": self.solcast_key,
                 "solcast_latitude": self.solcast_lat,
                 "solcast_longitude": self.solcast_lon,
+                "solcast_follow_gps": self.solcast_follow_gps,
                 "telemetry_ingestion_api_url": self.telemetry_ingestion_api_url,
                 "telemetry_ingestion_api_key": self.telemetry_ingestion_api_key,
                 "telemetry_ingestion_auth_scheme": self.telemetry_ingestion_auth_scheme,
@@ -528,7 +524,6 @@ class TelemetryApplication(QObject):
         self.solcast_key = key
         self.solcast_lat = lat
         self.solcast_lon = lon
-        self._solcast_location_anchor = self._current_solcast_location_tuple()
 
         if not all((self.solcast_key, self.solcast_lat, self.solcast_lon)):
             self.logger.warning("Missing Solcast configuration; skipping solar data fetch.")
@@ -545,7 +540,7 @@ class TelemetryApplication(QObject):
 
         self.solcast_timer = QTimer(self)
         self.solcast_timer.timeout.connect(self.fetch_solcast_data)
-        self.solcast_timer.start(5 * 60 * 1000)  # 5 min
+        self.solcast_timer.start(int(self.solcast_poll_interval_seconds * 1000))
         self._solcast_initial_fetch_pending = True
         if self.signals_connected:
             self._schedule_initial_solcast_fetch()
@@ -880,45 +875,6 @@ class TelemetryApplication(QObject):
             return lat, lon
         return None
 
-    def _load_solcast_location_updates_today(self) -> int:
-        """Read the daily Solcast GPS auto-location counter from QSettings."""
-        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
-        today = datetime.now().date().isoformat()
-        saved_date = str(settings.value("solcast/location_update_date", "") or "")
-        if saved_date != today:
-            settings.setValue("solcast/location_update_date", today)
-            settings.setValue("solcast/location_update_count", 0)
-            return 0
-        try:
-            return int(settings.value("solcast/location_update_count", 0) or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    def _record_solcast_location_update(self) -> None:
-        """Persist one accepted Solcast GPS auto-location update."""
-        today = datetime.now().date().isoformat()
-        if self._solcast_location_usage_date != today:
-            self._solcast_location_usage_date = today
-            self._solcast_location_updates_today = 0
-        self._solcast_location_updates_today += 1
-        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
-        settings.setValue("solcast/location_update_date", self._solcast_location_usage_date)
-        settings.setValue("solcast/location_update_count", self._solcast_location_updates_today)
-
-    @staticmethod
-    def _haversine_miles(lat1, lon1, lat2, lon2) -> float:
-        """Calculate distance between two GPS points in miles."""
-        radius_miles = 3958.7613
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        d_phi = math.radians(lat2 - lat1)
-        d_lambda = math.radians(lon2 - lon1)
-        a = (
-            math.sin(d_phi / 2) ** 2
-            + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-        )
-        return 2 * radius_miles * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
     def _valid_gps_location_from_snapshot(self, data: dict) -> tuple[float, float] | None:
         """Extract a trustworthy GPS coordinate from a telemetry snapshot."""
         try:
@@ -940,65 +896,30 @@ class TelemetryApplication(QObject):
         return lat, lon
 
     def _maybe_update_solcast_location_from_gps(self, data: dict) -> None:
-        """Move the Solcast query point as the car progresses down-route."""
-        if not all((self.solcast_key, self.solcast_lat, self.solcast_lon)):
+        """Cache the newest valid GPS point for the next five-minute poll."""
+        if not self.solcast_follow_gps:
             return
         gps_location = self._valid_gps_location_from_snapshot(data)
         if gps_location is None:
             return
+        self._latest_solcast_gps_location = gps_location
 
-        now = time.monotonic()
-        if (
-            self._last_solcast_location_update_monotonic is not None
-            and now - self._last_solcast_location_update_monotonic < self.solcast_location_update_interval_seconds
-        ):
-            return
-        if self._load_solcast_location_updates_today() >= self.solcast_location_daily_limit:
-            self.logger.warning(
-                "Skipping Solcast GPS location update: daily auto-location limit of %d reached.",
-                self.solcast_location_daily_limit,
-            )
-            return
-
-        anchor = self._solcast_location_anchor or self._current_solcast_location_tuple()
-        if anchor is None:
-            distance_miles = 0.0
-        else:
-            distance_miles = self._haversine_miles(anchor[0], anchor[1], gps_location[0], gps_location[1])
-
-        # Avoid API churn for tiny movements and reject very large jumps that
-        # are more likely bad GPS than actual route progress.
-        if anchor is not None and distance_miles < self.solcast_location_min_update_miles:
-            return
-        if anchor is not None and distance_miles > self.solcast_location_max_update_miles:
-            self.logger.warning(
-                "Skipping Solcast GPS location update: moved %.1f mi, outside %.0f-%.0f mi update band.",
-                distance_miles,
-                self.solcast_location_min_update_miles,
-                self.solcast_location_max_update_miles,
-            )
-            return
-
-        self.solcast_lat = f"{gps_location[0]:.6f}"
-        self.solcast_lon = f"{gps_location[1]:.6f}"
-        self._solcast_location_anchor = gps_location
-        self._last_solcast_location_update_monotonic = now
-        self._record_solcast_location_update()
-        if self.config_data_copy is None:
-            self.config_data_copy = {}
-        self.config_data_copy["solcast_latitude"] = self.solcast_lat
-        self.config_data_copy["solcast_longitude"] = self.solcast_lon
-        self._save_app_settings()
-        self.logger.info(
-            "Updated Solcast location from GPS: %s, %s (moved %.1f mi).",
-            self.solcast_lat,
-            self.solcast_lon,
-            distance_miles,
-        )
-        QTimer.singleShot(0, self.fetch_solcast_data)
+    def _solcast_query_location(self) -> tuple[float, float] | None:
+        """Choose live GPS for a poll, falling back to configured coordinates."""
+        if self.solcast_follow_gps and self._latest_solcast_gps_location is not None:
+            return self._latest_solcast_gps_location
+        return self._current_solcast_location_tuple()
 
     def fetch_solcast_data(self):
         """Fetch live and forecast irradiance/weather data and emit into the GUI."""
+        using_live_gps = (
+            self.solcast_follow_gps and self._latest_solcast_gps_location is not None
+        )
+        query_location = self._solcast_query_location()
+        if not self.solcast_key or query_location is None:
+            self.logger.warning("Missing Solcast configuration; skipping solar data fetch.")
+            return
+        query_lat, query_lon = query_location
         headers = {"Authorization": f"Bearer {self.solcast_key}"}
         fetched_at = datetime.now(timezone.utc)
         fetched_at_text = self._format_fetch_time(fetched_at)
@@ -1008,7 +929,7 @@ class TelemetryApplication(QObject):
             # Live estimated actuals (last 7 days): get most recent point
             url_live = (
                 f"https://api.solcast.com.au/data/live/radiation_and_weather"
-                f"?latitude={self.solcast_lat}&longitude={self.solcast_lon}"
+                f"?latitude={query_lat:.6f}&longitude={query_lon:.6f}"
                 f"&hours=1&period=PT5M&output_parameters={output_parameters}&format=json"
             )
             r_live = requests.get(url_live, headers=headers, timeout=10)
@@ -1024,7 +945,7 @@ class TelemetryApplication(QObject):
             # and also emit explicit 30m, 1h, and 24h fields.
             url_fc = (
                 f"https://api.solcast.com.au/data/forecast/radiation_and_weather"
-                f"?latitude={self.solcast_lat}&longitude={self.solcast_lon}"
+                f"?latitude={query_lat:.6f}&longitude={query_lon:.6f}"
                 f"&hours=48&period=PT30M"
                 f"&output_parameters={output_parameters}&format=json"
             )
@@ -1050,7 +971,13 @@ class TelemetryApplication(QObject):
                 if payload:
                     self.update_data_signal.emit(payload)
 
-            self.logger.info("Solcast data fetched and emitted.")
+            source = "vehicle GPS" if using_live_gps else "configured fallback"
+            self.logger.info(
+                "Solcast data fetched at %.6f, %.6f using %s.",
+                query_lat,
+                query_lon,
+                source,
+            )
         except Exception as e:
             self.logger.error(f"Solcast fetch failed: {e}")
 
@@ -1067,14 +994,14 @@ class TelemetryApplication(QObject):
         solcast_key = config_data.get("solcast_api_key")
         solcast_lat = config_data.get("solcast_latitude")
         solcast_lon = config_data.get("solcast_longitude")
+        self.solcast_follow_gps = bool(config_data.get("solcast_follow_gps", self.solcast_follow_gps))
         if solcast_key:
             self.solcast_key = solcast_key
         if solcast_lat:
             self.solcast_lat = solcast_lat
         if solcast_lon:
             self.solcast_lon = solcast_lon
-        self._solcast_location_anchor = self._current_solcast_location_tuple()
-        self._last_solcast_location_update_monotonic = None
+        self._latest_solcast_gps_location = None
 
         self.logger.info(f"Battery info: {self.battery_info}")
         self.logger.info(f"Selected port: {self.selected_port}")
@@ -1110,6 +1037,7 @@ class TelemetryApplication(QObject):
         config_data_copy.setdefault("driver_name", self.driver_name)
         config_data_copy.setdefault("solcast_latitude", self.solcast_lat)
         config_data_copy.setdefault("solcast_longitude", self.solcast_lon)
+        config_data_copy.setdefault("solcast_follow_gps", self.solcast_follow_gps)
         config_data_copy.setdefault("telemetry_ingestion_api_url", self.telemetry_ingestion_api_url)
         config_data_copy.setdefault("telemetry_ingestion_api_key", self.telemetry_ingestion_api_key)
         config_data_copy.setdefault("telemetry_ingestion_auth_scheme", self.telemetry_ingestion_auth_scheme)
@@ -1124,19 +1052,22 @@ class TelemetryApplication(QObject):
         self._apply_solcast_settings()
         self.update_logging_level(self.logging_level)
 
-    def on_solcast_config_changed(self, api_key: str, latitude: str, longitude: str):
+    def on_solcast_config_changed(
+        self, api_key: str, latitude: str, longitude: str, follow_gps: bool
+    ):
         # Update Solcast configuration at runtime (empty strings disable)
         self.solcast_key = api_key.strip()
         self.solcast_lat = latitude.strip()
         self.solcast_lon = longitude.strip()
+        self.solcast_follow_gps = bool(follow_gps)
 
         if self.config_data_copy is None:
             self.config_data_copy = {}
         self.config_data_copy['solcast_api_key'] = self.solcast_key
         self.config_data_copy['solcast_latitude'] = self.solcast_lat
         self.config_data_copy['solcast_longitude'] = self.solcast_lon
-        self._solcast_location_anchor = self._current_solcast_location_tuple()
-        self._last_solcast_location_update_monotonic = None
+        self.config_data_copy['solcast_follow_gps'] = self.solcast_follow_gps
+        self._latest_solcast_gps_location = None
 
         self._save_app_settings()
         self._apply_solcast_settings()

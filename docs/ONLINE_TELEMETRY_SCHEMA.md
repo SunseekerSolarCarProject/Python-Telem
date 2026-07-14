@@ -381,12 +381,10 @@ forecast for compatibility.
 | `Zenith` | deg |
 | `Azimuth` | deg |
 
-When valid GPS telemetry is available, the desktop app can move the Solcast
-query point during a race. It checks once per flushed telemetry snapshot, but
-only updates Solcast coordinates after at least 1 hour and 15-30 miles of
-movement from the previous Solcast query point. A persisted daily cap of 10
-automatic location updates prevents restarts from accidentally exceeding the
-race-day location budget.
+The desktop app polls Solcast every five minutes. When **Follow valid vehicle
+GPS every 5 minutes** is enabled, each poll uses the newest valid telemetry GPS
+position. The configured Solcast latitude and longitude are used before a
+valid GPS fix is received and whenever GPS following is disabled.
 
 ### GPS, Route, And Lap Timing
 

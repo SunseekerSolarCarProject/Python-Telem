@@ -48,6 +48,7 @@ class AppSettings:
     solcast_api_key: str = ""
     solcast_latitude: str = ""
     solcast_longitude: str = ""
+    solcast_follow_gps: bool = True
     telemetry_ingestion_api_url: str = "http://localhost:5000/ingest"
     telemetry_ingestion_api_key: str = ""
     telemetry_ingestion_auth_scheme: str = "auto"
@@ -71,6 +72,7 @@ class AppSettings:
         self.solcast_api_key = _clean_string(self.solcast_api_key)
         self.solcast_latitude = _clean_string(self.solcast_latitude)
         self.solcast_longitude = _clean_string(self.solcast_longitude)
+        self.solcast_follow_gps = _clean_bool(self.solcast_follow_gps, default=True)
         self.telemetry_ingestion_api_url = (
             _clean_string(self.telemetry_ingestion_api_url) or "http://localhost:5000/ingest"
         )

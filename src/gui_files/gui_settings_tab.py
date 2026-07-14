@@ -35,7 +35,7 @@ class SettingsTab(QWidget):
     units_changed_signal = pyqtSignal(str)
     machine_learning_retrain_signal = pyqtSignal()
     additional_files_selected = pyqtSignal(list)
-    solcast_config_changed = pyqtSignal(str, str, str)
+    solcast_config_changed = pyqtSignal(str, str, str, bool)
     telemetry_ingestion_config_changed = pyqtSignal(dict)
     driver_name_changed = pyqtSignal(str)
     vehicle_year_changed_signal = pyqtSignal(str)
@@ -204,6 +204,14 @@ class SettingsTab(QWidget):
         self.solcast_lon_edit = QLineEdit()
         self.solcast_lon_edit.setPlaceholderText("Longitude (optional)")
         solcast_form.addRow("Longitude:", self.solcast_lon_edit)
+
+        self.solcast_follow_gps_checkbox = QCheckBox("Follow valid vehicle GPS every 5 minutes")
+        self.solcast_follow_gps_checkbox.setChecked(True)
+        self.solcast_follow_gps_checkbox.setToolTip(
+            "Use the newest valid telemetry GPS position for each Solcast poll; "
+            "the latitude and longitude above remain the fallback."
+        )
+        solcast_form.addRow("", self.solcast_follow_gps_checkbox)
         layout.addWidget(solcast_group)
 
         layout.addStretch()
@@ -450,7 +458,12 @@ class SettingsTab(QWidget):
         }
 
         self.settings_applied_signal.emit(com_port, baud_rate, selected_log_level, endianness)
-        self.solcast_config_changed.emit(solcast_key, solcast_lat, solcast_lon)
+        self.solcast_config_changed.emit(
+            solcast_key,
+            solcast_lat,
+            solcast_lon,
+            self.solcast_follow_gps_checkbox.isChecked(),
+        )
         self.telemetry_ingestion_config_changed.emit(telemetry_config)
         self.vehicle_year_changed_signal.emit(vehicle_year)
         self.driver_name_changed.emit(driver_name)
@@ -564,6 +577,9 @@ class SettingsTab(QWidget):
             self.solcast_key_edit.setText(config_data.get("solcast_api_key", ""))
             self.solcast_lat_edit.setText(str(config_data.get("solcast_latitude", "")))
             self.solcast_lon_edit.setText(str(config_data.get("solcast_longitude", "")))
+            self.solcast_follow_gps_checkbox.setChecked(
+                bool(config_data.get("solcast_follow_gps", True))
+            )
 
             self.telemetry_url_edit.setText(config_data.get("telemetry_ingestion_api_url", ""))
             self.telemetry_api_key_edit.setText(config_data.get("telemetry_ingestion_api_key", ""))

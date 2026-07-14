@@ -192,11 +192,10 @@ prefix may include `GHI`, `DNI`, `DHI`, `GTI`, `Temp`, `Time`, `Fetched_At`,
 `Precipitable_Water`, `Precipitation_Rate`, `Surface_Pressure`,
 `Clearsky_GHI`, `Clearsky_DNI`, `Zenith`, and `Azimuth`.
 
-During live racing, the Solcast query location may be updated from valid GPS
-telemetry no more than once per hour. The update is accepted only when the car
-has moved 15 to 30 miles from the previous Solcast query point, and the app
-persists a daily auto-location cap of 10 updates to protect the Solcast
-site/location budget while still following the route.
+Solcast is polled every five minutes. In **Settings > API & Solar**, enable
+**Follow valid vehicle GPS every 5 minutes** to use the newest valid telemetry
+position for each poll. The manually configured latitude and longitude remain
+the fallback until GPS is valid, or whenever GPS following is disabled.
 
 ## Adding a New Packet
 
