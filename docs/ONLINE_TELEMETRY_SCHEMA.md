@@ -401,6 +401,9 @@ race-day location budget.
 | `NAV_LON` | degrees | Longitude. |
 | `NAV_FIX` | integer | GPS fix type/status. |
 | `NAV_AGE_MS` | ms | Age of GPS data. |
+| `NAV_ELEV_M` | m | GPS height above mean sea level. |
+| `NAV_ELEV_VALID` | boolean-ish integer | `1` means the elevation is current and usable. |
+| `NAV_ELEV_AGE_MS` | ms | Age of the most recent valid GGA elevation. |
 | `NAV_Route_Name` | text | Loaded route name(s). |
 | `NAV_Checkpoint_Name` | text | Current/next checkpoint segment. |
 | `NAV_Route_Distance_Remaining` | mi | Remaining route distance. |
@@ -412,16 +415,35 @@ race-day location budget.
 | `NAV_Best_Lap_Time` | `hh:mm:ss` | Best completed lap. |
 | `NAV_Lap_Status` | text | Lap timing status. |
 
+### BMI270 G-Force
+
+| Field | Unit | Meaning |
+| --- | --- | --- |
+| `IMU_G_VALID` | boolean-ish integer | `1` means the current sample was read successfully. |
+| `IMU_G_CALIBRATED` | boolean-ish integer | `1` means stationary boot calibration succeeded. |
+| `IMU_FORWARD_G` | g | Signed forward acceleration; negative values indicate braking. |
+| `IMU_LINEAR_X_G` | g | Gravity-subtracted board X-axis acceleration. |
+| `IMU_LINEAR_Y_G` | g | Gravity-subtracted board Y-axis acceleration. |
+| `IMU_LINEAR_Z_G` | g | Gravity-subtracted board Z-axis acceleration. |
+| `IMU_TOTAL_G` | g | Acceleration-vector magnitude including gravity. |
+| `IMU_DYNAMIC_G` | g | Movement magnitude after gravity removal and noise deadband. |
+| `IMU_PEAK_BOOT_G` | g | Highest dynamic magnitude measured since calibration. |
+| `IMU_G_AGE_MS` | ms | Age of the current IMU sample. |
+
+Only use the acceleration values when both `IMU_G_VALID` and
+`IMU_G_CALIBRATED` equal `1`.
+
 ## Best Fields For A Website Dashboard
 
-For a public live page, start with:
+For a public live page possible information, start with:
 
 | UI Area | Fields |
 | --- | --- |
-| Map | `NAV_LAT`, `NAV_LON`, `NAV_GPS_VALID`, `NAV_FIX`, `NAV_AGE_MS` |
+| Map | `NAV_LAT`, `NAV_LON`, `NAV_GPS_VALID`, `NAV_FIX`, `NAV_AGE_MS`, `NAV_ELEV_M`, `NAV_ELEV_VALID` |
 | Speed | `NAV_VEHICLE_MPH`, `NAV_GPS_MPH`, `NAV_IMU_MPH`, `NAV_SOURCE` |
 | Battery | `BP_ISH_SOC`, `BP_PVS_Voltage`, `BP_ISH_Amps`, `Battery_Pack_Power_kW`, `Battery_Power_Direction` |
 | Race | `NAV_Lap_Count`, `NAV_Current_Lap_Time`, `NAV_Last_Lap_Time`, `NAV_Best_Lap_Time`, `NAV_Lap_Status` |
+| Motion | `IMU_FORWARD_G`, `IMU_DYNAMIC_G`, `IMU_PEAK_BOOT_G`, `IMU_G_VALID`, `IMU_G_CALIBRATED` |
 | Health | `Telemetry_Status`, `Telemetry_Error`, `MC1LIM_Errors`, `MC2LIM_Errors`, `Prediction_Quality_Flags` |
 | Solar | `Solcast_Live_GHI`, `Solcast_Fcst_GHI`, `Solcast_Live_Temp`, `Solcast_Fcst_Temp` |
 
@@ -430,6 +452,8 @@ For a public live page, start with:
 - Do not expose the ingest API key in browser JavaScript.
 - Browser pages should call a public read endpoint, not the protected ingest endpoint.
 - Treat `NAV_GPS_VALID != 1` as "do not update map marker" or show stale/invalid state.
+- Treat `NAV_ELEV_VALID != 1` as "do not use the printed elevation."
+- Treat IMU G-force values as unavailable unless `IMU_G_VALID == 1` and `IMU_G_CALIBRATED == 1`.
 - Treat `Telemetry_Status != "OK"` as a data quality warning.
 - Non-finite numbers are sanitized before HTTP send; expect `null` for impossible numeric values.
 - Some fields may be `N/A` until the corresponding subsystem has reported at least once.

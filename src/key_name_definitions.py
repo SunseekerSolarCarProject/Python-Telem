@@ -209,6 +209,9 @@ class TelemetryKey(Enum):
     NAV_LONGITUDE = ("NAV_LON", "deg")
     NAV_FIX = ("NAV_FIX", "")
     NAV_AGE_MS = ("NAV_AGE_MS", "ms")
+    NAV_ELEVATION_M = ("NAV_ELEV_M", "m")
+    NAV_ELEVATION_VALID = ("NAV_ELEV_VALID", "")
+    NAV_ELEVATION_AGE_MS = ("NAV_ELEV_AGE_MS", "ms")
     NAV_ROUTE_NAME = ("NAV_Route_Name", "")
     NAV_CHECKPOINT_NAME = ("NAV_Checkpoint_Name", "")
     NAV_ROUTE_DISTANCE_REMAINING_MI = ("NAV_Route_Distance_Remaining", "mi")
@@ -219,6 +222,18 @@ class TelemetryKey(Enum):
     NAV_LAST_LAP_TIME = ("NAV_Last_Lap_Time", "hh:mm:ss")
     NAV_BEST_LAP_TIME = ("NAV_Best_Lap_Time", "hh:mm:ss")
     NAV_LAP_STATUS = ("NAV_Lap_Status", "")
+
+    # BMI270 processed acceleration / g-force
+    IMU_G_VALID = ("IMU_G_VALID", "")
+    IMU_G_CALIBRATED = ("IMU_G_CALIBRATED", "")
+    IMU_FORWARD_G = ("IMU_FORWARD_G", "g")
+    IMU_LINEAR_X_G = ("IMU_LINEAR_X_G", "g")
+    IMU_LINEAR_Y_G = ("IMU_LINEAR_Y_G", "g")
+    IMU_LINEAR_Z_G = ("IMU_LINEAR_Z_G", "g")
+    IMU_TOTAL_G = ("IMU_TOTAL_G", "g")
+    IMU_DYNAMIC_G = ("IMU_DYNAMIC_G", "g")
+    IMU_PEAK_BOOT_G = ("IMU_PEAK_BOOT_G", "g")
+    IMU_G_AGE_MS = ("IMU_G_AGE_MS", "ms")
 
     # Remaining Capacity
     REMAINING_CAPACITY_AH = ("Remaining_Capacity_Ah", "Ah")

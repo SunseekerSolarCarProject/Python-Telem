@@ -127,6 +127,16 @@ class DataDisplay:
             TelemetryKey.PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY,
             TelemetryKey.PREDICTION_DATA_AGE_S,
             TelemetryKey.PREDICTION_QUALITY_FLAGS,
+            "Navigation / GPS:",
+            TelemetryKey.NAV_LATITUDE, TelemetryKey.NAV_LONGITUDE,
+            TelemetryKey.NAV_ELEVATION_M, TelemetryKey.NAV_ELEVATION_VALID,
+            TelemetryKey.NAV_ELEVATION_AGE_MS,
+            "IMU / G-Force:",
+            TelemetryKey.IMU_G_VALID, TelemetryKey.IMU_G_CALIBRATED,
+            TelemetryKey.IMU_FORWARD_G, TelemetryKey.IMU_LINEAR_X_G,
+            TelemetryKey.IMU_LINEAR_Y_G, TelemetryKey.IMU_LINEAR_Z_G,
+            TelemetryKey.IMU_TOTAL_G, TelemetryKey.IMU_DYNAMIC_G,
+            TelemetryKey.IMU_PEAK_BOOT_G, TelemetryKey.IMU_G_AGE_MS,
             TelemetryKey.DEVICE_TIMESTAMP, TelemetryKey.BOARD_UPTIME,
             TelemetryKey.BOARD_UPTIME_MS, TelemetryKey.TIMESTAMP
         ]

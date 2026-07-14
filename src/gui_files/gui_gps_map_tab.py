@@ -118,7 +118,8 @@ class GPSMapTab(QWidget):
         self.status_label = QLabel("Waiting for GPS telemetry")
         self.coord_label = QLabel("Lat: --  Lon: --")
         self.speed_label = QLabel("Speed: -- mph")
-        for label in (self.status_label, self.coord_label, self.speed_label):
+        self.elevation_label = QLabel("Elevation: --")
+        for label in (self.status_label, self.coord_label, self.speed_label, self.elevation_label):
             label.setMinimumWidth(90)
             status_layout.addWidget(label, 1)
 
@@ -224,6 +225,16 @@ class GPSMapTab(QWidget):
         speed = self._as_float(telemetry_data.get(TelemetryKey.NAV_VEHICLE_MPH.value[0]))
         source = telemetry_data.get(TelemetryKey.NAV_SOURCE.value[0], "NONE")
         age_ms = self._as_int(telemetry_data.get(TelemetryKey.NAV_AGE_MS.value[0]))
+        elevation = self._as_float(telemetry_data.get(TelemetryKey.NAV_ELEVATION_M.value[0]))
+        elevation_valid = self._as_int(telemetry_data.get(TelemetryKey.NAV_ELEVATION_VALID.value[0]))
+        elevation_age_ms = self._as_int(telemetry_data.get(TelemetryKey.NAV_ELEVATION_AGE_MS.value[0]))
+
+        if elevation_valid == 1 and elevation is not None:
+            self.elevation_label.setText(
+                f"Elevation: {elevation:.1f} m | age {elevation_age_ms or 0} ms"
+            )
+        else:
+            self.elevation_label.setText("Elevation: invalid")
 
         if lat is None or lon is None:
             return self._build_navigation_metrics(speed or 0.0, update_laps=False)

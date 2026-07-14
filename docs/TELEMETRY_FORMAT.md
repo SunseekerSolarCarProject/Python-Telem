@@ -7,7 +7,8 @@ Raw serial telemetry is parsed by `src/data_processor.py`. The parser converts f
 ```text
 MC1BUS,0x...,0x...
 BME,T=23.65,P=98110.73,H=52.43
-NAV,IMU_MPH=0.00,GPS_MPH=0.00,GPS_VALID=0,VEHICLE_MPH=0.00,SOURCE=NONE,LAT=0.000000,LON=0.000000,FIX=0,AGE_MS=4294967295
+NAV,IMU_MPH=0.00,GPS_MPH=0.00,GPS_VALID=0,VEHICLE_MPH=0.00,SOURCE=NONE,LAT=0.000000,LON=0.000000,FIX=0,AGE_MS=4294967295,ELEV_M=214.372,ELEV_VALID=1,ELEV_AGE_MS=84
+IMU_G,VALID=1,CALIBRATED=1,FORWARD_G=0.184,LINEAR_X_G=0.021,LINEAR_Y_G=0.184,LINEAR_Z_G=-0.012,TOTAL_G=1.018,DYNAMIC_G=0.186,PEAK_BOOT_G=0.438,AGE_MS=4
 TL_TIM,2026-07-12T12:34:56,UPTIME_MS=123456
 TL_UPT,0:00:02:03.456
 ```
@@ -18,7 +19,7 @@ Most packets use this shape:
 KEY,HEX_FLOAT_1,HEX_FLOAT_2
 ```
 
-`HEX_FLOAT_1` and `HEX_FLOAT_2` are decoded as 32-bit floats using the configured endianness. `MC1LIM`, `MC2LIM`, `DC_SWC`, `NAV`, `TL_TIM`, and `TL_UPT` have special parsing rules.
+`HEX_FLOAT_1` and `HEX_FLOAT_2` are decoded as 32-bit floats using the configured endianness. `MC1LIM`, `MC2LIM`, `DC_SWC`, `NAV`, `IMU_G`, `TL_TIM`, and `TL_UPT` have special parsing rules.
 
 ## Example Packet Outputs
 
@@ -65,7 +66,30 @@ NAV_LAT
 NAV_LON
 NAV_FIX
 NAV_AGE_MS
+NAV_ELEV_M
+NAV_ELEV_VALID
+NAV_ELEV_AGE_MS
 ```
+
+`IMU_G,...` produces:
+
+```text
+IMU_G_VALID
+IMU_G_CALIBRATED
+IMU_FORWARD_G
+IMU_LINEAR_X_G
+IMU_LINEAR_Y_G
+IMU_LINEAR_Z_G
+IMU_TOTAL_G
+IMU_DYNAMIC_G
+IMU_PEAK_BOOT_G
+IMU_G_AGE_MS
+```
+
+Use elevation only when `NAV_ELEV_VALID=1`. Use processed acceleration only
+when both `IMU_G_VALID=1` and `IMU_G_CALIBRATED=1`. `IMU_FORWARD_G` is signed
+(positive acceleration, negative braking), `IMU_TOTAL_G` includes gravity,
+and `IMU_DYNAMIC_G` has the calibrated gravity vector removed.
 
 The GPS map tab may add route fields after a GPX route is loaded:
 

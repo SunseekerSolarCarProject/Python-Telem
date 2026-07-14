@@ -68,6 +68,7 @@ def build_imperial_units_dict():
       "MC2CUM_Odometer":      "ft",
       "NAV_Route_Distance_Remaining": "mi",
       "NAV_Checkpoint_Distance_Remaining": "mi",
+      "NAV_ELEV_M":             "ft",
       "BME_Pressure_Pa": "psi",
       "Wh_per_Mile": "Wh/mi",
     }

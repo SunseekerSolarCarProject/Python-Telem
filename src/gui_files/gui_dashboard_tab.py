@@ -207,6 +207,13 @@ class DashboardTab(QWidget):
             card.set_value(display, target, self._state_for_value(key, raw))
         self._update_alerts(telemetry_data)
 
+    @staticmethod
+    def _flag_is_one(value):
+        try:
+            return int(float(value)) == 1
+        except (TypeError, ValueError):
+            return False
+
     def _on_speed_source_changed(self):
         self.speed_source = self.speed_source_selector.currentData() or self.SPEED_SOURCE_NAV
         if self.last_telemetry_data:
@@ -326,6 +333,13 @@ class DashboardTab(QWidget):
         gps_valid = str(telemetry_data.get(TelemetryKey.NAV_GPS_VALID.value[0], "")).lower()
         if gps_valid in ("0", "false", "invalid"):
             alerts.append("GPS telemetry is invalid.")
+
+        imu_valid = telemetry_data.get(TelemetryKey.IMU_G_VALID.value[0])
+        imu_calibrated = telemetry_data.get(TelemetryKey.IMU_G_CALIBRATED.value[0])
+        if imu_valid is not None and not self._flag_is_one(imu_valid):
+            alerts.append("IMU acceleration sample is invalid.")
+        elif imu_calibrated is not None and not self._flag_is_one(imu_calibrated):
+            alerts.append("IMU requires stationary calibration.")
 
         telemetry_status = str(telemetry_data.get(TelemetryKey.TELEMETRY_STATUS.value[0], "")).strip()
         if telemetry_status and telemetry_status.upper() not in ("OK", "N/A"):

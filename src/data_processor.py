@@ -339,7 +339,8 @@ class DataProcessor:
 
         Expected format:
         NAV,IMU_MPH=0.00,GPS_MPH=0.00,GPS_VALID=0,VEHICLE_MPH=0.00,
-        SOURCE=NONE,LAT=0.000000,LON=0.000000,FIX=0,AGE_MS=4294967295
+        SOURCE=NONE,LAT=0.000000,LON=0.000000,FIX=0,AGE_MS=4294967295,
+        ELEV_M=214.372,ELEV_VALID=1,ELEV_AGE_MS=84
         """
         nav_pairs = {}
         for part in parts[1:]:
@@ -372,8 +373,49 @@ class DataProcessor:
             TelemetryKey.NAV_LONGITUDE.value[0]: as_float("LON"),
             TelemetryKey.NAV_FIX.value[0]: as_int("FIX"),
             TelemetryKey.NAV_AGE_MS.value[0]: as_int("AGE_MS", 0),
+            TelemetryKey.NAV_ELEVATION_M.value[0]: as_float("ELEV_M"),
+            TelemetryKey.NAV_ELEVATION_VALID.value[0]: as_int("ELEV_VALID"),
+            TelemetryKey.NAV_ELEVATION_AGE_MS.value[0]: as_int("ELEV_AGE_MS"),
         }
         self.logger.debug(f"Processed NAV data: {processed_data}")
+        return processed_data
+
+    def parse_imu_g_data(self, parts):
+        """Parse calibrated BMI270 acceleration values reported in units of g."""
+        imu_pairs = {}
+        for part in parts[1:]:
+            if "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            imu_pairs[name.strip().upper()] = value.strip()
+
+        def as_float(name, default=0.0):
+            try:
+                return float(imu_pairs.get(name, default))
+            except (TypeError, ValueError):
+                self.logger.warning(f"Invalid IMU_G float for {name}: {imu_pairs.get(name)}")
+                return default
+
+        def as_int(name, default=0):
+            try:
+                return int(float(imu_pairs.get(name, default)))
+            except (TypeError, ValueError):
+                self.logger.warning(f"Invalid IMU_G integer for {name}: {imu_pairs.get(name)}")
+                return default
+
+        processed_data = {
+            TelemetryKey.IMU_G_VALID.value[0]: as_int("VALID"),
+            TelemetryKey.IMU_G_CALIBRATED.value[0]: as_int("CALIBRATED"),
+            TelemetryKey.IMU_FORWARD_G.value[0]: as_float("FORWARD_G"),
+            TelemetryKey.IMU_LINEAR_X_G.value[0]: as_float("LINEAR_X_G"),
+            TelemetryKey.IMU_LINEAR_Y_G.value[0]: as_float("LINEAR_Y_G"),
+            TelemetryKey.IMU_LINEAR_Z_G.value[0]: as_float("LINEAR_Z_G"),
+            TelemetryKey.IMU_TOTAL_G.value[0]: as_float("TOTAL_G"),
+            TelemetryKey.IMU_DYNAMIC_G.value[0]: as_float("DYNAMIC_G"),
+            TelemetryKey.IMU_PEAK_BOOT_G.value[0]: as_float("PEAK_BOOT_G"),
+            TelemetryKey.IMU_G_AGE_MS.value[0]: as_int("AGE_MS"),
+        }
+        self.logger.debug(f"Processed IMU_G data: {processed_data}")
         return processed_data
 
     def parse_bme_data(self, parts):
@@ -465,6 +507,9 @@ class DataProcessor:
 
             if key == "NAV":
                 return self.parse_nav_data(parts)
+
+            if key == "IMU_G":
+                return self.parse_imu_g_data(parts)
 
             if key == "BME":
                 return self.parse_bme_data(parts)

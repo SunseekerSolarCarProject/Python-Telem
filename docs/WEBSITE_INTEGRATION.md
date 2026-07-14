@@ -161,7 +161,15 @@ is preferred because it sends the compatibility headers together.
     "NAV_GPS_VALID": 1,
     "NAV_FIX": 3,
     "NAV_SOURCE": "GPS",
-    "NAV_AGE_MS": 120
+    "NAV_AGE_MS": 120,
+    "NAV_ELEV_M": 214.372,
+    "NAV_ELEV_VALID": 1,
+    "NAV_ELEV_AGE_MS": 84,
+    "IMU_G_VALID": 1,
+    "IMU_G_CALIBRATED": 1,
+    "IMU_FORWARD_G": 0.184,
+    "IMU_DYNAMIC_G": 0.186,
+    "IMU_PEAK_BOOT_G": 0.438
   },
   "timestamp": "2026-06-18T12:34:56.000000"
 }
@@ -175,6 +183,11 @@ fields.NAV_LON
 fields.NAV_VEHICLE_MPH
 fields.NAV_GPS_VALID
 fields.NAV_FIX
+fields.NAV_ELEV_M
+fields.NAV_ELEV_VALID
+fields.IMU_FORWARD_G
+fields.IMU_DYNAMIC_G
+fields.IMU_PEAK_BOOT_G
 timestamp
 ```
 
