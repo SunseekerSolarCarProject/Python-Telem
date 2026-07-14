@@ -49,6 +49,38 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install -r requirement.txt; fi
           pip install pyinstaller==6.16.0 tufup
 
+      - name: Stamp Linux executable version from release tag
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from packaging.version import Version
+
+          tag = os.environ["RELEASE_TAG"].strip()
+          release_version = tag[1:] if tag.lower().startswith("v") else tag
+          Version(release_version)
+
+          version_file = Path("src/Version.py")
+          source = version_file.read_text(encoding="utf-8")
+          updated, replacements = re.subn(
+              r'^VERSION\s*=\s*["\'][^"\']+["\']',
+              f'VERSION = "{release_version}"',
+              source,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if replacements != 1:
+              raise SystemExit("Could not stamp VERSION in src/Version.py")
+          version_file.write_text(updated, encoding="utf-8")
+          print(f"Stamped Linux build as {release_version}")
+          PY
+
       - name: Build executable (PyInstaller --onedir)
         shell: bash
         run: |

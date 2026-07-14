@@ -26,7 +26,7 @@ from key_name_definitions import TelemetryKey, solcast_keys_for_prefix
 
 # Import for updating the application
 from updater.update_checker import UpdateChecker
-from Version import VERSION
+from Version import VERSION, resolve_running_version
 
 # Import your custom tabs
 from gui_files.gui_motor_controller_tab import MotorControllerGraphTab
@@ -66,6 +66,7 @@ class TelemetryGUI(QWidget):
             app_install_dir = os.path.dirname(sys.executable)
         else:
             app_install_dir = os.path.dirname(os.path.abspath(__file__))
+        self.current_version = resolve_running_version(VERSION, app_install_dir)
 
         self.data_keys = data_keys
         self.csv_handler = csv_handler
@@ -94,7 +95,7 @@ class TelemetryGUI(QWidget):
         self.updater = UpdateChecker(
             repo_owner="SunseekerSolarCarProject",
             repo_name="Python-Telem",
-            version=VERSION,
+            version=self.current_version,
             app_install_dir=app_install_dir
         )
         # connect signals:
@@ -458,6 +459,7 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.NAV_CURRENT_LAP_TIME.value[0],
                 TelemetryKey.NAV_LAST_LAP_TIME.value[0],
                 TelemetryKey.NAV_BEST_LAP_TIME.value[0],
+                TelemetryKey.NAV_AVERAGE_LAP_TIME.value[0],
                 TelemetryKey.NAV_LAP_STATUS.value[0],
             ],
             "IMU / G-Force": [
@@ -576,7 +578,7 @@ class TelemetryGUI(QWidget):
         title_group.setSpacing(0)
         self.header_wordmark = QLabel("SUNSEEKER")
         self.header_wordmark.setObjectName("BrandWordmark")
-        self.header_subtitle = QLabel(f"Telemetry Operations  |  v{VERSION}")
+        self.header_subtitle = QLabel(f"Telemetry Operations  |  v{self.current_version}")
         self.header_subtitle.setObjectName("BrandSubtitle")
         title_group.addWidget(self.header_wordmark)
         title_group.addWidget(self.header_subtitle)
@@ -655,7 +657,7 @@ class TelemetryGUI(QWidget):
         box.setIcon(QMessageBox.Icon.Information)
         box.setText(
             f"A new version ({latest_version}) is available.\n"
-            f"You're currently on {VERSION}."
+            f"You're currently on {self.current_version}."
         )
         install_btn = box.addButton("Install Update", QMessageBox.ButtonRole.YesRole)
         skip_btn = box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
@@ -693,8 +695,7 @@ class TelemetryGUI(QWidget):
     def on_refresh_versions(self):
         try:
             versions = self.updater.list_available_versions(limit=20)
-            from Version import VERSION
-            self.settings_tab.set_versions(versions, VERSION)
+            self.settings_tab.set_versions(versions, self.current_version)
             if not versions:
                 QMessageBox.information(self, "Versions", "No versions found or network error.")
         except Exception as e:

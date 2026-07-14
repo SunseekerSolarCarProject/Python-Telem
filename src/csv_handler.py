@@ -127,6 +127,7 @@ class CSVHandler:
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
             TelemetryKey.NAV_LAP_COUNT.value[0], TelemetryKey.NAV_CURRENT_LAP_TIME.value[0],
             TelemetryKey.NAV_LAST_LAP_TIME.value[0], TelemetryKey.NAV_BEST_LAP_TIME.value[0],
+            TelemetryKey.NAV_AVERAGE_LAP_TIME.value[0],
             TelemetryKey.NAV_LAP_STATUS.value[0],
             *solcast_keys_for_prefix("Solcast_Live"),
             *solcast_keys_for_prefix("Solcast_Fcst"),

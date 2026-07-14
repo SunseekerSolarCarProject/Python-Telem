@@ -221,6 +221,7 @@ class TelemetryKey(Enum):
     NAV_CURRENT_LAP_TIME = ("NAV_Current_Lap_Time", "hh:mm:ss")
     NAV_LAST_LAP_TIME = ("NAV_Last_Lap_Time", "hh:mm:ss")
     NAV_BEST_LAP_TIME = ("NAV_Best_Lap_Time", "hh:mm:ss")
+    NAV_AVERAGE_LAP_TIME = ("NAV_Average_Lap_Time", "hh:mm:ss")
     NAV_LAP_STATUS = ("NAV_Lap_Status", "")
 
     # BMI270 processed acceleration / g-force

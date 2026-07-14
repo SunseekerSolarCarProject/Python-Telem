@@ -38,6 +38,7 @@ class MapGraphicsView(QGraphicsView):
     def __init__(self, parent_tab):
         super().__init__(parent_tab.scene, parent_tab)
         self.parent_tab = parent_tab
+        self._suppress_next_left_release = False
 
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
@@ -47,9 +48,21 @@ class MapGraphicsView(QGraphicsView):
             self.parent_tab._set_zoom(self.parent_tab.zoom - 1)
         event.accept()
 
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            scene_point = self.mapToScene(event.position().toPoint())
+            if self.parent_tab._place_lap_line_point(scene_point.x(), scene_point.y()):
+                self._suppress_next_left_release = True
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
+
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._suppress_next_left_release:
+                self._suppress_next_left_release = False
+                return
             self.parent_tab._set_map_center_from_view()
 
 
@@ -86,8 +99,10 @@ class GPSMapTab(QWidget):
         self.lap_started_at = None
         self.last_lap_seconds = None
         self.best_lap_seconds = None
+        self.completed_lap_seconds = []
         self.last_crossing_at = None
         self.lap_status = "Set start/end line"
+        self.lap_line_placement_mode = None
         self.tile_cache = OrderedDict()
         self.tile_items = {}
         self.visible_tile_keys = set()
@@ -173,12 +188,14 @@ class GPSMapTab(QWidget):
         load_gpx_button = QPushButton("Load GPX")
         load_gpx_button.clicked.connect(self._load_gpx_route)
         route_row.addWidget(load_gpx_button)
-        set_lap_start_button = QPushButton("Set Start")
-        set_lap_start_button.clicked.connect(self._set_lap_start)
-        route_row.addWidget(set_lap_start_button)
-        set_lap_end_button = QPushButton("Set End")
-        set_lap_end_button.clicked.connect(self._set_lap_end)
-        route_row.addWidget(set_lap_end_button)
+        self.set_lap_start_button = QPushButton("Set Start")
+        self.set_lap_start_button.setToolTip("Click, then double-click the first end of the timing line on the map.")
+        self.set_lap_start_button.clicked.connect(self._set_lap_start)
+        route_row.addWidget(self.set_lap_start_button)
+        self.set_lap_end_button = QPushButton("Set End")
+        self.set_lap_end_button.setToolTip("Click, then double-click the other end of the timing line on the map.")
+        self.set_lap_end_button.clicked.connect(self._set_lap_end)
+        route_row.addWidget(self.set_lap_end_button)
         reset_laps_button = QPushButton("Reset Laps")
         reset_laps_button.clicked.connect(self._reset_laps)
         route_row.addWidget(reset_laps_button)
@@ -433,32 +450,80 @@ class GPSMapTab(QWidget):
         self.status_label.setText("Saved location deleted")
 
     def _set_lap_start(self):
-        point = self._current_lap_point()
-        if point is None:
-            QMessageBox.warning(self, "Lap Line", "Set a valid vehicle or manual location first.")
-            return
-        self.lap_start_point = point
-        self._reset_laps(keep_line=True)
-        self._refresh_lap_label()
-        self._render_map()
+        self._set_lap_line_placement_mode("start")
 
     def _set_lap_end(self):
-        point = self._current_lap_point()
-        if point is None:
-            QMessageBox.warning(self, "Lap Line", "Set a valid vehicle or manual location first.")
+        if self.lap_start_point is None:
+            QMessageBox.information(self, "Lap Line", "Place the start point first.")
             return
-        if self.lap_start_point and self._haversine_miles(
+        self._set_lap_line_placement_mode("end")
+
+    def _set_lap_line_placement_mode(self, mode):
+        if mode not in {"start", "end"}:
+            mode = None
+        # Clicking the active button again cancels placement.
+        if self.lap_line_placement_mode == mode:
+            mode = None
+        self.lap_line_placement_mode = mode
+        self.set_lap_start_button.setText("Cancel Start" if mode == "start" else "Set Start")
+        self.set_lap_end_button.setText("Cancel End" if mode == "end" else "Set End")
+        if mode:
+            self.view.viewport().setCursor(Qt.CursorShape.CrossCursor)
+            self.lap_status = f"Double-click map to place {mode} point"
+            self.status_label.setText(f"Lap line: double-click the map to place the {mode} point")
+        else:
+            self.view.viewport().unsetCursor()
+            self.lap_status = "Ready" if self._lap_line_ready() else "Set start/end line"
+            self.status_label.setText("Lap-line placement canceled")
+        self._refresh_lap_label()
+
+    def _place_lap_line_point(self, scene_x, scene_y):
+        mode = self.lap_line_placement_mode
+        if mode not in {"start", "end"}:
+            return False
+        if not self.scene.sceneRect().contains(scene_x, scene_y):
+            self.status_label.setText("Double-click inside the visible map area")
+            return True
+
+        point = self._scene_point_to_latlon(scene_x, scene_y)
+        if mode == "end" and self.lap_start_point and self._haversine_miles(
             self.lap_start_point[0],
             self.lap_start_point[1],
             point[0],
             point[1],
         ) < 0.003:
-            QMessageBox.warning(self, "Lap Line", "Start and end need to be at least about 15 feet apart.")
-            return
-        self.lap_end_point = point
+            QMessageBox.warning(
+                self,
+                "Lap Line",
+                "Start and end need to be at least about 15 feet apart. Double-click another location.",
+            )
+            return True
+
+        if mode == "start":
+            self.lap_start_point = point
+            # Replacing the start invalidates an existing end until the user
+            # deliberately places the second endpoint again.
+            self.lap_end_point = None
+        else:
+            self.lap_end_point = point
         self._reset_laps(keep_line=True)
+        self.lap_line_placement_mode = None
+        self.set_lap_start_button.setText("Set Start")
+        self.set_lap_end_button.setText("Set End")
+        self.view.viewport().unsetCursor()
+        if mode == "start":
+            self.lap_status = "Start set; click Set End"
+            self.status_label.setText(
+                f"Lap-line start placed at {point[0]:.6f}, {point[1]:.6f}; now click Set End"
+            )
+        else:
+            self.lap_status = "Ready"
+            self.status_label.setText(
+                f"Lap line ready: {point[0]:.6f}, {point[1]:.6f} is the end point"
+            )
         self._refresh_lap_label()
         self._render_map()
+        return True
 
     def _reset_laps(self, keep_line=False):
         self.previous_lap_point = None
@@ -466,6 +531,7 @@ class GPSMapTab(QWidget):
         self.lap_started_at = None
         self.last_lap_seconds = None
         self.best_lap_seconds = None
+        self.completed_lap_seconds = []
         self.last_crossing_at = None
         self.lap_status = "Ready" if self._lap_line_ready() else "Set start/end line"
         self._refresh_lap_label()
@@ -641,6 +707,11 @@ class GPSMapTab(QWidget):
         start_marker.setPen(QPen(QColor("#ffffff"), 2))
         start_marker.setBrush(QBrush(QColor("#22c55e")))
         self.scene.addItem(start_marker)
+        start_label = QGraphicsTextItem("Start")
+        start_label.setDefaultTextColor(QColor("#ffffff"))
+        start_label.setFont(QFont("", 9, QFont.Weight.Bold))
+        start_label.setPos(start_x + 9, start_y - 22)
+        self.scene.addItem(start_label)
 
         if not self.lap_end_point:
             return
@@ -656,6 +727,11 @@ class GPSMapTab(QWidget):
         end_marker.setPen(QPen(QColor("#ffffff"), 2))
         end_marker.setBrush(QBrush(QColor("#16a34a")))
         self.scene.addItem(end_marker)
+        end_label = QGraphicsTextItem("End")
+        end_label.setDefaultTextColor(QColor("#ffffff"))
+        end_label.setFont(QFont("", 9, QFont.Weight.Bold))
+        end_label.setPos(end_x + 9, end_y - 22)
+        self.scene.addItem(end_label)
 
     def _draw_trail(self, base_tile_x, base_tile_y):
         if len(self.trail) < 2:
@@ -888,14 +964,21 @@ class GPSMapTab(QWidget):
         current_seconds = None
         if self.lap_started_at is not None:
             current_seconds = time.monotonic() - self.lap_started_at
+        average_seconds = self._average_lap_seconds()
         self._refresh_lap_label(current_seconds=current_seconds)
         return {
             TelemetryKey.NAV_LAP_COUNT.value[0]: self.lap_count,
             TelemetryKey.NAV_CURRENT_LAP_TIME.value[0]: self._format_duration(current_seconds),
             TelemetryKey.NAV_LAST_LAP_TIME.value[0]: self._format_duration(self.last_lap_seconds),
             TelemetryKey.NAV_BEST_LAP_TIME.value[0]: self._format_duration(self.best_lap_seconds),
+            TelemetryKey.NAV_AVERAGE_LAP_TIME.value[0]: self._format_duration(average_seconds),
             TelemetryKey.NAV_LAP_STATUS.value[0]: self.lap_status,
         }
+
+    def _average_lap_seconds(self):
+        if len(self.completed_lap_seconds) < 3:
+            return None
+        return sum(self.completed_lap_seconds) / len(self.completed_lap_seconds)
 
     def _update_lap_counter(self, lat, lon, speed_mph):
         current_point = (lat, lon)
@@ -939,6 +1022,7 @@ class GPSMapTab(QWidget):
 
         self.lap_count += 1
         self.last_lap_seconds = lap_seconds
+        self.completed_lap_seconds.append(lap_seconds)
         if self.best_lap_seconds is None or lap_seconds < self.best_lap_seconds:
             self.best_lap_seconds = lap_seconds
         self.lap_started_at = now
@@ -951,8 +1035,10 @@ class GPSMapTab(QWidget):
         current = self._format_duration(current_seconds)
         last = self._format_duration(self.last_lap_seconds)
         best = self._format_duration(self.best_lap_seconds)
+        average = self._format_duration(self._average_lap_seconds())
         self.lap_label.setText(
-            f"Laps: {self.lap_count} | Current {current} | Last {last} | Best {best} | {line_state} | {self.lap_status}"
+            f"Laps: {self.lap_count} | Current {current} | Last {last} | "
+            f"Best {best} | Average {average} | {line_state} | {self.lap_status}"
         )
 
     def _lap_line_ready(self):

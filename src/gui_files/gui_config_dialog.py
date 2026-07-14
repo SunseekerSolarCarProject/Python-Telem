@@ -225,7 +225,7 @@ class ConfigDialog(QDialog):
         box.setWindowTitle("Update Available")
         box.setText(
             f"A new version ({latest_version}) is available."
-            f"You're currently on {VERSION}."
+            f"You're currently on {self.updater.version}."
         )
         install_btn = box.addButton("Install Update", QMessageBox.ButtonRole.YesRole)
         skip_btn = box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)

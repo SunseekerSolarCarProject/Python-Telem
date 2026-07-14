@@ -12,18 +12,20 @@ import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 from tuf.ngclient.updater import Updater  # TUF verification
 from updater.progress_fetcher import ProgressFetcher
+from Version import LINUX_VERSION_FILENAME as LINUX_VERSION_MARKER_FILENAME, resolve_running_version
 
 class UpdateChecker(QObject):
     update_available = pyqtSignal(str)   # latest version string
     update_progress  = pyqtSignal(int)   # 0..100
     update_error     = pyqtSignal(str)
+    LINUX_VERSION_FILENAME = LINUX_VERSION_MARKER_FILENAME
 
     def __init__(self, repo_owner: str, repo_name: str, version: str, app_install_dir: str,
                  target_name: str | None = None):
         super().__init__()
         self.repo_owner = repo_owner
         self.repo_name  = repo_name
-        self.version    = version
+        self.version    = resolve_running_version(version, app_install_dir)
         self.app_install_dir = app_install_dir
         self.target_name = target_name  # MUST match the asset name you upload in Releases
 
@@ -357,6 +359,99 @@ class UpdateChecker(QObject):
                     f.write(script)
                 env = os.environ.copy()
                 subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000, env=env)
+                sys.exit(0)
+            elif sys.platform.startswith("linux"):
+                script_path = os.path.join(self.download_dir, "apply_update.sh")
+                app_dir = os.path.dirname(old_exe)
+                version_marker = os.path.join(app_dir, self.LINUX_VERSION_FILENAME)
+                script = textwrap.dedent("""\
+                #!/bin/sh
+                set -u
+
+                PID="$1"
+                NEW_DIR="$2"
+                OLD_EXE="$3"
+                APP_DIR="$4"
+                NEW_VERSION="$5"
+                VERSION_MARKER="$6"
+                shift 6
+
+                LOG="$APP_DIR/tuf_downloads/apply_update.log"
+                mkdir -p "$(dirname "$LOG")"
+                {
+                  echo "---- $(date) ----"
+                  echo "Applying Linux update to version $NEW_VERSION"
+                  echo "PID=$PID"
+                  echo "NEW_DIR=$NEW_DIR"
+                  echo "OLD_EXE=$OLD_EXE"
+                  echo "APP_DIR=$APP_DIR"
+                } >> "$LOG" 2>&1
+
+                while kill -0 "$PID" 2>/dev/null; do
+                  sleep 0.5
+                done
+
+                if [ ! -d "$NEW_DIR" ]; then
+                  echo "Staged bundle missing: $NEW_DIR" >> "$LOG" 2>&1
+                  exit 1
+                fi
+
+                if [ -f "$OLD_EXE" ]; then
+                  cp -f "$OLD_EXE" "$OLD_EXE.bak" >> "$LOG" 2>&1 || true
+                fi
+
+                cp -a "$NEW_DIR"/. "$APP_DIR"/ >> "$LOG" 2>&1
+                STATUS=$?
+                if [ "$STATUS" -ne 0 ]; then
+                  echo "Copy failed with status $STATUS" >> "$LOG" 2>&1
+                  exit "$STATUS"
+                fi
+
+                # Record the signed bundle version only after every application
+                # file has been copied successfully. Use an atomic rename so a
+                # crash cannot leave a partial version marker.
+                VERSION_TMP="$VERSION_MARKER.tmp.$$"
+                if ! printf '%s\n' "$NEW_VERSION" > "$VERSION_TMP"; then
+                  echo "Could not write Linux version marker: $VERSION_TMP" >> "$LOG" 2>&1
+                  rm -f "$VERSION_TMP"
+                  exit 1
+                fi
+                if ! mv -f "$VERSION_TMP" "$VERSION_MARKER"; then
+                  echo "Could not install Linux version marker: $VERSION_MARKER" >> "$LOG" 2>&1
+                  rm -f "$VERSION_TMP"
+                  exit 1
+                fi
+                echo "Installed Linux version marker: $NEW_VERSION" >> "$LOG" 2>&1
+
+                chmod +x "$OLD_EXE" >> "$LOG" 2>&1 || true
+                echo "Launching updated app" >> "$LOG" 2>&1
+                cd "$APP_DIR" || exit 1
+                "$OLD_EXE" "$@" >> "$LOG" 2>&1 &
+                exit 0
+                """)
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(script)
+                os.chmod(script_path, 0o755)
+                env = os.environ.copy()
+                subprocess.Popen(
+                    [
+                        "/bin/sh",
+                        script_path,
+                        str(os.getpid()),
+                        staged_root,
+                        old_exe,
+                        app_dir,
+                        version,
+                        version_marker,
+                    ] + sys.argv[1:],
+                    cwd=app_dir,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                    close_fds=True,
+                )
                 sys.exit(0)
             else:
                 script_path = os.path.join(self.download_dir, "apply_update.sh")
