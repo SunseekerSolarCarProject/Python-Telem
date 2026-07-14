@@ -4,7 +4,7 @@ import sys
 from packaging.version import Version as SemVer
 
 
-VERSION = "2.3.2"  # Update this when releasing new versions
+VERSION = "2.3.3"  # Update this when releasing new versions
 LINUX_VERSION_FILENAME = ".telemetry-version"
 
 
