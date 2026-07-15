@@ -104,6 +104,8 @@ class CSVHandler:
             TelemetryKey.TELEMETRY_STATUS.value[0], TelemetryKey.TELEMETRY_ERROR.value[0],
             TelemetryKey.TELEMETRY_BAD_PACKET_COUNT.value[0], TelemetryKey.TELEMETRY_LAST_BAD_RAW.value[0],
             TelemetryKey.BME_TEMPERATURE_C.value[0], TelemetryKey.BME_PRESSURE_PA.value[0], TelemetryKey.BME_HUMIDITY_PCT.value[0],
+            TelemetryKey.SHUNT_USED_AH.value[0], TelemetryKey.SHUNT_INTEGRATION_STATUS.value[0],
+            TelemetryKey.SHUNT_SAMPLE_INTERVAL_S.value[0],
             TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
             TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
             TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0],

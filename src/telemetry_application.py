@@ -25,7 +25,7 @@ from serial_reader import SerialReaderThread
 from data_processor import DataProcessor
 from data_display import DataDisplay
 from buffer_data import BufferData
-from extra_calculations import ExtraCalculations
+from extra_calculations import AmpHourIntegrator, ExtraCalculations
 from gui_files.gui_display import TelemetryGUI, ConfigDialog
 from csv_handler import CSVHandler
 from app_settings import APP_SETTINGS_SECTION, AppSettings, load_config, save_app_settings
@@ -156,6 +156,10 @@ class TelemetryApplication(QObject):
         self.serial_reader_thread = None
         self.signals_connected = False
         self.used_Ah = 0
+        self.shunt_integrator = AmpHourIntegrator(
+            initial_used_ah=self.used_Ah,
+            max_sample_gap_seconds=5.0,
+        )
         self.config_data_copy = None  # Initialize to store config data
         self.storage_folder = storage_folder
         self.log_file_path = log_file_path or (os.path.join(self.storage_folder, "telemetry_application.log") if self.storage_folder else None)
@@ -366,6 +370,9 @@ class TelemetryApplication(QObject):
             TelemetryKey.IMU_DYNAMIC_G.value[0],
             TelemetryKey.IMU_PEAK_BOOT_G.value[0],
             TelemetryKey.IMU_G_AGE_MS.value[0],
+            TelemetryKey.SHUNT_USED_AH.value[0],
+            TelemetryKey.SHUNT_INTEGRATION_STATUS.value[0],
+            TelemetryKey.SHUNT_SAMPLE_INTERVAL_S.value[0],
             TelemetryKey.SHUNT_REMAINING_AH.value[0],
             TelemetryKey.USED_AH_REMAINING_AH.value[0],
             TelemetryKey.SHUNT_REMAINING_WH.value[0],
@@ -1244,12 +1251,16 @@ class TelemetryApplication(QObject):
 
     def clear_previous_data(self):
         """
-        Clear in-memory telemetry buffers without touching CSV history or retraining.
+        Clear in-memory telemetry and reset race-session shunt integration.
+
+        CSV history and model training data are left untouched.
         """
         self.buffer.data_buffer.clear()
         self.buffer.raw_data_buffer.clear()
         self.buffer.combined_data.clear()
         self.buffer.last_flush_time = time.time()
+        self.shunt_integrator.reset()
+        self.used_Ah = 0.0
         self.logger.info("Previous data cleared.")
 
     def train_machine_learning_model(self):
@@ -1525,6 +1536,24 @@ class TelemetryApplication(QObject):
             self.logger.debug(f"Processed data: {processed_data}")
 
             if processed_data:
+                shunt_current_key = TelemetryKey.BP_ISH_AMPS.value[0]
+                if not self._simulation_mode and shunt_current_key in processed_data:
+                    # BP_ISH is expected about once per second. Use actual
+                    # monotonic arrival times so scheduling jitter and buffer
+                    # flush frequency cannot distort accumulated energy.
+                    self.used_Ah = self.shunt_integrator.update(
+                        processed_data[shunt_current_key],
+                        time.monotonic(),
+                    )
+                    processed_data[TelemetryKey.SHUNT_USED_AH.value[0]] = self.used_Ah
+                    processed_data[TelemetryKey.SHUNT_INTEGRATION_STATUS.value[0]] = (
+                        self.shunt_integrator.status
+                    )
+                    interval = self.shunt_integrator.last_interval_seconds
+                    processed_data[TelemetryKey.SHUNT_SAMPLE_INTERVAL_S.value[0]] = (
+                        interval if interval is not None else "N/A"
+                    )
+
                 # Every partial packet gets an application timestamp before it
                 # enters the buffer. Device-provided timestamps remain separate.
                 processed_data['timestamp'] = timestamp

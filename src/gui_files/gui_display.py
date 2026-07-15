@@ -314,6 +314,7 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.BP_PVS_AH.value[0], TelemetryKey.BP_PVS_MILLIAMP_S.value[0]
             ],
             "Remaining Capacity": [
+                TelemetryKey.SHUNT_USED_AH.value[0], TelemetryKey.SHUNT_SAMPLE_INTERVAL_S.value[0],
                 TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
                 TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
                 TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0]
@@ -398,6 +399,8 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0], TelemetryKey.ARRAY_ESTIMATE_STATUS.value[0]
             ],
             "Shunt Remaining": [
+                TelemetryKey.SHUNT_USED_AH.value[0], TelemetryKey.SHUNT_INTEGRATION_STATUS.value[0],
+                TelemetryKey.SHUNT_SAMPLE_INTERVAL_S.value[0],
                 TelemetryKey.SHUNT_REMAINING_AH.value[0], TelemetryKey.USED_AH_REMAINING_AH.value[0],
                 TelemetryKey.SHUNT_REMAINING_WH.value[0], TelemetryKey.USED_AH_REMAINING_WH.value[0],
                 TelemetryKey.SHUNT_REMAINING_TIME.value[0], TelemetryKey.USED_AH_REMAINING_TIME.value[0],

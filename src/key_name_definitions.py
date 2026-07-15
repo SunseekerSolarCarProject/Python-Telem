@@ -88,6 +88,9 @@ class TelemetryKey(Enum):
     # MPPTs information
  
     # Shunt information
+    SHUNT_USED_AH = ("Shunt_Used_Ah", "Ah")
+    SHUNT_INTEGRATION_STATUS = ("Shunt_Integration_Status", "")
+    SHUNT_SAMPLE_INTERVAL_S = ("Shunt_Sample_Interval_s", "s")
     SHUNT_REMAINING_AH = ("Shunt_Remaining_Ah", "Ah")
     USED_AH_REMAINING_AH = ("Used_Ah_Remaining_Ah", "Ah")
     SHUNT_REMAINING_WH = ("Shunt_Remaining_wh", "Wh")

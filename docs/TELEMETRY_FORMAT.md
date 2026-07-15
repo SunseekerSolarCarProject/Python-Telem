@@ -46,6 +46,14 @@ BP_PVS_milliamp*s
 BP_PVS_Ah
 ```
 
+`BP_ISH` current samples also drive a race-session amp-hour integrator. The
+integrator uses the actual monotonic time between samples (normally about one
+second), uses trapezoidal integration, and skips gaps longer than five seconds
+instead of assuming the last current continued through a telemetry outage. Its
+outputs are `Shunt_Used_Ah`, `Shunt_Integration_Status`, and
+`Shunt_Sample_Interval_s`; the accumulated value feeds the existing shunt
+remaining-capacity fields.
+
 `BME,T=23.65,P=98110.73,H=52.43` produces:
 
 ```text

@@ -297,6 +297,9 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 
 | Field | Unit |
 | --- | --- |
+| `Shunt_Used_Ah` | Ah consumed since the in-memory race session began |
+| `Shunt_Integration_Status` | `OK`, waiting, or skipped-sample status |
+| `Shunt_Sample_Interval_s` | seconds between the latest two shunt samples |
 | `Shunt_Remaining_Ah` | Ah |
 | `Used_Ah_Remaining_Ah` | Ah |
 | `Shunt_Remaining_wh` | Wh |

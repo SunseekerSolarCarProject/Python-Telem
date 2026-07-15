@@ -5,6 +5,81 @@ import math
 import os
 from typing import Dict, Optional
 
+
+class AmpHourIntegrator:
+    """Integrate signed battery current using real monotonic sample times.
+
+    Positive ``BP_ISH_Amps`` values are discharge and increase ``used_ah``.
+    Negative values are charging/regen and reduce it, without allowing the
+    estimate to imply more than a full starting pack. Long gaps are skipped
+    because the current between those samples is unknown.
+    """
+
+    def __init__(self, initial_used_ah=0.0, max_sample_gap_seconds=5.0):
+        self.max_sample_gap_seconds = float(max_sample_gap_seconds)
+        if not math.isfinite(self.max_sample_gap_seconds) or self.max_sample_gap_seconds <= 0:
+            raise ValueError("max_sample_gap_seconds must be a positive finite number")
+        self.reset(initial_used_ah)
+
+    def reset(self, used_ah=0.0):
+        parsed_used_ah = float(used_ah)
+        if not math.isfinite(parsed_used_ah):
+            raise ValueError("used_ah must be finite")
+        self.used_ah = max(0.0, parsed_used_ah)
+        self.previous_current_a = None
+        self.previous_sample_time = None
+        self.last_interval_seconds = None
+        self.status = "WAITING_FOR_SAMPLE"
+
+    def update(self, current_a, sample_time):
+        """Add one current sample and return the accumulated net used Ah."""
+        try:
+            current = float(current_a)
+            timestamp = float(sample_time)
+        except (TypeError, ValueError):
+            self.status = "INVALID_SAMPLE"
+            self.last_interval_seconds = None
+            return self.used_ah
+
+        if not math.isfinite(current) or not math.isfinite(timestamp):
+            self.status = "INVALID_SAMPLE"
+            self.last_interval_seconds = None
+            return self.used_ah
+
+        if self.previous_sample_time is None:
+            self.previous_current_a = current
+            self.previous_sample_time = timestamp
+            self.last_interval_seconds = None
+            self.status = "WAITING_FOR_SECOND_SAMPLE"
+            return self.used_ah
+
+        interval = timestamp - self.previous_sample_time
+        self.last_interval_seconds = interval
+
+        if interval <= 0:
+            # Do not replace the last good anchor with an out-of-order sample.
+            self.status = "NON_MONOTONIC_SAMPLE_SKIPPED"
+            return self.used_ah
+
+        if interval > self.max_sample_gap_seconds:
+            # Re-anchor at the newest reading, but do not guess what happened
+            # while telemetry was unavailable.
+            self.previous_current_a = current
+            self.previous_sample_time = timestamp
+            self.status = "LONG_GAP_SKIPPED"
+            return self.used_ah
+
+        average_current_a = (self.previous_current_a + current) / 2.0
+        self.used_ah = max(
+            0.0,
+            self.used_ah + (average_current_a * interval) / 3600.0,
+        )
+        self.previous_current_a = current
+        self.previous_sample_time = timestamp
+        self.status = "OK"
+        return self.used_ah
+
+
 class ExtraCalculations:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
@@ -205,7 +280,7 @@ class ExtraCalculations:
                 return 0.0
             remaining_capacity = capacity_Ah - used_Ah
             self.logger.debug(f"Calculated remaining capacity: {remaining_capacity} Ah")
-            return remaining_capacity
+            return min(max(remaining_capacity, 0.0), max(capacity_Ah, 0.0))
         except Exception as e:
             self.logger.error(f"Error calculating remaining capacity: {e}")
             return 0.0
@@ -226,12 +301,12 @@ class ExtraCalculations:
     def calculate_remaining_time_hours(self, remaining_Ah, current):
         #deals with Ah over A to get hours back
         try:
-            if current is None or current == 0 or remaining_Ah is None:
+            if current is None or current <= 0 or remaining_Ah is None:
                 self.logger.warning("Incomplete data for remaining time calculation.")
                 return float('inf')
             remaining_time = remaining_Ah / current
             self.logger.debug(f"Calculated remaining time: {remaining_time} hours")
-            return remaining_time
+            return max(remaining_time, 0.0)
         except Exception as e:
             self.logger.error(f"Error calculating remaining time: {e}")
             return float('inf')

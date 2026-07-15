@@ -117,6 +117,8 @@ class DataDisplay:
             TelemetryKey.MC2LIM_ERRORS,
             TelemetryKey.MC2LIM_LIMITS,
 
+            TelemetryKey.SHUNT_USED_AH, TelemetryKey.SHUNT_INTEGRATION_STATUS,
+            TelemetryKey.SHUNT_SAMPLE_INTERVAL_S,
             TelemetryKey.SHUNT_REMAINING_AH, TelemetryKey.USED_AH_REMAINING_AH,
             TelemetryKey.SHUNT_REMAINING_WH, TelemetryKey.USED_AH_REMAINING_WH, 
             TelemetryKey.SHUNT_REMAINING_TIME, TelemetryKey.USED_AH_REMAINING_TIME,

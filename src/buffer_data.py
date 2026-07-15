@@ -127,12 +127,14 @@ class BufferData:
             self.combined_data.setdefault(field, "N/A")
         self._update_telemetry_health_for_flush()
 
-        # Add derived battery metrics. The shunt current is integrated over a
-        # fixed interval inside ExtraCalculations.update_used_Ah, while BP_PVS_Ah
-        # comes from the packet itself; both estimates are kept for comparison.
+        # Add derived battery metrics. TelemetryApplication integrates each
+        # BP_ISH current sample using its real monotonic arrival interval and
+        # passes the accumulated value here. Snapshot flush frequency must not
+        # change the energy estimate.
         shunt_current = self.safe_float(self.combined_data.get('BP_ISH_Amps', 0))
-        used_ah = self.safe_float(self.extra_calculations.update_used_Ah(used_ah , shunt_current))
-        self.logger.debug(f"Used_Ah2 is updated so often {used_ah}")
+        used_ah = self.safe_float(used_ah)
+        self.combined_data[TelemetryKey.SHUNT_USED_AH.value[0]] = used_ah
+        self.logger.debug(f"Accumulated shunt used Ah: {used_ah}")
 
         self.combined_data.update(battery_info)
         self.combined_data['Shunt_Remaining_Ah'] = self.extra_calculations.calculate_remaining_capacity(
