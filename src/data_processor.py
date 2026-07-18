@@ -340,7 +340,9 @@ class DataProcessor:
         Expected format:
         NAV,IMU_MPH=0.00,GPS_MPH=0.00,GPS_VALID=0,VEHICLE_MPH=0.00,
         SOURCE=NONE,LAT=0.000000,LON=0.000000,FIX=0,AGE_MS=4294967295,
-        ELEV_M=214.372,ELEV_VALID=1,ELEV_AGE_MS=84
+        ELEV_M=214.372,ELEV_VALID=1,ELEV_AGE_MS=84,SATS_VISIBLE=10,
+        SATS_VISIBLE_VALID=1,SATS_VISIBLE_AGE_MS=287,SATS_USED=8,
+        SATS_USED_VALID=1,SATS_USED_AGE_MS=306
         """
         nav_pairs = {}
         for part in parts[1:]:
@@ -376,6 +378,12 @@ class DataProcessor:
             TelemetryKey.NAV_ELEVATION_M.value[0]: as_float("ELEV_M"),
             TelemetryKey.NAV_ELEVATION_VALID.value[0]: as_int("ELEV_VALID"),
             TelemetryKey.NAV_ELEVATION_AGE_MS.value[0]: as_int("ELEV_AGE_MS"),
+            TelemetryKey.NAV_SATS_VISIBLE.value[0]: as_int("SATS_VISIBLE"),
+            TelemetryKey.NAV_SATS_VISIBLE_VALID.value[0]: as_int("SATS_VISIBLE_VALID"),
+            TelemetryKey.NAV_SATS_VISIBLE_AGE_MS.value[0]: as_int("SATS_VISIBLE_AGE_MS"),
+            TelemetryKey.NAV_SATS_USED.value[0]: as_int("SATS_USED"),
+            TelemetryKey.NAV_SATS_USED_VALID.value[0]: as_int("SATS_USED_VALID"),
+            TelemetryKey.NAV_SATS_USED_AGE_MS.value[0]: as_int("SATS_USED_AGE_MS"),
         }
         self.logger.debug(f"Processed NAV data: {processed_data}")
         return processed_data
@@ -406,6 +414,7 @@ class DataProcessor:
         processed_data = {
             TelemetryKey.IMU_G_VALID.value[0]: as_int("VALID"),
             TelemetryKey.IMU_G_CALIBRATED.value[0]: as_int("CALIBRATED"),
+            TelemetryKey.IMU_G_MOUNT_VALID.value[0]: as_int("MOUNT_VALID"),
             TelemetryKey.IMU_FORWARD_G.value[0]: as_float("FORWARD_G"),
             TelemetryKey.IMU_LINEAR_X_G.value[0]: as_float("LINEAR_X_G"),
             TelemetryKey.IMU_LINEAR_Y_G.value[0]: as_float("LINEAR_Y_G"),

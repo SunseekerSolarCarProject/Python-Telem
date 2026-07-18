@@ -405,6 +405,12 @@ valid GPS fix is received and whenever GPS following is disabled.
 | `NAV_ELEV_M` | m | GPS height above mean sea level. |
 | `NAV_ELEV_VALID` | boolean-ish integer | `1` means the elevation is current and usable. |
 | `NAV_ELEV_AGE_MS` | ms | Age of the most recent valid GGA elevation. |
+| `NAV_SATS_VISIBLE` | integer | Satellites currently visible to the GPS receiver. |
+| `NAV_SATS_VISIBLE_VALID` | boolean-ish integer | `1` means the visible-satellite count is valid. |
+| `NAV_SATS_VISIBLE_AGE_MS` | ms | Age of the visible-satellite count. |
+| `NAV_SATS_USED` | integer | Satellites currently used in the GPS fix. |
+| `NAV_SATS_USED_VALID` | boolean-ish integer | `1` means the used-satellite count is valid. |
+| `NAV_SATS_USED_AGE_MS` | ms | Age of the used-satellite count. |
 | `NAV_Route_Name` | text | Loaded route name(s). |
 | `NAV_Checkpoint_Name` | text | Current/next checkpoint segment. |
 | `NAV_Route_Distance_Remaining` | mi | Remaining route distance. |
@@ -422,6 +428,7 @@ valid GPS fix is received and whenever GPS following is disabled.
 | --- | --- | --- |
 | `IMU_G_VALID` | boolean-ish integer | `1` means the current sample was read successfully. |
 | `IMU_G_CALIBRATED` | boolean-ish integer | `1` means stationary boot calibration succeeded. |
+| `IMU_G_MOUNT_VALID` | boolean-ish integer | `1` means the configured IMU mounting orientation is valid. |
 | `IMU_FORWARD_G` | g | Signed forward acceleration; negative values indicate braking. |
 | `IMU_LINEAR_X_G` | g | Gravity-subtracted board X-axis acceleration. |
 | `IMU_LINEAR_Y_G` | g | Gravity-subtracted board Y-axis acceleration. |
