@@ -73,6 +73,10 @@ class MachineLearningModel:
         'NAV_GPS_MPH',
         'NAV_IMU_MPH',
     ]
+    # A narrow training run may never observe the lower end of the vehicle's
+    # normal pack-voltage range. Do not report PVS voltage extrapolation until
+    # it falls below this known operational floor.
+    PVS_VOLTAGE_QUALITY_MIN = 100.0
 
     def __init__(self, model_dir: str = None):
         # --- Logger ---
@@ -205,6 +209,14 @@ class MachineLearningModel:
         return ranges
 
 
+    def _diagnostic_feature_range(self, feature: str, feature_range) -> tuple[float, float]:
+        """Return the accepted range used only for runtime quality warnings."""
+        minimum, maximum = feature_range
+        if feature == 'BP_PVS_Voltage':
+            minimum = min(float(minimum), self.PVS_VOLTAGE_QUALITY_MIN)
+        return float(minimum), float(maximum)
+
+
     def _target_stats(self, y: pd.Series) -> dict:
         """Store simple target stats for future diagnostics/reporting."""
         if y.empty:
@@ -321,7 +333,7 @@ class MachineLearningModel:
             # can still predict, but the GUI should show caution.
             rng = ranges.get(col)
             if rng:
-                mn, mx = rng
+                mn, mx = self._diagnostic_feature_range(col, rng)
                 if value < mn or value > mx:
                     outliers[col] = {"value": float(value), "min": mn, "max": mx}
         if outliers:
@@ -460,7 +472,7 @@ class MachineLearningModel:
             # surfacing even when the forest still returns a number.
             rng = ranges.get(col)
             if rng:
-                mn, mx = rng
+                mn, mx = self._diagnostic_feature_range(col, rng)
                 if value < mn or value > mx:
                     outliers[col] = {"value": float(value), "min": mn, "max": mx}
         if outliers:

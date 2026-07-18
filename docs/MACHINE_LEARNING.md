@@ -89,6 +89,12 @@ training. At runtime, `QualityDiagnostics` uses this metadata to flag:
 These flags are written to `Prediction_Quality_Flags`. `OK` means no known
 diagnostic issue was detected for that snapshot.
 
+`BP_PVS_Voltage` has a known operational lower bound of 100 V for quality
+diagnostics. A narrow training dataset with a higher minimum voltage does not
+produce an out-of-range warning until live voltage falls below 100 V. The
+training maximum is still enforced; a model genuinely trained below 100 V
+retains that wider observed range.
+
 ## Training Data
 
 The app maintains a sparse training file named `training_data.csv`. By default
