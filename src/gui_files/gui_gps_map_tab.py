@@ -11,6 +11,7 @@ from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkDiskCache, QNetworkRe
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGraphicsEllipseItem,
@@ -27,6 +28,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -79,6 +81,15 @@ class GPSMapTab(QWidget):
     TILE_RADIUS = 3
     MAX_MEMORY_TILES = 384
     MAX_DRAW_ROUTE_POINTS_PER_SEGMENT = 1800
+    LAP_CROSSING_COOLDOWN_SECONDS = 8.0
+    MINIMUM_LAP_SECONDS = 30.0
+    LAP_LINE_REARM_DISTANCE_METERS = 20.0
+    RACE_MODE_FSGP = "FSGP Track"
+    RACE_MODE_ASC = "ASC Route"
+    MINIMUM_DISTANCE_SPEED_MPH = 1.0
+    GPS_SEGMENT_BASE_TOLERANCE_MILES = 0.002
+    GPS_SEGMENT_SPEED_FACTOR = 2.5
+    MAX_MOVING_TIME_SAMPLE_GAP_SECONDS = 5.0
     KALAMAZOO_LAT = 42.291707
     KALAMAZOO_LON = -85.587229
 
@@ -92,6 +103,9 @@ class GPSMapTab(QWidget):
         self.trail = []
         self.route_points = []
         self.route_segments = []
+        self.route_flat_positions = []
+        self.route_last_flat_index = None
+        self.route_progress_miles = 0.0
         self.lap_start_point = None
         self.lap_end_point = None
         self.previous_lap_point = None
@@ -100,9 +114,26 @@ class GPSMapTab(QWidget):
         self.last_lap_seconds = None
         self.best_lap_seconds = None
         self.completed_lap_seconds = []
+        self.current_lap_distance_miles = 0.0
+        self.completed_lap_distances_miles = []
         self.last_crossing_at = None
+        self.lap_crossing_direction = None
+        self.lap_crossing_armed = True
         self.lap_status = "Set start/end line"
         self.lap_line_placement_mode = None
+        (
+            self.race_mode,
+            self.track_lap_length_miles,
+            self.fsgp_day_duration_hours,
+        ) = self._load_race_settings()
+        if self.race_mode == self.RACE_MODE_ASC:
+            self.lap_status = "ASC route mode"
+        self.trip_distance_miles = 0.0
+        self.trip_started_at = None
+        self.previous_trip_point = None
+        self.previous_trip_at = None
+        self.day_moving_seconds = 0.0
+        self.day_max_speed_mph = 0.0
         self.tile_cache = OrderedDict()
         self.tile_items = {}
         self.visible_tile_keys = set()
@@ -134,23 +165,44 @@ class GPSMapTab(QWidget):
         self.coord_label = QLabel("Lat: --  Lon: --")
         self.speed_label = QLabel("Speed: -- mph")
         self.elevation_label = QLabel("Elevation: --")
-        for label in (self.status_label, self.coord_label, self.speed_label, self.elevation_label):
-            label.setMinimumWidth(90)
-            status_layout.addWidget(label, 1)
-
-        status_layout.addStretch()
-        self.zoom_out_button = QPushButton("-")
-        self.zoom_in_button = QPushButton("+")
-        self.zoom_out_button.setFixedWidth(34)
-        self.zoom_in_button.setFixedWidth(34)
-        self.zoom_out_button.clicked.connect(lambda: self._set_zoom(self.zoom - 1))
-        self.zoom_in_button.clicked.connect(lambda: self._set_zoom(self.zoom + 1))
-        status_layout.addWidget(self.zoom_out_button)
-        status_layout.addWidget(self.zoom_in_button)
+        self.status_label.setMinimumWidth(150)
+        self.coord_label.setMinimumWidth(180)
+        self.speed_label.setMinimumWidth(100)
+        self.elevation_label.setMinimumWidth(110)
+        status_layout.addWidget(self.status_label, 2)
+        status_layout.addWidget(self.coord_label, 2)
+        status_layout.addWidget(self.speed_label, 1)
+        status_layout.addWidget(self.elevation_label, 1)
         layout.addWidget(status_bar)
 
-        manual_bar = QFrame(self)
-        manual_layout = QGridLayout(manual_bar)
+        drawer_bar = QFrame(self)
+        drawer_layout = QHBoxLayout(drawer_bar)
+        drawer_layout.setContentsMargins(0, 0, 0, 0)
+        self.setup_toggle_button = QToolButton(drawer_bar)
+        self.setup_toggle_button.setText("Map setup")
+        self.setup_toggle_button.setCheckable(True)
+        self.setup_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.setup_toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.details_toggle_button = QToolButton(drawer_bar)
+        self.details_toggle_button.setText("Race details")
+        self.details_toggle_button.setCheckable(True)
+        self.details_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.details_toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        drawer_layout.addWidget(self.setup_toggle_button)
+        drawer_layout.addWidget(self.details_toggle_button)
+        drawer_layout.addStretch()
+        layout.addWidget(drawer_bar)
+
+        self.setup_panel = QFrame(self)
+        self.setup_panel.setObjectName("mapSetupPanel")
+        self.setup_panel.setStyleSheet(
+            "QFrame#mapSetupPanel { border: 1px solid #777; border-radius: 4px; padding: 3px; }"
+        )
+        manual_layout = QGridLayout(self.setup_panel)
         manual_layout.setContentsMargins(0, 0, 0, 0)
 
         location_row = QHBoxLayout()
@@ -204,35 +256,171 @@ class GPSMapTab(QWidget):
         route_row.addWidget(self.follow_vehicle_checkbox)
         route_row.addStretch()
 
+        race_row = QHBoxLayout()
+        race_row.addWidget(QLabel("Race mode:"))
+        self.race_mode_combo = QComboBox()
+        self.race_mode_combo.addItems([self.RACE_MODE_FSGP, self.RACE_MODE_ASC])
+        self.race_mode_combo.setCurrentText(self.race_mode)
+        self.race_mode_combo.setToolTip(
+            "FSGP uses lap timing and official lap mileage; ASC uses continuous GPX route progress."
+        )
+        self.race_mode_combo.currentTextChanged.connect(self._race_mode_changed)
+        race_row.addWidget(self.race_mode_combo)
+        race_row.addWidget(QLabel("Official lap length:"))
+        self.track_length_input = QDoubleSpinBox()
+        self.track_length_input.setDecimals(3)
+        self.track_length_input.setRange(0.0, 100.0)
+        self.track_length_input.setSingleStep(0.001)
+        self.track_length_input.setSuffix(" mi")
+        self.track_length_input.setSpecialValueText("Use GPS")
+        self.track_length_input.setValue(self.track_lap_length_miles)
+        self.track_length_input.setToolTip(
+            "For FSGP, completed official distance is laps times this value. Zero uses filtered GPS lap distance."
+        )
+        self.track_length_input.setEnabled(self.race_mode == self.RACE_MODE_FSGP)
+        self.track_length_input.valueChanged.connect(self._track_length_changed)
+        race_row.addWidget(self.track_length_input)
+        race_row.addWidget(QLabel("Race-day duration:"))
+        self.day_duration_input = QDoubleSpinBox()
+        self.day_duration_input.setDecimals(1)
+        self.day_duration_input.setRange(0.0, 24.0)
+        self.day_duration_input.setSingleStep(0.5)
+        self.day_duration_input.setSuffix(" h")
+        self.day_duration_input.setSpecialValueText("Set hours")
+        self.day_duration_input.setValue(self.fsgp_day_duration_hours)
+        self.day_duration_input.setToolTip(
+            "Scheduled FSGP driving time for this day. The timer starts with the first movement after Reset Day; zero disables projected possible laps."
+        )
+        self.day_duration_input.setEnabled(self.race_mode == self.RACE_MODE_FSGP)
+        self.day_duration_input.valueChanged.connect(self._day_duration_changed)
+        race_row.addWidget(self.day_duration_input)
+        reset_trip_button = QPushButton("Reset Trip")
+        reset_trip_button.setToolTip("Reset GPS trip distance and ASC route progress.")
+        reset_trip_button.clicked.connect(self._reset_trip)
+        race_row.addWidget(reset_trip_button)
+        reset_day_button = QPushButton("Reset Day")
+        reset_day_button.setToolTip("Reset trip, daily speed statistics, route progress, and lap results.")
+        reset_day_button.clicked.connect(self._reset_day)
+        race_row.addWidget(reset_day_button)
+        race_row.addStretch()
+
         manual_layout.addLayout(location_row, 0, 0)
         manual_layout.addLayout(saved_row, 1, 0)
-        manual_layout.addLayout(route_row, 2, 0)
+        manual_layout.addLayout(race_row, 2, 0)
+        manual_layout.addLayout(route_row, 3, 0)
         manual_layout.setColumnStretch(0, 1)
-        layout.addWidget(manual_bar)
+        layout.addWidget(self.setup_panel)
+        self.setup_panel.setVisible(False)
         self._refresh_saved_locations_dropdown()
 
+        self.compact_summary_label = QLabel("Race summary: waiting for telemetry")
+        self.compact_summary_label.setObjectName("mapCompactSummary")
+        self.compact_summary_label.setWordWrap(True)
+        self.compact_summary_label.setStyleSheet(
+            "QLabel#mapCompactSummary { background: rgba(30, 90, 140, 35); "
+            "border: 1px solid rgba(80, 120, 150, 120); border-radius: 4px; padding: 5px; }"
+        )
+        layout.addWidget(self.compact_summary_label)
+
+        self.stats_details_panel = QFrame(self)
+        self.stats_details_panel.setObjectName("mapStatsDetailsPanel")
+        details_layout = QVBoxLayout(self.stats_details_panel)
+        details_layout.setContentsMargins(4, 2, 4, 2)
+        details_layout.setSpacing(2)
         self.route_label = QLabel("Route: none")
-        layout.addWidget(self.route_label)
+        details_layout.addWidget(self.route_label)
         self.lap_label = QLabel("Laps: set start/end line")
-        layout.addWidget(self.lap_label)
+        details_layout.addWidget(self.lap_label)
+        self.lap_speed_label = QLabel("Lap speeds: waiting for completed laps")
+        details_layout.addWidget(self.lap_speed_label)
+        self.distance_label = QLabel("Distance: GPS trip 0.00 mi")
+        details_layout.addWidget(self.distance_label)
+        self.day_summary_label = QLabel("Day averages: waiting for movement")
+        details_layout.addWidget(self.day_summary_label)
+        self.fsgp_projection_label = QLabel("FSGP projection: set race-day duration")
+        details_layout.addWidget(self.fsgp_projection_label)
 
         self.tile_status_label = QLabel("Map tiles: idle")
-        layout.addWidget(self.tile_status_label)
+        details_layout.addWidget(self.tile_status_label)
+        for detail_label in (
+            self.route_label,
+            self.lap_label,
+            self.lap_speed_label,
+            self.distance_label,
+            self.day_summary_label,
+            self.fsgp_projection_label,
+            self.tile_status_label,
+        ):
+            detail_label.setWordWrap(True)
+        layout.addWidget(self.stats_details_panel)
+        self.stats_details_panel.setVisible(False)
+        self.setup_toggle_button.toggled.connect(
+            lambda expanded: self._set_drawer_expanded(
+                self.setup_panel, self.setup_toggle_button, expanded
+            )
+        )
+        self.details_toggle_button.toggled.connect(
+            lambda expanded: self._set_drawer_expanded(
+                self.stats_details_panel, self.details_toggle_button, expanded
+            )
+        )
 
         self.scene = QGraphicsScene(self)
         self.view = MapGraphicsView(self)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
         self.view.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontSavePainterState, True)
         self.view.setMinimumHeight(180)
-        layout.addWidget(self.view, 1)
+
+        # Keep the zoom controls directly over the map so they remain easy to
+        # find even when the telemetry status row is crowded.
+        map_container = QWidget(self)
+        map_layout = QGridLayout(map_container)
+        map_layout.setContentsMargins(0, 0, 0, 0)
+        map_layout.addWidget(self.view, 0, 0)
+
+        self.zoom_controls = QFrame(map_container)
+        self.zoom_controls.setObjectName("mapZoomControls")
+        self.zoom_controls.setStyleSheet(
+            "QFrame#mapZoomControls { background: rgba(255, 255, 255, 230); "
+            "border: 1px solid #666; border-radius: 4px; }"
+            "QPushButton { background: white; color: black; border: none; "
+            "font-size: 22px; font-weight: bold; }"
+            "QPushButton:hover { background: #e8e8e8; }"
+            "QPushButton:disabled { color: #aaaaaa; }"
+        )
+        zoom_layout = QVBoxLayout(self.zoom_controls)
+        zoom_layout.setContentsMargins(2, 2, 2, 2)
+        zoom_layout.setSpacing(1)
+        self.zoom_in_button = QPushButton("+")
+        self.zoom_out_button = QPushButton("-")
+        for button in (self.zoom_in_button, self.zoom_out_button):
+            button.setFixedSize(40, 40)
+        self.zoom_in_button.setToolTip("Zoom in")
+        self.zoom_out_button.setToolTip("Zoom out")
+        self.zoom_in_button.setAccessibleName("Zoom map in")
+        self.zoom_out_button.setAccessibleName("Zoom map out")
+        self.zoom_in_button.clicked.connect(lambda: self._set_zoom(self.zoom + 1))
+        self.zoom_out_button.clicked.connect(lambda: self._set_zoom(self.zoom - 1))
+        zoom_layout.addWidget(self.zoom_in_button)
+        zoom_layout.addWidget(self.zoom_out_button)
+        map_layout.addWidget(
+            self.zoom_controls,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
+        layout.addWidget(map_container, 1)
+        self._update_zoom_controls()
 
         self.attribution_label = QLabel("Map tiles: OpenStreetMap contributors")
         self.attribution_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.attribution_label)
+        self._refresh_lap_label()
+        self._refresh_distance_labels()
 
     def update_data(self, telemetry_data, update_laps=True):
         lat = self._as_float(telemetry_data.get(TelemetryKey.NAV_LATITUDE.value[0]))
@@ -297,8 +485,21 @@ class GPSMapTab(QWidget):
 
     def _set_zoom(self, zoom):
         self.zoom = max(2, min(19, zoom))
+        self._update_zoom_controls()
         if self.center_lat is not None and self.center_lon is not None:
             self._render_map()
+
+    def _update_zoom_controls(self):
+        """Reflect the OSM zoom limits in the on-map buttons."""
+        self.zoom_out_button.setEnabled(self.zoom > 2)
+        self.zoom_in_button.setEnabled(self.zoom < 19)
+
+    @staticmethod
+    def _set_drawer_expanded(panel, button, expanded):
+        panel.setVisible(bool(expanded))
+        button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
 
     def _set_location(self, lat, lon, status=None, speed=None, reset_trail=False):
         self._set_vehicle_location(lat, lon, status=status, speed=speed, reset_trail=reset_trail, recenter=True)
@@ -349,6 +550,72 @@ class GPSMapTab(QWidget):
             speed=0.0,
             reset_trail=True,
         )
+
+    def _load_race_settings(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        mode = str(settings.value("map/race_mode", self.RACE_MODE_FSGP))
+        if mode not in {self.RACE_MODE_FSGP, self.RACE_MODE_ASC}:
+            mode = self.RACE_MODE_FSGP
+        track_length = self._as_float(settings.value("map/fsgp_lap_length_miles", 0.0))
+        if track_length is None or not (0.0 <= track_length <= 100.0):
+            track_length = 0.0
+        day_duration = self._as_float(settings.value("map/fsgp_day_duration_hours", 0.0))
+        if day_duration is None or not (0.0 <= day_duration <= 24.0):
+            day_duration = 0.0
+        return mode, track_length, day_duration
+
+    def _race_mode_changed(self, mode):
+        if mode not in {self.RACE_MODE_FSGP, self.RACE_MODE_ASC}:
+            return
+        previous_mode = self.race_mode
+        self.race_mode = mode
+        QSettings("SunseekerSolarCarProject", "Python-Telem").setValue("map/race_mode", mode)
+        self.track_length_input.setEnabled(mode == self.RACE_MODE_FSGP)
+        self.day_duration_input.setEnabled(mode == self.RACE_MODE_FSGP)
+        if mode != previous_mode:
+            # Completed laps remain available, but a partial circuit cannot be
+            # meaningfully resumed after operating in point-to-point mode.
+            self.lap_started_at = None
+            self.previous_lap_point = None
+            self.current_lap_distance_miles = 0.0
+            self.lap_crossing_armed = True
+            self.lap_status = (
+                "ASC route mode"
+                if mode == self.RACE_MODE_ASC
+                else ("Ready" if self._lap_line_ready() else "Set start/end line")
+            )
+        self._refresh_lap_label()
+        self._refresh_distance_labels()
+
+    def _track_length_changed(self, miles):
+        self.track_lap_length_miles = max(0.0, float(miles))
+        QSettings("SunseekerSolarCarProject", "Python-Telem").setValue(
+            "map/fsgp_lap_length_miles", self.track_lap_length_miles
+        )
+        self._refresh_lap_label()
+        self._refresh_distance_labels()
+
+    def _day_duration_changed(self, hours):
+        self.fsgp_day_duration_hours = max(0.0, float(hours))
+        QSettings("SunseekerSolarCarProject", "Python-Telem").setValue(
+            "map/fsgp_day_duration_hours", self.fsgp_day_duration_hours
+        )
+        self._refresh_distance_labels()
+
+    def _reset_trip(self):
+        self.trip_distance_miles = 0.0
+        self.trip_started_at = None
+        self.previous_trip_point = None
+        self.previous_trip_at = None
+        self.day_moving_seconds = 0.0
+        self.day_max_speed_mph = 0.0
+        self.route_progress_miles = 0.0
+        self.route_last_flat_index = None
+        self._refresh_distance_labels()
+
+    def _reset_day(self):
+        self._reset_trip()
+        self._reset_laps(keep_line=True)
 
     def _load_saved_locations(self):
         settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
@@ -532,9 +799,14 @@ class GPSMapTab(QWidget):
         self.last_lap_seconds = None
         self.best_lap_seconds = None
         self.completed_lap_seconds = []
+        self.current_lap_distance_miles = 0.0
+        self.completed_lap_distances_miles = []
         self.last_crossing_at = None
+        self.lap_crossing_direction = None
+        self.lap_crossing_armed = True
         self.lap_status = "Ready" if self._lap_line_ready() else "Set start/end line"
         self._refresh_lap_label()
+        self._refresh_distance_labels()
 
     def _current_lap_point(self):
         if self.vehicle_lat is not None and self.vehicle_lon is not None:
@@ -887,6 +1159,13 @@ class GPSMapTab(QWidget):
 
         self.route_segments = segments
         self.route_points = [point for segment in segments for point in segment["points"]]
+        self.route_flat_positions = [
+            (segment_index, point_index, point)
+            for segment_index, segment in enumerate(segments)
+            for point_index, point in enumerate(segment["points"])
+        ]
+        self.route_last_flat_index = None
+        self.route_progress_miles = 0.0
         total_miles = sum(segment["length_miles"] for segment in segments)
         self.route_label.setText(
             f"Route: {len(segments)} segment(s), {len(self.route_points)} points, {total_miles:.1f} mi"
@@ -906,7 +1185,7 @@ class GPSMapTab(QWidget):
         cumulative = [0.0]
         for previous, current in zip(points, points[1:]):
             cumulative.append(cumulative[-1] + self._haversine_miles(previous[0], previous[1], current[0], current[1]))
-        name = file_path.split("/")[-1]
+        name = os.path.basename(file_path)
         if name.lower().endswith(".gpx"):
             name = name[:-4]
         return {
@@ -916,48 +1195,89 @@ class GPSMapTab(QWidget):
             "length_miles": cumulative[-1],
         }
 
-    def _build_route_metrics(self, speed_mph):
+    def _build_route_metrics(self, speed_mph, lat=None, lon=None):
         # Route metrics are returned as telemetry fields so the normal GUI and
         # CSV paths can display them without a GPS-map-specific data channel.
         defaults = {
             TelemetryKey.NAV_ROUTE_NAME.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_NAME.value[0]: "N/A",
             TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0]: "N/A",
+            TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0]: "N/A",
         }
-        if self.vehicle_lat is None or self.vehicle_lon is None or not self.route_segments:
+        route_lat = self.vehicle_lat if lat is None else lat
+        route_lon = self.vehicle_lon if lon is None else lon
+        if route_lat is None or route_lon is None or not self.route_segments:
             return defaults
 
-        nearest = self._nearest_route_position(self.vehicle_lat, self.vehicle_lon)
+        nearest = self._nearest_route_position(route_lat, route_lon)
         if nearest is None:
             return defaults
 
-        segment_index, point_index = nearest
+        nearest_segment_index, point_index = nearest
+        miles_before_nearest = sum(
+            item["length_miles"] for item in self.route_segments[:nearest_segment_index]
+        )
+        candidate_progress = (
+            miles_before_nearest
+            + self.route_segments[nearest_segment_index]["cumulative_miles"][point_index]
+        )
+        total_route_miles = sum(item["length_miles"] for item in self.route_segments)
+        if self.race_mode == self.RACE_MODE_ASC:
+            # ASC is point-to-point: never move route progress backwards when
+            # GPS jitters or a route doubles back near an earlier point.
+            self.route_progress_miles = min(
+                total_route_miles, max(self.route_progress_miles, candidate_progress)
+            )
+        else:
+            self.route_progress_miles = min(total_route_miles, candidate_progress)
+
+        segment_index = len(self.route_segments) - 1
+        miles_before_segment = 0.0
+        for index, item in enumerate(self.route_segments):
+            segment_end = miles_before_segment + item["length_miles"]
+            if self.route_progress_miles <= segment_end or index == len(self.route_segments) - 1:
+                segment_index = index
+                break
+            miles_before_segment = segment_end
+
         segment = self.route_segments[segment_index]
-        checkpoint_remaining = max(0.0, segment["length_miles"] - segment["cumulative_miles"][point_index])
-        later_remaining = sum(item["length_miles"] for item in self.route_segments[segment_index + 1:])
-        route_remaining = checkpoint_remaining + later_remaining
+        segment_progress = max(0.0, self.route_progress_miles - miles_before_segment)
+        checkpoint_remaining = max(0.0, segment["length_miles"] - segment_progress)
+        route_remaining = max(0.0, total_route_miles - self.route_progress_miles)
         eta = self._format_eta(checkpoint_remaining, speed_mph)
         route_name = " + ".join(segment["name"] for segment in self.route_segments)
 
         self.route_label.setText(
-            f"Route: {route_name} | next {segment['name']}: {checkpoint_remaining:.1f} mi | ETA {eta}"
+            f"Route: {route_name} | traveled {self.route_progress_miles:.1f} mi | "
+            f"remaining {route_remaining:.1f} mi | next {segment['name']}: "
+            f"{checkpoint_remaining:.1f} mi | ETA {eta}"
         )
 
         return {
             TelemetryKey.NAV_ROUTE_NAME.value[0]: route_name,
             TelemetryKey.NAV_CHECKPOINT_NAME.value[0]: segment["name"],
             TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0]: round(route_remaining, 2),
+            TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0]: round(self.route_progress_miles, 2),
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0]: round(checkpoint_remaining, 2),
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0]: eta,
         }
 
     def _build_navigation_metrics(self, speed_mph, update_laps=False, lat=None, lon=None):
-        metrics = self._build_route_metrics(speed_mph)
+        distance_increment = 0.0
         if update_laps and lat is not None and lon is not None:
-            self._update_lap_counter(lat, lon, speed_mph)
+            distance_increment = self._update_trip_distance(lat, lon, speed_mph)
+            if self.race_mode == self.RACE_MODE_FSGP:
+                self._update_lap_counter(
+                    lat,
+                    lon,
+                    speed_mph,
+                    distance_increment_miles=distance_increment,
+                )
+        metrics = self._build_route_metrics(speed_mph, lat=lat, lon=lon)
         metrics.update(self._build_lap_metrics())
+        metrics.update(self._build_distance_metrics())
         return metrics
 
     def _build_lap_metrics(self):
@@ -965,6 +1285,12 @@ class GPSMapTab(QWidget):
         if self.lap_started_at is not None:
             current_seconds = time.monotonic() - self.lap_started_at
         average_seconds = self._average_lap_seconds()
+        current_speed = self._current_lap_average_speed(current_seconds)
+        completed_speeds = self._completed_lap_average_speeds()
+        last_speed = completed_speeds[-1] if completed_speeds else None
+        numeric_speeds = [speed for speed in completed_speeds if speed is not None]
+        best_speed = max(numeric_speeds) if numeric_speeds else None
+        average_speed = self._average_completed_lap_speed()
         self._refresh_lap_label(current_seconds=current_seconds)
         return {
             TelemetryKey.NAV_LAP_COUNT.value[0]: self.lap_count,
@@ -972,7 +1298,14 @@ class GPSMapTab(QWidget):
             TelemetryKey.NAV_LAST_LAP_TIME.value[0]: self._format_duration(self.last_lap_seconds),
             TelemetryKey.NAV_BEST_LAP_TIME.value[0]: self._format_duration(self.best_lap_seconds),
             TelemetryKey.NAV_AVERAGE_LAP_TIME.value[0]: self._format_duration(average_seconds),
-            TelemetryKey.NAV_LAP_STATUS.value[0]: self.lap_status,
+            TelemetryKey.NAV_CURRENT_LAP_DISTANCE_MI.value[0]: round(self.current_lap_distance_miles, 3),
+            TelemetryKey.NAV_CURRENT_LAP_AVERAGE_SPEED_MPH.value[0]: self._rounded_or_na(current_speed),
+            TelemetryKey.NAV_LAST_LAP_AVERAGE_SPEED_MPH.value[0]: self._rounded_or_na(last_speed),
+            TelemetryKey.NAV_BEST_LAP_AVERAGE_SPEED_MPH.value[0]: self._rounded_or_na(best_speed),
+            TelemetryKey.NAV_AVERAGE_LAP_SPEED_MPH.value[0]: self._rounded_or_na(average_speed),
+            TelemetryKey.NAV_LAP_STATUS.value[0]: (
+                "ASC route mode" if self.race_mode == self.RACE_MODE_ASC else self.lap_status
+            ),
         }
 
     def _average_lap_seconds(self):
@@ -980,7 +1313,166 @@ class GPSMapTab(QWidget):
             return None
         return sum(self.completed_lap_seconds) / len(self.completed_lap_seconds)
 
-    def _update_lap_counter(self, lat, lon, speed_mph):
+    def _completed_lap_average_speeds(self):
+        speeds = []
+        for index, seconds in enumerate(self.completed_lap_seconds):
+            if seconds <= 0:
+                speeds.append(None)
+                continue
+            distance = self.track_lap_length_miles
+            if distance <= 0 and index < len(self.completed_lap_distances_miles):
+                distance = self.completed_lap_distances_miles[index]
+            speeds.append(distance * 3600.0 / seconds if distance > 0 else None)
+        return speeds
+
+    def _average_completed_lap_speed(self):
+        if len(self.completed_lap_seconds) < 3:
+            return None
+        total_seconds = sum(self.completed_lap_seconds)
+        if total_seconds <= 0:
+            return None
+        if self.track_lap_length_miles > 0:
+            total_distance = self.track_lap_length_miles * len(self.completed_lap_seconds)
+        else:
+            total_distance = sum(self.completed_lap_distances_miles)
+        return total_distance * 3600.0 / total_seconds if total_distance > 0 else None
+
+    def _current_lap_average_speed(self, current_seconds=None):
+        if current_seconds is None or current_seconds <= 0 or self.lap_started_at is None:
+            return None
+        if self.current_lap_distance_miles <= 0:
+            return None
+        return self.current_lap_distance_miles * 3600.0 / current_seconds
+
+    def _build_distance_metrics(self):
+        session_average = self._session_average_speed()
+        moving_average = self._day_moving_average_speed()
+        day_elapsed = self._day_elapsed_seconds()
+        stopped_seconds = max(0.0, day_elapsed - self.day_moving_seconds)
+        official_distance = self._fsgp_official_distance()
+        time_remaining, projected_laps, projected_distance = self._fsgp_projection()
+        self._refresh_distance_labels(session_average=session_average)
+        return {
+            TelemetryKey.NAV_RACE_MODE.value[0]: self.race_mode,
+            TelemetryKey.NAV_GPS_TRIP_DISTANCE_MI.value[0]: round(self.trip_distance_miles, 3),
+            TelemetryKey.NAV_SESSION_AVERAGE_SPEED_MPH.value[0]: self._rounded_or_na(session_average),
+            TelemetryKey.NAV_DAY_MOVING_AVERAGE_SPEED_MPH.value[0]: self._rounded_or_na(moving_average),
+            TelemetryKey.NAV_DAY_MAX_SPEED_MPH.value[0]: round(self.day_max_speed_mph, 2),
+            TelemetryKey.NAV_DAY_ELAPSED_TIME.value[0]: self._format_duration(day_elapsed),
+            TelemetryKey.NAV_DAY_MOVING_TIME.value[0]: self._format_duration(self.day_moving_seconds),
+            TelemetryKey.NAV_DAY_STOPPED_TIME.value[0]: self._format_duration(stopped_seconds),
+            TelemetryKey.NAV_FSGP_LAP_LENGTH_MI.value[0]: round(self.track_lap_length_miles, 3),
+            TelemetryKey.NAV_FSGP_OFFICIAL_DISTANCE_MI.value[0]: round(official_distance, 3),
+            TelemetryKey.NAV_FSGP_DAY_DURATION_H.value[0]: round(self.fsgp_day_duration_hours, 1),
+            TelemetryKey.NAV_FSGP_TIME_REMAINING.value[0]: self._format_duration(time_remaining),
+            TelemetryKey.NAV_FSGP_PROJECTED_TOTAL_LAPS.value[0]: (
+                "N/A" if projected_laps is None else projected_laps
+            ),
+            TelemetryKey.NAV_FSGP_PROJECTED_DISTANCE_MI.value[0]: self._rounded_or_na(
+                projected_distance, digits=2
+            ),
+        }
+
+    def _update_trip_distance(self, lat, lon, speed_mph):
+        """Accumulate filtered GPS distance and return this sample's increment."""
+        current_point = (lat, lon)
+        now = time.monotonic()
+        speed = max(0.0, self._safe_float(speed_mph))
+        self.day_max_speed_mph = max(self.day_max_speed_mph, speed)
+        if self.previous_trip_point is None or self.previous_trip_at is None:
+            self.previous_trip_point = current_point
+            self.previous_trip_at = now
+            if speed >= self.MINIMUM_DISTANCE_SPEED_MPH:
+                self.trip_started_at = now
+            return 0.0
+
+        elapsed = max(0.0, now - self.previous_trip_at)
+        segment_miles = self._haversine_miles(
+            self.previous_trip_point[0],
+            self.previous_trip_point[1],
+            lat,
+            lon,
+        )
+        self.previous_trip_point = current_point
+        self.previous_trip_at = now
+
+        if speed < self.MINIMUM_DISTANCE_SPEED_MPH:
+            return 0.0
+        if self.trip_started_at is None:
+            self.trip_started_at = now
+        elif elapsed <= self.MAX_MOVING_TIME_SAMPLE_GAP_SECONDS:
+            self.day_moving_seconds += elapsed
+
+        max_segment_miles = (
+            self.GPS_SEGMENT_BASE_TOLERANCE_MILES
+            + max(5.0, speed) * self.GPS_SEGMENT_SPEED_FACTOR * max(0.25, elapsed) / 3600.0
+        )
+        if segment_miles > max_segment_miles:
+            return 0.0
+
+        self.trip_distance_miles += segment_miles
+        return segment_miles
+
+    def _session_average_speed(self):
+        if self.trip_started_at is None or self.trip_distance_miles <= 0:
+            return None
+        elapsed = self._day_elapsed_seconds()
+        if elapsed <= 0:
+            return None
+        return self.trip_distance_miles * 3600.0 / elapsed
+
+    def _day_elapsed_seconds(self):
+        if self.trip_started_at is None:
+            return 0.0
+        return max(0.0, time.monotonic() - self.trip_started_at)
+
+    def _day_moving_average_speed(self):
+        if self.trip_distance_miles <= 0 or self.day_moving_seconds <= 0:
+            return None
+        return self.trip_distance_miles * 3600.0 / self.day_moving_seconds
+
+    def _fsgp_official_distance(self):
+        if self.track_lap_length_miles > 0:
+            return self.lap_count * self.track_lap_length_miles
+        return sum(self.completed_lap_distances_miles)
+
+    def _fsgp_projection(self):
+        if self.race_mode != self.RACE_MODE_FSGP or self.fsgp_day_duration_hours <= 0:
+            return None, None, None
+        scheduled_seconds = self.fsgp_day_duration_hours * 3600.0
+        remaining_seconds = max(0.0, scheduled_seconds - self._day_elapsed_seconds())
+        average_lap_seconds = self._average_lap_seconds()
+        if average_lap_seconds is None or average_lap_seconds <= 0:
+            return remaining_seconds, None, None
+
+        current_progress_seconds = 0.0
+        if self.lap_started_at is not None:
+            current_progress_seconds = min(
+                max(0.0, time.monotonic() - self.lap_started_at),
+                average_lap_seconds,
+            )
+        additional_laps = 0
+        if remaining_seconds > 0:
+            additional_laps = int(
+                (remaining_seconds + current_progress_seconds) // average_lap_seconds
+            )
+        projected_total_laps = self.lap_count + additional_laps
+
+        lap_distance = self.track_lap_length_miles
+        if lap_distance <= 0 and self.completed_lap_distances_miles:
+            lap_distance = sum(self.completed_lap_distances_miles) / len(
+                self.completed_lap_distances_miles
+            )
+        projected_distance = (
+            projected_total_laps * lap_distance if lap_distance > 0 else None
+        )
+        return remaining_seconds, projected_total_laps, projected_distance
+
+    @staticmethod
+    def _rounded_or_na(value, digits=2):
+        return "N/A" if value is None else round(value, digits)
+
+    def _update_lap_counter(self, lat, lon, speed_mph, distance_increment_miles=0.0):
         current_point = (lat, lon)
         if not self._lap_line_ready():
             self.previous_lap_point = current_point
@@ -998,38 +1490,80 @@ class GPSMapTab(QWidget):
             self.lap_status = "Waiting for movement"
             return
 
+        if self.lap_started_at is not None and distance_increment_miles > 0:
+            self.current_lap_distance_miles += distance_increment_miles
+
+        if (
+            self.lap_started_at is not None
+            and not self.lap_crossing_armed
+            and self._distance_to_lap_line_meters(current_point)
+            >= self.LAP_LINE_REARM_DISTANCE_METERS
+        ):
+            self.lap_crossing_armed = True
+
         crossed = self._movement_crossed_lap_line(self.previous_lap_point, current_point)
+        crossing_direction = self._lap_line_crossing_direction(self.previous_lap_point, current_point)
         self.previous_lap_point = current_point
         if not crossed:
             if self.lap_started_at is not None:
                 self.lap_status = "Timing"
             return
 
-        if self.last_crossing_at is not None and now - self.last_crossing_at < 8.0:
+        if not self.lap_crossing_armed:
+            self.lap_status = "Crossing ignored: lap gate not rearmed"
+            return
+
+        if (
+            self.lap_crossing_direction is not None
+            and crossing_direction != 0
+            and crossing_direction != self.lap_crossing_direction
+        ):
+            self.lap_crossing_armed = False
+            self.lap_status = "Crossing ignored: wrong direction"
+            return
+
+        if (
+            self.last_crossing_at is not None
+            and now - self.last_crossing_at < self.LAP_CROSSING_COOLDOWN_SECONDS
+        ):
             self.lap_status = "Crossing cooldown"
             return
 
         self.last_crossing_at = now
+        self.lap_crossing_armed = False
         if self.lap_started_at is None:
             self.lap_started_at = now
+            self.current_lap_distance_miles = 0.0
+            if crossing_direction != 0:
+                self.lap_crossing_direction = crossing_direction
             self.lap_status = "Timing started"
             return
 
         lap_seconds = now - self.lap_started_at
-        if lap_seconds < 10.0:
-            self.lap_status = "Lap ignored: too short"
+        if lap_seconds < self.MINIMUM_LAP_SECONDS:
+            self.lap_status = (
+                f"Lap ignored: under {self.MINIMUM_LAP_SECONDS:.0f} seconds"
+            )
             return
 
         self.lap_count += 1
         self.last_lap_seconds = lap_seconds
         self.completed_lap_seconds.append(lap_seconds)
+        self.completed_lap_distances_miles.append(self.current_lap_distance_miles)
         if self.best_lap_seconds is None or lap_seconds < self.best_lap_seconds:
             self.best_lap_seconds = lap_seconds
         self.lap_started_at = now
+        self.current_lap_distance_miles = 0.0
         self.lap_status = f"Lap {self.lap_count} complete"
 
     def _refresh_lap_label(self, current_seconds=None):
         if not hasattr(self, "lap_label"):
+            return
+        if self.race_mode == self.RACE_MODE_ASC:
+            self.lap_label.setText("Laps: paused in ASC route mode")
+            if hasattr(self, "lap_speed_label"):
+                self.lap_speed_label.setText("Lap speeds: N/A in ASC route mode")
+            self._refresh_compact_summary()
             return
         line_state = "line set" if self._lap_line_ready() else "set start/end line"
         current = self._format_duration(current_seconds)
@@ -1040,6 +1574,118 @@ class GPSMapTab(QWidget):
             f"Laps: {self.lap_count} | Current {current} | Last {last} | "
             f"Best {best} | Average {average} | {line_state} | {self.lap_status}"
         )
+        if hasattr(self, "lap_speed_label"):
+            completed_speeds = self._completed_lap_average_speeds()
+            current_speed = self._current_lap_average_speed(current_seconds)
+            last_speed = completed_speeds[-1] if completed_speeds else None
+            numeric_speeds = [speed for speed in completed_speeds if speed is not None]
+            best_speed = max(numeric_speeds) if numeric_speeds else None
+            average_speed = self._average_completed_lap_speed()
+            self.lap_speed_label.setText(
+                "Lap speeds: Current {} | Last {} | Best {} | Average {} | Current distance {:.3f} mi".format(
+                    self._format_speed(current_speed),
+                    self._format_speed(last_speed),
+                    self._format_speed(best_speed),
+                    self._format_speed(average_speed),
+                    self.current_lap_distance_miles,
+                )
+            )
+        self._refresh_compact_summary()
+
+    def _refresh_distance_labels(self, session_average=None):
+        if not hasattr(self, "distance_label"):
+            return
+        if session_average is None:
+            session_average = self._session_average_speed()
+        average_text = self._format_speed(session_average)
+        moving_average_text = self._format_speed(self._day_moving_average_speed())
+        elapsed_text = self._format_duration(self._day_elapsed_seconds())
+        moving_text = self._format_duration(self.day_moving_seconds)
+        if hasattr(self, "day_summary_label"):
+            self.day_summary_label.setText(
+                f"Day averages: Overall {average_text} | Moving {moving_average_text} | "
+                f"Max {self.day_max_speed_mph:.2f} mph | Elapsed {elapsed_text} | Moving {moving_text}"
+            )
+        if self.race_mode == self.RACE_MODE_ASC:
+            route_text = (
+                f"{self.route_progress_miles:.2f} mi"
+                if self.route_segments
+                else "no GPX loaded"
+            )
+            self.distance_label.setText(
+                f"Distance: GPS trip {self.trip_distance_miles:.2f} mi | "
+                f"ASC route progress {route_text} | Session average {average_text}"
+            )
+            if hasattr(self, "fsgp_projection_label"):
+                self.fsgp_projection_label.setText(
+                    "FSGP projection: paused in ASC route mode"
+                )
+            self._refresh_compact_summary()
+            return
+
+        source = (
+            f"{self.track_lap_length_miles:.3f} mi official lap"
+            if self.track_lap_length_miles > 0
+            else "filtered GPS laps"
+        )
+        self.distance_label.setText(
+            f"Distance: GPS trip {self.trip_distance_miles:.2f} mi | "
+            f"FSGP completed {self._fsgp_official_distance():.2f} mi | "
+            f"{source} | Session average {average_text}"
+        )
+        if hasattr(self, "fsgp_projection_label"):
+            time_remaining, projected_laps, projected_distance = self._fsgp_projection()
+            if self.fsgp_day_duration_hours <= 0:
+                projection_text = "set race-day duration"
+            elif projected_laps is None:
+                projection_text = (
+                    f"waiting for 3 completed laps | Time remaining "
+                    f"{self._format_duration(time_remaining)}"
+                )
+            else:
+                distance_text = (
+                    "N/A" if projected_distance is None else f"{projected_distance:.1f} mi"
+                )
+                projection_text = (
+                    f"{projected_laps} total laps possible | {distance_text} | "
+                    f"Time remaining {self._format_duration(time_remaining)}"
+                )
+            self.fsgp_projection_label.setText(f"FSGP projection: {projection_text}")
+        self._refresh_compact_summary()
+
+    def _refresh_compact_summary(self):
+        if not hasattr(self, "compact_summary_label"):
+            return
+        day_average = self._format_speed(self._session_average_speed())
+        if self.race_mode == self.RACE_MODE_ASC:
+            if self.route_segments:
+                route_total = sum(item["length_miles"] for item in self.route_segments)
+                route_progress = f"{self.route_progress_miles:.1f}/{route_total:.1f} mi"
+            else:
+                route_progress = "no GPX"
+            self.compact_summary_label.setText(
+                f"<b>ASC</b> &nbsp; Route {route_progress} &nbsp;|&nbsp; "
+                f"GPS trip {self.trip_distance_miles:.1f} mi &nbsp;|&nbsp; "
+                f"Day average {day_average}"
+            )
+            return
+
+        current_seconds = (
+            None if self.lap_started_at is None else time.monotonic() - self.lap_started_at
+        )
+        _remaining, projected_laps, _projected_distance = self._fsgp_projection()
+        projection = "--" if projected_laps is None else str(projected_laps)
+        self.compact_summary_label.setText(
+            f"<b>FSGP</b> &nbsp; Lap {self.lap_count} &nbsp;|&nbsp; "
+            f"Current {self._format_duration(current_seconds)} &nbsp;|&nbsp; "
+            f"Day average {day_average} &nbsp;|&nbsp; "
+            f"Official {self._fsgp_official_distance():.1f} mi &nbsp;|&nbsp; "
+            f"Projected laps {projection}"
+        )
+
+    @staticmethod
+    def _format_speed(speed):
+        return "N/A" if speed is None else f"{speed:.2f} mph"
 
     def _lap_line_ready(self):
         return self.lap_start_point is not None and self.lap_end_point is not None
@@ -1052,6 +1698,50 @@ class GPSMapTab(QWidget):
         c = self._project_to_meters(self.lap_start_point, ref_lat, ref_lon)
         d = self._project_to_meters(self.lap_end_point, ref_lat, ref_lon)
         return self._segments_intersect(a, b, c, d)
+
+    def _lap_line_crossing_direction(self, previous_point, current_point):
+        """Return the side-to-side direction of a lap-line crossing."""
+        ref_lat = (self.lap_start_point[0] + self.lap_end_point[0]) / 2.0
+        ref_lon = (self.lap_start_point[1] + self.lap_end_point[1]) / 2.0
+        start = self._project_to_meters(self.lap_start_point, ref_lat, ref_lon)
+        end = self._project_to_meters(self.lap_end_point, ref_lat, ref_lon)
+        previous = self._project_to_meters(previous_point, ref_lat, ref_lon)
+        current = self._project_to_meters(current_point, ref_lat, ref_lon)
+
+        def side(point):
+            return (
+                (end[0] - start[0]) * (point[1] - start[1])
+                - (end[1] - start[1]) * (point[0] - start[0])
+            )
+
+        previous_side = side(previous)
+        current_side = side(current)
+        if previous_side < 0.0 < current_side:
+            return 1
+        if previous_side > 0.0 > current_side:
+            return -1
+        return 0
+
+    def _distance_to_lap_line_meters(self, point):
+        """Return the shortest distance from a GPS point to the timing segment."""
+        ref_lat = (self.lap_start_point[0] + self.lap_end_point[0] + point[0]) / 3.0
+        ref_lon = (self.lap_start_point[1] + self.lap_end_point[1] + point[1]) / 3.0
+        start = self._project_to_meters(self.lap_start_point, ref_lat, ref_lon)
+        end = self._project_to_meters(self.lap_end_point, ref_lat, ref_lon)
+        projected_point = self._project_to_meters(point, ref_lat, ref_lon)
+        line_x = end[0] - start[0]
+        line_y = end[1] - start[1]
+        line_length_squared = line_x * line_x + line_y * line_y
+        if line_length_squared <= 0.0:
+            return math.hypot(projected_point[0] - start[0], projected_point[1] - start[1])
+        fraction = (
+            (projected_point[0] - start[0]) * line_x
+            + (projected_point[1] - start[1]) * line_y
+        ) / line_length_squared
+        fraction = max(0.0, min(1.0, fraction))
+        nearest_x = start[0] + fraction * line_x
+        nearest_y = start[1] + fraction * line_y
+        return math.hypot(projected_point[0] - nearest_x, projected_point[1] - nearest_y)
 
     @staticmethod
     def _project_to_meters(point, ref_lat, ref_lon):
@@ -1112,17 +1802,46 @@ class GPSMapTab(QWidget):
             return default
 
     def _nearest_route_position(self, lat, lon):
-        # This intentionally checks the sampled GPX points directly. It is
-        # simple and predictable for modest route files; drawing is separately
-        # downsampled so visual rendering stays responsive for large GPX files.
+        if not self.route_flat_positions:
+            self.route_flat_positions = [
+                (segment_index, point_index, point)
+                for segment_index, segment in enumerate(self.route_segments)
+                for point_index, point in enumerate(segment["points"])
+            ]
+        if not self.route_flat_positions:
+            return None
+
+        # ASC route files can contain many thousands of points. After the first
+        # fix, search near the last match and only fall back to the full route
+        # if the car is more than two miles from that local window.
+        start = 0
+        end = len(self.route_flat_positions)
+        if self.race_mode == self.RACE_MODE_ASC and self.route_last_flat_index is not None:
+            start = max(0, self.route_last_flat_index - 500)
+            end = min(len(self.route_flat_positions), self.route_last_flat_index + 501)
+
         best = None
+        best_flat_index = None
         best_distance = float("inf")
-        for segment_index, segment in enumerate(self.route_segments):
-            for point_index, point in enumerate(segment["points"]):
+        for flat_index in range(start, end):
+            segment_index, point_index, point = self.route_flat_positions[flat_index]
+            distance = self._haversine_miles(lat, lon, point[0], point[1])
+            if distance < best_distance:
+                best_distance = distance
+                best = (segment_index, point_index)
+                best_flat_index = flat_index
+
+        if (start != 0 or end != len(self.route_flat_positions)) and best_distance > 2.0:
+            best = None
+            best_flat_index = None
+            best_distance = float("inf")
+            for flat_index, (segment_index, point_index, point) in enumerate(self.route_flat_positions):
                 distance = self._haversine_miles(lat, lon, point[0], point[1])
                 if distance < best_distance:
                     best_distance = distance
                     best = (segment_index, point_index)
+                    best_flat_index = flat_index
+        self.route_last_flat_index = best_flat_index
         return best
 
     @staticmethod

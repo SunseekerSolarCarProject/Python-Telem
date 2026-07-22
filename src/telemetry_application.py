@@ -160,6 +160,12 @@ class TelemetryApplication(QObject):
             initial_used_ah=self.used_Ah,
             max_sample_gap_seconds=5.0,
         )
+        # Break-even learning is refreshed in batches so predictions improve
+        # during a drive without fitting a forest on every telemetry row.
+        self._break_even_auto_retrain_lock = threading.Lock()
+        self._break_even_auto_retrain_in_progress = False
+        self._break_even_labels_pending = 0
+        self.break_even_auto_retrain_batch_rows = 20
         self.config_data_copy = None  # Initialize to store config data
         self.storage_folder = storage_folder
         self.log_file_path = log_file_path or (os.path.join(self.storage_folder, "telemetry_application.log") if self.storage_folder else None)
@@ -366,6 +372,37 @@ class TelemetryApplication(QObject):
             TelemetryKey.NAV_SATS_USED.value[0],
             TelemetryKey.NAV_SATS_USED_VALID.value[0],
             TelemetryKey.NAV_SATS_USED_AGE_MS.value[0],
+            TelemetryKey.NAV_ROUTE_NAME.value[0],
+            TelemetryKey.NAV_CHECKPOINT_NAME.value[0],
+            TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0],
+            TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0],
+            TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0],
+            TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
+            TelemetryKey.NAV_RACE_MODE.value[0],
+            TelemetryKey.NAV_GPS_TRIP_DISTANCE_MI.value[0],
+            TelemetryKey.NAV_SESSION_AVERAGE_SPEED_MPH.value[0],
+            TelemetryKey.NAV_DAY_MOVING_AVERAGE_SPEED_MPH.value[0],
+            TelemetryKey.NAV_DAY_MAX_SPEED_MPH.value[0],
+            TelemetryKey.NAV_DAY_ELAPSED_TIME.value[0],
+            TelemetryKey.NAV_DAY_MOVING_TIME.value[0],
+            TelemetryKey.NAV_DAY_STOPPED_TIME.value[0],
+            TelemetryKey.NAV_FSGP_LAP_LENGTH_MI.value[0],
+            TelemetryKey.NAV_FSGP_OFFICIAL_DISTANCE_MI.value[0],
+            TelemetryKey.NAV_FSGP_DAY_DURATION_H.value[0],
+            TelemetryKey.NAV_FSGP_TIME_REMAINING.value[0],
+            TelemetryKey.NAV_FSGP_PROJECTED_TOTAL_LAPS.value[0],
+            TelemetryKey.NAV_FSGP_PROJECTED_DISTANCE_MI.value[0],
+            TelemetryKey.NAV_LAP_COUNT.value[0],
+            TelemetryKey.NAV_CURRENT_LAP_TIME.value[0],
+            TelemetryKey.NAV_LAST_LAP_TIME.value[0],
+            TelemetryKey.NAV_BEST_LAP_TIME.value[0],
+            TelemetryKey.NAV_AVERAGE_LAP_TIME.value[0],
+            TelemetryKey.NAV_CURRENT_LAP_DISTANCE_MI.value[0],
+            TelemetryKey.NAV_CURRENT_LAP_AVERAGE_SPEED_MPH.value[0],
+            TelemetryKey.NAV_LAST_LAP_AVERAGE_SPEED_MPH.value[0],
+            TelemetryKey.NAV_BEST_LAP_AVERAGE_SPEED_MPH.value[0],
+            TelemetryKey.NAV_AVERAGE_LAP_SPEED_MPH.value[0],
+            TelemetryKey.NAV_LAP_STATUS.value[0],
             TelemetryKey.IMU_G_VALID.value[0],
             TelemetryKey.IMU_G_CALIBRATED.value[0],
             TelemetryKey.IMU_G_MOUNT_VALID.value[0],
@@ -570,8 +607,10 @@ class TelemetryApplication(QObject):
 
     def init_machine_learning(self):
         """
-        Create the ML model object but DO NOT train yet.
-        Training will only occur when the user clicks "Retrain...".
+        Create the ML model object and load any compatible saved models.
+
+        Manual retraining remains available; break-even also retrains in the
+        background after enough new steady-state labels have accumulated.
         """
         # Keep model artifacts beside the active CSV data so packaged/source
         # runs do not accidentally share incompatible model files.
@@ -1296,6 +1335,62 @@ class TelemetryApplication(QObject):
             # signal the GUI (with or without an error) so it can re-enable the button
             self.training_complete_signal.emit(error)
 
+    def _note_break_even_training_result(self, result):
+        """Queue background retraining after enough new steady-state labels."""
+        if not isinstance(result, dict) or not result.get("break_even_label_written"):
+            return
+        with self._break_even_auto_retrain_lock:
+            self._break_even_labels_pending += 1
+        self._start_break_even_auto_retrain_if_ready()
+
+    def _start_break_even_auto_retrain_if_ready(self):
+        with self._break_even_auto_retrain_lock:
+            if (
+                self._break_even_auto_retrain_in_progress
+                or self._break_even_labels_pending < self.break_even_auto_retrain_batch_rows
+            ):
+                return
+            self._break_even_auto_retrain_in_progress = True
+            self._break_even_labels_pending -= self.break_even_auto_retrain_batch_rows
+
+        worker = threading.Thread(
+            target=self._auto_retrain_break_even_model,
+            name="break-even-auto-retrain",
+            daemon=True,
+        )
+        worker.start()
+
+    def _auto_retrain_break_even_model(self):
+        """Fit and atomically replace the break-even model off the GUI thread."""
+        training_path = self.csv_handler.get_training_data_csv_path()
+        succeeded = False
+        try:
+            # Avoid reading a half-written CSV row while telemetry continues.
+            with self.csv_handler.lock:
+                succeeded = bool(self.ml_model.train_break_even_model(training_path))
+            if succeeded:
+                metadata = self.ml_model.be_meta or {}
+                validation = metadata.get("validation") or {}
+                self.logger.info(
+                    "Break-even model auto-retrained from %s rows (MAE=%s mph).",
+                    metadata.get("row_count", "unknown"),
+                    validation.get("mae_mph", "N/A"),
+                )
+            else:
+                self.logger.warning(
+                    "Break-even auto-retrain skipped because training data was insufficient."
+                )
+        except Exception as exc:
+            self.logger.error(f"Break-even auto-retrain failed: {exc}")
+        finally:
+            with self._break_even_auto_retrain_lock:
+                if not succeeded:
+                    # Preserve the batch count so the next valid label retries.
+                    self._break_even_labels_pending += self.break_even_auto_retrain_batch_rows
+                self._break_even_auto_retrain_in_progress = False
+            if succeeded:
+                self._start_break_even_auto_retrain_if_ready()
+
     def on_training_complete(self, error=None):
         """Show the training result and restore the retrain button."""
         if error:
@@ -1601,10 +1696,13 @@ class TelemetryApplication(QObject):
                         ),
                     }
 
-                    # --- build exactly the 2 inputs your break-even RF expects ---
+                    # The break-even RF learns steady motor power versus speed.
+                    # Query that road-load curve with current net array power.
                     feat_be = {
-                        'BP_PVS_milliamp*s': feat_batt['BP_PVS_milliamp*s'],
-                        'BP_PVS_Voltage':    feat_batt['BP_PVS_Voltage'],
+                        'BreakEven_Power_W': combined_data.get(
+                            'Array_Estimated_Power_W'
+                        ),
+                        'BP_PVS_Voltage': feat_batt['BP_PVS_Voltage'],
                     }
 
                     # --- battery-life prediction + diagnostics ---
@@ -1673,7 +1771,8 @@ class TelemetryApplication(QObject):
                         # history, training data, and external storage.
                         csv_row = self._build_primary_csv_row(combined_data)
                         self.csv_handler.append_to_csv(self.csv_handler.get_csv_file_path(), csv_row)
-                        self.buffer.save_training_data()
+                        training_result = self.buffer.save_training_data()
+                        self._note_break_even_training_result(training_result)
 
                     # --- emit to GUI & server ---
                     self.update_data_signal.emit(combined_data)

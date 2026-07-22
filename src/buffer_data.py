@@ -2,12 +2,26 @@
 
 import time
 import os
+import math
+from collections import deque
 from datetime import datetime
 import logging
 from extra_calculations import ExtraCalculations
 from key_name_definitions import TelemetryKey
 
 class BufferData:
+    ARRAY_ESTIMATE_WINDOW_FRAMES = 5
+    MIN_BREAK_EVEN_SPEED_MPH = 5.0
+    BREAK_EVEN_MAX_ABS_FORWARD_G = 0.03
+    ARRAY_SOURCE_FIELDS = (
+        'MC1BUS_Voltage',
+        'MC1BUS_Current',
+        'MC2BUS_Voltage',
+        'MC2BUS_Current',
+        'BP_ISH_Amps',
+        'BP_PVS_Voltage',
+    )
+
     def __init__(self, csv_handler, csv_headers, secondary_csv_headers, buffer_size, buffer_timeout):
         """
         Initializes the BufferData with the given parameters and CSVHandler.
@@ -29,6 +43,17 @@ class BufferData:
         self.raw_data_buffer = []  # Holds raw hex data entries for secondary CSV
         self.last_flush_time = time.time()
         self.combined_data = {}  # Holds the latest values for each telemetry field
+        # Array power is a balance across four separate packets. Keep the
+        # current frame separate from the latest-known display snapshot so a
+        # mid-frame buffer flush cannot combine new motor currents with an old
+        # battery current. BP_PVS is the final source packet in each firmware
+        # telemetry frame and closes this candidate frame.
+        self._array_frame_data = {}
+        self._array_power_balance_samples = deque(
+            maxlen=self.ARRAY_ESTIMATE_WINDOW_FRAMES
+        )
+        self._array_estimate_generation = 0
+        self._last_training_array_generation = 0
         self.logger.info(f"BufferData initialized with buffer_size={buffer_size}, buffer_timeout={buffer_timeout}")
 
     def add_data(self, data):
@@ -58,10 +83,90 @@ class BufferData:
 
         :param new_data: Dictionary containing new telemetry data.
         """
+        # An externally cleared combined snapshot denotes a new session; do not
+        # let a partial array frame survive that reset.
+        if not self.combined_data:
+            self._array_frame_data.clear()
+            self._array_power_balance_samples.clear()
+            self._array_estimate_generation = 0
+            self._last_training_array_generation = 0
+
         # Each serial line only carries a small slice of the car state. This
         # dictionary is the latest-known snapshot assembled across many lines.
         self.combined_data.update(new_data)
+
+        array_updates = {
+            field: new_data[field]
+            for field in self.ARRAY_SOURCE_FIELDS
+            if field in new_data
+        }
+        if array_updates:
+            self._array_frame_data.update(array_updates)
+
+        # BP_PVS follows both controller bus packets and BP_ISH in the firmware
+        # frame. Calculate only at this boundary. If a required packet was
+        # absent, compute_array_insights publishes N/A and the incomplete frame
+        # is discarded instead of borrowing a stale value from an older frame.
+        if 'BP_PVS_Voltage' in new_data:
+            self._publish_completed_array_frame()
+            self._array_frame_data.clear()
         self.logger.debug(f"Combined data updated with: {new_data}")
+
+    def _publish_completed_array_frame(self):
+        """Publish a synchronized, latency-smoothed array power estimate."""
+        insights = self.extra_calculations.compute_array_insights(self._array_frame_data)
+        power_balance = self.extra_calculations.safe_float(
+            insights.get('Array_Power_Balance_W')
+        )
+        pack_voltage = self.extra_calculations.safe_float(
+            self._array_frame_data.get('BP_PVS_Voltage')
+        )
+
+        if (
+            power_balance is None
+            or not math.isfinite(power_balance)
+            or pack_voltage is None
+            or not math.isfinite(pack_voltage)
+            or pack_voltage <= 0
+        ):
+            # A broken frame also breaks continuity of the smoothing window.
+            # Require a fresh run of complete frames before publishing again.
+            self._array_power_balance_samples.clear()
+            self.combined_data.update(insights)
+            return
+
+        # Controller current responds faster than the battery shunt during load
+        # changes. Averaging the signed balance lets the later low/negative
+        # residual cancel the earlier positive spike. This is a temporal filter,
+        # not a wattage limit; sustained high generation remains high.
+        self._array_power_balance_samples.append(power_balance)
+        sample_count = len(self._array_power_balance_samples)
+        if sample_count < self.ARRAY_ESTIMATE_WINDOW_FRAMES:
+            insights['Array_Estimated_Current_A'] = 'N/A'
+            insights['Array_Estimated_Power_W'] = 'N/A'
+            insights['Array_Estimated_Power_kW'] = 'N/A'
+            insights['Array_Estimate_Status'] = (
+                f'Stabilizing: {sample_count}/{self.ARRAY_ESTIMATE_WINDOW_FRAMES} synchronized frames'
+            )
+            self.combined_data.update(insights)
+            return
+
+        averaged_balance = sum(self._array_power_balance_samples) / sample_count
+        if averaged_balance < -50.0:
+            insights['Array_Estimated_Current_A'] = 'N/A'
+            insights['Array_Estimated_Power_W'] = 'N/A'
+            insights['Array_Estimated_Power_kW'] = 'N/A'
+            insights['Array_Estimate_Status'] = 'Invalid: averaged negative power balance'
+        else:
+            estimated_power = max(0.0, averaged_balance)
+            insights['Array_Estimated_Current_A'] = estimated_power / pack_voltage
+            insights['Array_Estimated_Power_W'] = estimated_power
+            insights['Array_Estimated_Power_kW'] = estimated_power / 1000.0
+            insights['Array_Estimate_Status'] = (
+                f'Estimated: synchronized {self.ARRAY_ESTIMATE_WINDOW_FRAMES}-frame average'
+            )
+            self._array_estimate_generation += 1
+        self.combined_data.update(insights)
 
     def is_ready_to_flush(self):
         """
@@ -169,10 +274,6 @@ class BufferData:
         motor_insights = self.extra_calculations.compute_motor_insights(self.combined_data)
         if motor_insights:
             self.combined_data.update(motor_insights)
-        array_insights = self.extra_calculations.compute_array_insights(self.combined_data)
-        if array_insights:
-            self.combined_data.update(array_insights)
-
         self.logger.debug(f"Combined data with battery info: {self.combined_data}")
 
         if write_to_csv:
@@ -217,7 +318,8 @@ class BufferData:
     def save_training_data(self):
         """
         Saves the combined data into a CSV file for training purposes.
-        Only writes a row if all required features & targets are numeric.
+        Battery-life rows require their numeric features and target. Break-even
+        labels are optional and are written only for steady-state driving.
         """
         if not self.combined_data:
             self.logger.debug("No combined data to save for training.")
@@ -230,18 +332,49 @@ class BufferData:
         pvs_v    = self.safe_float(self.combined_data.get('BP_PVS_Voltage', None), default=None)
 
         used_time = self.safe_float(self.combined_data.get('Used_Ah_Remaining_Time', None), default=None)
-        # for break-even, use actual speed as label
-        speed     = self.safe_float(self.combined_data.get('MC1VEL_Speed', None), default=None)
-
-        # skip if any required is missing
-        if None in (pvs_ma_s, pvs_ah, pvs_v, used_time, speed):
+        # Battery-life rows do not require a break-even label. The speed model
+        # learns road load only while moving with near-zero longitudinal
+        # acceleration, excluding launch and braking power.
+        if None in (pvs_ma_s, pvs_ah, pvs_v, used_time):
             self.logger.debug("Skipping training row—incomplete data.")
-            return
+            return {"row_written": False, "break_even_label_written": False}
+
+        speed = self.safe_float(self.combined_data.get('MC1VEL_Speed'), default=None)
+        array_power = self.safe_float(
+            self.combined_data.get('Array_Estimated_Power_W'), default=None
+        )
+        motor_power = self.safe_float(
+            self.combined_data.get('Motors_Total_Bus_Power_W'), default=None
+        )
+        forward_g = self.safe_float(
+            self.combined_data.get('IMU_FORWARD_G'), default=None
+        )
+        imu_valid = self.safe_float(
+            self.combined_data.get('IMU_G_VALID'), default=None
+        )
+        array_status = str(self.combined_data.get('Array_Estimate_Status', ''))
+        has_new_array_frame = (
+            self._array_estimate_generation > self._last_training_array_generation
+        )
+        break_even_eligible = (
+            has_new_array_frame
+            and speed is not None
+            and speed >= self.MIN_BREAK_EVEN_SPEED_MPH
+            and motor_power is not None
+            and math.isfinite(motor_power)
+            and motor_power > 0.0
+            and forward_g is not None
+            and abs(forward_g) <= self.BREAK_EVEN_MAX_ABS_FORWARD_G
+            and imu_valid == 1
+            and array_power is not None
+            and math.isfinite(array_power)
+            and array_status.startswith('Estimated: synchronized')
+        )
 
         training_data_path = self.csv_handler.get_training_data_csv_path()
         if not training_data_path:
             self.logger.error("Training data CSV path is not set. Cannot save training data.")
-            return
+            return {"row_written": False, "break_even_label_written": False}
         training_entry = {
             # battery-life inputs
             'BP_PVS_milliamp*s': pvs_ma_s,
@@ -249,12 +382,22 @@ class BufferData:
             'BP_PVS_Voltage'   : pvs_v,
             # battery-life target
             'Used_Ah_Remaining_Time': used_time,
-            # break-even inputs (same PV fields)
-            'BreakEvenSpeed': speed
+            # Break-even learns from synchronized array power and only receives
+            # a motor-power/speed label during steady-state driving. At runtime,
+            # current net array power is queried against this learned road load.
+            'Array_Estimated_Power_W': array_power if array_power is not None else 'N/A',
+            'BreakEven_Power_W': motor_power if break_even_eligible else 'N/A',
+            'BreakEvenSpeed': speed if break_even_eligible else 'N/A',
         }
 
         self.csv_handler.append_to_csv(training_data_path, training_entry)
+        if has_new_array_frame:
+            self._last_training_array_generation = self._array_estimate_generation
         self.logger.info(f"Training data saved to {training_data_path}")
+        return {
+            "row_written": True,
+            "break_even_label_written": break_even_eligible,
+        }
 
     def safe_float(self, value, default=0.0):
         """

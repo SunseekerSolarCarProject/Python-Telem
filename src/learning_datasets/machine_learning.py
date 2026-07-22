@@ -3,7 +3,7 @@
 """
 MachineLearningModel for solar-car telemetry:
  1. Battery life prediction using integrated PV current
- 2. Break-even speed prediction using integrated PV current
+ 2. Break-even speed prediction from the learned steady-state road-load curve
 
 The app trains these models locally from training_data.csv and stores the fitted
 pipelines as .pkl files beside the active application data. Runtime prediction
@@ -13,14 +13,16 @@ uncertainty, stale/unfitted flags, or out-of-range warnings without guessing.
 
 import os
 import logging
+import threading
 import joblib
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.exceptions import NotFittedError
+from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.utils.validation import check_is_fitted
 from sklearn.base import TransformerMixin, BaseEstimator
 
@@ -53,7 +55,7 @@ class MachineLearningModel:
     """
     Encapsulates both:
       - Battery life:   RF([PV_Ah, PV_V]) -> Used_Ah_Remaining_Time
-      - Break-even:     RF([PV_mA_s, PV_V])       -> BreakEvenSpeed
+      - Break-even:     RF([propulsion power, pack V]) -> sustainable speed
     """
     # The canonical sparse training schema. Full telemetry CSVs are normalized
     # down to exactly these columns before training model artifacts.
@@ -62,6 +64,8 @@ class MachineLearningModel:
         'BP_PVS_Ah',
         'BP_PVS_Voltage',
         'Used_Ah_Remaining_Time',
+        'Array_Estimated_Power_W',
+        'BreakEven_Power_W',
         'BreakEvenSpeed',
     ]
     # Full telemetry exports may not have BreakEvenSpeed yet. These fields are
@@ -77,11 +81,18 @@ class MachineLearningModel:
     # normal pack-voltage range. Do not report PVS voltage extrapolation until
     # it falls below this known operational floor.
     PVS_VOLTAGE_QUALITY_MIN = 100.0
+    BREAK_EVEN_FEATURES = ['BreakEven_Power_W', 'BP_PVS_Voltage']
+    BREAK_EVEN_MODEL_VERSION = 2
+    MIN_BREAK_EVEN_TRAINING_ROWS = 20
+    MIN_BREAK_EVEN_SPEED_MPH = 5.0
+    STEADY_STATE_MAX_ABS_FORWARD_G = 0.03
 
     def __init__(self, model_dir: str = None):
         # --- Logger ---
         self.log = logging.getLogger(self.__class__.__name__)
         self.log.setLevel(logging.INFO)
+        self._model_lock = threading.RLock()
+        self._training_lock = threading.Lock()
 
         # --- Model directory & paths ---
         base = os.path.dirname(os.path.abspath(__file__))
@@ -108,7 +119,13 @@ class MachineLearningModel:
         # Startup should prefer existing fitted .pkl files. If a model is
         # missing/corrupt and training_data.csv exists, attempt a local rebuild.
         self._load_or_train(self.batt_pipe, self.batt_path, self.train_battery_life_model, self.batt_meta)
-        self._load_or_train(self.be_pipe,   self.be_path,   self.train_break_even_model,   self.be_meta)
+        self._load_or_train(
+            self.be_pipe,
+            self.be_path,
+            self.train_break_even_model,
+            self.be_meta,
+            expected_model_version=self.BREAK_EVEN_MODEL_VERSION,
+        )
 
 
     def _load_model_bundle(self, obj):
@@ -126,7 +143,14 @@ class MachineLearningModel:
         return pipeline, meta
 
 
-    def _load_or_train(self, pipe: Pipeline, path: str, train_fn, meta_target: dict):
+    def _load_or_train(
+        self,
+        pipe: Pipeline,
+        path: str,
+        train_fn,
+        meta_target: dict,
+        expected_model_version: int | None = None,
+    ):
         """
         If a fitted model exists at `path`, load it.
         Otherwise, retrain by calling `train_fn(...)` on training_data.csv.
@@ -135,6 +159,14 @@ class MachineLearningModel:
             try:
                 loaded = joblib.load(path)
                 pipeline, meta = self._load_model_bundle(loaded)
+                if (
+                    expected_model_version is not None
+                    and meta.get("model_version") != expected_model_version
+                ):
+                    raise ValueError(
+                        f"Model version {meta.get('model_version')} is incompatible with "
+                        f"required version {expected_model_version}"
+                    )
                 check_is_fitted(pipeline)
                 # Replace pipeline steps in place so existing object references
                 # remain valid for the application.
@@ -258,7 +290,7 @@ class MachineLearningModel:
         meta = {
             "feature_ranges": self._collect_feature_ranges(X, feats),
             "target_stats": self._target_stats(y),
-            "trained_at": datetime.utcnow().isoformat(timespec='seconds') + "Z",
+            "trained_at": datetime.now(timezone.utc).isoformat(timespec='seconds'),
         }
         # Save both the fitted pipeline and its metadata together. Legacy loaders
         # still accept pipeline-only dumps, but metadata powers quality flags.
@@ -353,32 +385,37 @@ class MachineLearningModel:
     def _build_break_even_pipeline(self):
         """
         Pipeline:
-          - smooth PV_mA_s, PV_V
-          - RandomForestRegressor
+          - RandomForestRegressor(propulsion power, pack voltage)
         """
-        self.be_pipe = Pipeline([
-            ('smooth', MovingAverage(window=5, cols=[
-                'BP_PVS_milliamp*s',
-                'BP_PVS_Voltage'
-            ])),
+        self.be_pipe = self._new_break_even_pipeline()
+
+    @staticmethod
+    def _new_break_even_pipeline():
+        # Training uses measured steady-state motor power. Runtime prediction
+        # places synchronized net array power into that same generic propulsion-
+        # power feature to ask what steady speed the available power can sustain.
+        return Pipeline([
             ('rf', RandomForestRegressor(
-                # Keep hyperparameters aligned with the battery model so both
-                # predictors retrain quickly and expose comparable uncertainty.
                 n_estimators=100,
-                min_samples_leaf=5,
+                min_samples_leaf=3,
                 random_state=42
             ))
         ])
 
 
     def train_break_even_model(self, csv_path: str):
+        """Serialize manual and automatic break-even training runs."""
+        with self._training_lock:
+            return self._train_break_even_model_unlocked(csv_path)
+
+    def _train_break_even_model_unlocked(self, csv_path: str):
         """
         Train break-even model:
-          features = [ 'BP_PVS_milliamp*s', 'BP_PVS_Voltage' ]
-          target   =   'BreakEvenSpeed'
+          features = [ 'BreakEven_Power_W', 'BP_PVS_Voltage' ]
+          target   = observed speed during steady-state driving
         """
         df = pd.read_csv(csv_path)
-        feats  = ['BP_PVS_milliamp*s', 'BP_PVS_Voltage']
+        feats = self.BREAK_EVEN_FEATURES
         target = 'BreakEvenSpeed'
 
         missing = [c for c in feats + [target] if c not in df.columns]
@@ -388,25 +425,56 @@ class MachineLearningModel:
             self.log.warning(f"Skipping break-even training, missing required columns: {missing}")
             return
 
+        for column in feats + [target]:
+            df[column] = pd.to_numeric(df[column], errors='coerce')
         df = self._clean_data(df, feats + [target])
-        if df.empty:
-            self.log.error("Break-even training skipped: no valid numeric rows after cleaning.")
+        if len(df) < self.MIN_BREAK_EVEN_TRAINING_ROWS:
+            self.log.error(
+                "Break-even training skipped: "
+                f"{len(df)} valid steady-state rows; "
+                f"need at least {self.MIN_BREAK_EVEN_TRAINING_ROWS}."
+            )
             return False
         X = df[feats]
         y = df[target]
 
-        # Break-even currently learns the selected speed label from PV context.
-        # If a future strategy module calculates a true energy-neutral speed,
-        # that value should become the BreakEvenSpeed target before this fit.
-        self.be_pipe.fit(X, y)
+        # Evaluate chronologically so later telemetry is not leaked into the
+        # validation window, then refit on every valid row for live use.
+        split_index = max(1, min(len(df) - 1, int(len(df) * 0.8)))
+        validation_pipe = self._new_break_even_pipeline()
+        validation_pipe.fit(X.iloc[:split_index], y.iloc[:split_index])
+        validation_predictions = validation_pipe.predict(X.iloc[split_index:])
+        validation_target = y.iloc[split_index:]
+        validation = {
+            "rows": int(len(validation_target)),
+            "mae_mph": float(mean_absolute_error(validation_target, validation_predictions)),
+            "r2": (
+                float(r2_score(validation_target, validation_predictions))
+                if len(validation_target) >= 2
+                else None
+            ),
+        }
+
+        candidate_pipe = self._new_break_even_pipeline()
+        candidate_pipe.fit(X, y)
         meta = {
             "feature_ranges": self._collect_feature_ranges(X, feats),
             "target_stats": self._target_stats(y),
-            "trained_at": datetime.utcnow().isoformat(timespec='seconds') + "Z",
+            "trained_at": datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            "row_count": int(len(df)),
+            "model_version": self.BREAK_EVEN_MODEL_VERSION,
+            "features": list(feats),
+            "label_definition": (
+                "Observed vehicle speed while moving with absolute forward "
+                f"acceleration <= {self.STEADY_STATE_MAX_ABS_FORWARD_G:.2f} g"
+            ),
+            "validation": validation,
         }
-        joblib.dump({"pipeline": self.be_pipe, "meta": meta}, self.be_path)
-        self.be_meta.clear()
-        self.be_meta.update(meta)
+        joblib.dump({"pipeline": candidate_pipe, "meta": meta}, self.be_path)
+        with self._model_lock:
+            self.be_pipe = candidate_pipe
+            self.be_meta.clear()
+            self.be_meta.update(meta)
         self.log.info(f"Trained break-even model -> {self.be_path}")
         return True
 
@@ -414,9 +482,9 @@ class MachineLearningModel:
     def predict_break_even_speed_details(self, data: dict) -> dict:
         """
         Predict break-even speed (mph) given:
-          data['BP_PVS_milliamp*s'], data['BP_PVS_Voltage']
+          data['BreakEven_Power_W'], data['BP_PVS_Voltage']
         """
-        feats = ['BP_PVS_milliamp*s', 'BP_PVS_Voltage']
+        feats = self.BREAK_EVEN_FEATURES
         details = {
             # Same structured response shape as battery-life predictions so one
             # diagnostics class can summarize both models consistently.
@@ -450,7 +518,9 @@ class MachineLearningModel:
 
         row = pd.DataFrame([values], columns=feats)
         try:
-            pred, sigma = self._predict_with_uncertainty(self.be_pipe, row)
+            with self._model_lock:
+                pred, sigma = self._predict_with_uncertainty(self.be_pipe, row)
+                ranges = dict(self.be_meta.get("feature_ranges", {}))
         except NotFittedError:
             self.log.warning("Break-even model not fitted yet, skipping prediction.")
             details["not_fitted"] = True
@@ -465,7 +535,6 @@ class MachineLearningModel:
         # Match the battery model's approximate 95% uncertainty convention.
         details["uncertainty"] = 1.96 * sigma if sigma is not None else None
 
-        ranges = self.be_meta.get("feature_ranges", {}) if isinstance(self.be_meta, dict) else {}
         outliers = {}
         for col, value in row.iloc[0].items():
             # Runtime inputs outside the trained min/max range are worth
@@ -529,22 +598,60 @@ class MachineLearningModel:
         exact numeric columns used by the saved model files.
         """
         normalized = df.copy()
-        if 'BreakEvenSpeed' not in normalized.columns:
-            # Full telemetry CSVs usually store speed under a telemetry key, not
-            # under the sparse training label name. Promote the best available
-            # speed field into BreakEvenSpeed.
-            for alias in self.BREAK_EVEN_LABEL_ALIASES:
-                if alias in normalized.columns:
-                    normalized['BreakEvenSpeed'] = normalized[alias]
-                    self.log.info(f"Using {alias} as BreakEvenSpeed label for {source}")
-                    break
+        # Full telemetry exports teach the road-load curve only from steady
+        # driving. Acceleration/braking power is not sustainable road load and
+        # would bias the inferred break-even speed.
+        if 'BreakEven_Power_W' not in normalized.columns:
+            if 'Motors_Total_Bus_Power_W' in normalized.columns:
+                normalized['BreakEven_Power_W'] = normalized['Motors_Total_Bus_Power_W']
+            elif {
+                'MC1BUS_Voltage',
+                'MC1BUS_Current',
+                'MC2BUS_Voltage',
+                'MC2BUS_Current',
+            }.issubset(normalized.columns):
+                normalized['BreakEven_Power_W'] = (
+                    pd.to_numeric(normalized['MC1BUS_Voltage'], errors='coerce')
+                    * pd.to_numeric(normalized['MC1BUS_Current'], errors='coerce')
+                    + pd.to_numeric(normalized['MC2BUS_Voltage'], errors='coerce')
+                    * pd.to_numeric(normalized['MC2BUS_Current'], errors='coerce')
+                )
 
-        missing = [col for col in self.TRAINING_COLUMNS if col not in normalized.columns]
-        if missing:
-            # A file can be valid telemetry but still unusable for model
-            # training if it lacks the PV features or target labels.
-            self.log.warning(f"Skipping {source}; missing training columns: {missing}")
-            return pd.DataFrame(columns=self.TRAINING_COLUMNS)
+        if 'BreakEvenSpeed' not in normalized.columns:
+            normalized['BreakEvenSpeed'] = np.nan
+            speed_column = next(
+                (alias for alias in self.BREAK_EVEN_LABEL_ALIASES if alias in normalized.columns),
+                None,
+            )
+            required = {'BreakEven_Power_W', 'IMU_FORWARD_G'}
+            if speed_column and required.issubset(normalized.columns):
+                speed = pd.to_numeric(normalized[speed_column], errors='coerce')
+                motor_power = pd.to_numeric(
+                    normalized['BreakEven_Power_W'], errors='coerce'
+                )
+                forward_g = pd.to_numeric(normalized['IMU_FORWARD_G'], errors='coerce')
+                steady = (
+                    (forward_g.abs() <= self.STEADY_STATE_MAX_ABS_FORWARD_G)
+                    & (speed >= self.MIN_BREAK_EVEN_SPEED_MPH)
+                    & (motor_power > 0.0)
+                )
+                if 'IMU_G_VALID' in normalized.columns:
+                    imu_valid = pd.to_numeric(
+                        normalized['IMU_G_VALID'], errors='coerce'
+                    ) == 1
+                    steady &= imu_valid
+                normalized.loc[steady, 'BreakEvenSpeed'] = speed.loc[steady]
+                self.log.info(
+                    f"Derived {int(steady.sum())} steady-state road-load labels "
+                    f"from {source}"
+                )
+
+        # Preserve rows usable by either model. Legacy sparse files will receive
+        # an empty array-power column: their battery rows remain useful, while
+        # old ordinary-speed labels cannot train the new break-even model.
+        for col in self.TRAINING_COLUMNS:
+            if col not in normalized.columns:
+                normalized[col] = np.nan
 
         normalized = normalized[self.TRAINING_COLUMNS].copy()
         for col in self.TRAINING_COLUMNS:
@@ -553,7 +660,19 @@ class MachineLearningModel:
             normalized[col] = pd.to_numeric(normalized[col], errors='coerce')
 
         before = len(normalized)
-        normalized = normalized.replace([np.inf, -np.inf], np.nan).dropna(subset=self.TRAINING_COLUMNS)
+        normalized = normalized.replace([np.inf, -np.inf], np.nan)
+        battery_required = [
+            'BP_PVS_milliamp*s',
+            'BP_PVS_Ah',
+            'BP_PVS_Voltage',
+            'Used_Ah_Remaining_Time',
+        ]
+        break_even_required = self.BREAK_EVEN_FEATURES + ['BreakEvenSpeed']
+        usable = (
+            normalized[battery_required].notna().all(axis=1)
+            | normalized[break_even_required].notna().all(axis=1)
+        )
+        normalized = normalized.loc[usable].copy()
         dropped = before - len(normalized)
         if dropped:
             self.log.info(f"Dropped {dropped} incomplete/non-numeric training rows from {source}")

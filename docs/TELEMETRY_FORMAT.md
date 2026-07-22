@@ -46,6 +46,17 @@ BP_PVS_milliamp*s
 BP_PVS_Ah
 ```
 
+Array power is estimated from the synchronized DC-bus balance
+`MC1 power + MC2 power - battery power`. The calculation is published only
+after both controller bus packets, the battery-shunt packet, and the pack
+voltage packet have arrived in the same firmware telemetry frame. There is no
+fixed array-size or wattage cap; incomplete frames report the estimate as
+unavailable instead of mixing new and stale currents. The instantaneous signed
+power balance remains available for diagnostics, while estimated array power
+uses a five-frame average to cancel short motor-controller/battery-shunt sensor
+latency during acceleration and regenerative braking. Sustained high output is
+not clipped.
+
 `BP_ISH` current samples also drive a race-session amp-hour integrator. The
 integrator uses the actual monotonic time between samples (normally about one
 second), uses trapezoidal integration, and skips gaps longer than five seconds
@@ -106,25 +117,88 @@ when both `IMU_G_VALID=1` and `IMU_G_CALIBRATED=1`. `IMU_FORWARD_G` is signed
 (positive acceleration, negative braking), `IMU_TOTAL_G` includes gravity,
 and `IMU_DYNAMIC_G` has the calibrated gravity vector removed.
 
+The map keeps a compact race summary visible above the map. Configuration is
+inside the collapsed **Map setup** drawer, and the longer route/lap/day readout
+is inside **Race details**. Both drawers default closed to maximize map area;
+click-drag panning remains available with the visual scrollbars hidden.
+
 The GPS map tab may add route fields after a GPX route is loaded:
 
 ```text
 NAV_Route_Name
 NAV_Checkpoint_Name
 NAV_Route_Distance_Remaining
+NAV_Route_Distance_Traveled
 NAV_Checkpoint_Distance_Remaining
 NAV_Checkpoint_ETA
 ```
 
-The GPS map tab may also add lap timing fields after a start/end line is set:
+The map has separate **FSGP Track** and **ASC Route** modes. ASC mode treats
+multiple selected GPX files as ordered checkpoint/day segments, maintains
+monotonic point-to-point progress, and pauses circuit lap timing. The route
+search normally checks a window around the prior GPX match so long ASC files
+remain responsive, with a full-route fallback if the vehicle is off that
+window. Changing race modes preserves completed laps but clears the partial lap
+in progress so time spent in ASC mode cannot inflate a later FSGP lap.
+
+The GPS map tab also adds session-distance and FSGP lap fields:
 
 ```text
+NAV_Race_Mode
+NAV_GPS_Trip_Distance
+NAV_Session_Average_Speed
+NAV_Day_Moving_Average_Speed
+NAV_Day_Max_Speed
+NAV_Day_Elapsed_Time
+NAV_Day_Moving_Time
+NAV_Day_Stopped_Time
+NAV_FSGP_Lap_Length
+NAV_FSGP_Official_Distance
+NAV_FSGP_Day_Duration
+NAV_FSGP_Time_Remaining
+NAV_FSGP_Projected_Total_Laps
+NAV_FSGP_Projected_Distance
 NAV_Lap_Count
 NAV_Current_Lap_Time
 NAV_Last_Lap_Time
 NAV_Best_Lap_Time
+NAV_Average_Lap_Time
+NAV_Current_Lap_Distance
+NAV_Current_Lap_Average_Speed
+NAV_Last_Lap_Average_Speed
+NAV_Best_Lap_Average_Speed
+NAV_Average_Lap_Speed
 NAV_Lap_Status
 ```
+
+`NAV_GPS_Trip_Distance` is accumulated from valid moving GPS segments. Segments
+that imply an implausible speed and movement reported while the vehicle speed
+is below 1 mph are excluded to reduce stationary drift and GPS jumps. The
+session average is distance divided by elapsed session time, so stops lower it.
+The moving average divides the same filtered distance by moving time only.
+Elapsed, moving, stopped, and maximum-speed values reset with **Reset Day**;
+**Reset Trip** clears the distance/time averages without clearing completed lap
+results. Moving-time integration skips telemetry gaps longer than five seconds.
+
+In FSGP mode, the map accepts an optional official lap length in miles. When it
+is nonzero, `NAV_FSGP_Official_Distance` is completed laps times the entered
+length and completed-lap speed uses that same official distance. When it is
+zero, filtered GPS lap mileage is used. Partial laps remain visible as current
+GPS lap distance but do not count toward official completed mileage.
+
+The configurable FSGP race-day duration enables a possible-laps projection.
+Press **Reset Day** at the official start; its elapsed timer begins with the
+first valid moving GPS sample after that reset.
+After at least three completed laps, the projection combines average lap time,
+scheduled time remaining, completed laps, and progress through the current lap.
+Projected distance uses the entered official lap length, or average filtered
+GPS lap length when no official length is entered. This is a pace projection,
+not a guarantee; traffic, weather, pit time, and strategy can change the result.
+
+Lap timing ignores crossings made in the opposite direction, crossings before
+the vehicle has moved at least 20 metres away from the timing line, and lap
+times under 30 seconds. These guards prevent GPS jitter around start/finish
+from being recorded as a completed lap.
 
 `TL_TIM,12:34:56` produces an uptime-style device timestamp:
 

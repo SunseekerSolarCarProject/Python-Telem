@@ -127,6 +127,13 @@ class DashboardTab(QWidget):
             ("Lap Count", TelemetryKey.NAV_LAP_COUNT.value[0]),
             ("Current Lap", TelemetryKey.NAV_CURRENT_LAP_TIME.value[0]),
             ("Last Lap", TelemetryKey.NAV_LAST_LAP_TIME.value[0]),
+            ("Last Lap Speed", TelemetryKey.NAV_LAST_LAP_AVERAGE_SPEED_MPH.value[0]),
+            ("Average Lap Speed", TelemetryKey.NAV_AVERAGE_LAP_SPEED_MPH.value[0]),
+            ("GPS Trip Distance", TelemetryKey.NAV_GPS_TRIP_DISTANCE_MI.value[0]),
+            ("Day Average Speed", TelemetryKey.NAV_SESSION_AVERAGE_SPEED_MPH.value[0]),
+            ("Moving Average Speed", TelemetryKey.NAV_DAY_MOVING_AVERAGE_SPEED_MPH.value[0]),
+            ("Official Distance", TelemetryKey.NAV_FSGP_OFFICIAL_DISTANCE_MI.value[0]),
+            ("Possible FSGP Laps", TelemetryKey.NAV_FSGP_PROJECTED_TOTAL_LAPS.value[0]),
             ("Telemetry", TelemetryKey.TELEMETRY_STATUS.value[0]),
         ]
 

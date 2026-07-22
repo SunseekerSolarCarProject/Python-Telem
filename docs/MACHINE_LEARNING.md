@@ -16,17 +16,18 @@ There are two independent regression models:
 | Model | Runtime output | Target column | Feature columns |
 | --- | --- | --- | --- |
 | Battery life | `Predicted_Remaining_Time` | `Used_Ah_Remaining_Time` | `BP_PVS_milliamp*s`, `BP_PVS_Ah`, `BP_PVS_Voltage` |
-| Break-even speed | `Predicted_BreakEven_Speed` | `BreakEvenSpeed` | `BP_PVS_milliamp*s`, `BP_PVS_Voltage` |
+| Break-even speed | `Predicted_BreakEven_Speed` | `BreakEvenSpeed` | `BreakEven_Power_W`, `BP_PVS_Voltage` |
 
 The battery-life model estimates remaining runtime in hours. The app also
 formats this into `Predicted_Exact_Time` with the existing exact-time helper.
 
-The break-even-speed model currently learns from the observed vehicle speed
-saved as `BreakEvenSpeed`. In the current data pipeline, that label is taken
-from `MC1VEL_Speed` when a training row is written. This makes the model a
-PV-context speed estimate based on historical driving conditions. If future
-firmware or strategy tooling calculates a true energy-neutral speed, replace
-the `BreakEvenSpeed` label with that value before training.
+The break-even model learns the car's steady-state road-load curve. Training
+examples are collected while the car is moving at least 5 mph, IMU data is
+valid, and absolute forward acceleration is at most 0.03 g. Each example pairs
+measured total motor-controller bus power with observed speed. At runtime,
+synchronized net array power is placed into the same power feature to estimate
+the speed that available solar power can sustain. Acceleration and braking rows
+are stored without a break-even label and cannot train this model.
 
 ## How Prediction Runs
 
@@ -44,24 +45,33 @@ but simulation data is not written into the real CSVs or training corpus.
 
 ## Model Type
 
-Both predictors are scikit-learn pipelines:
+Both predictors use scikit-learn `RandomForestRegressor` models. Battery life
+retains its five-row moving-average preprocessing. Break-even consumes the
+already synchronized and smoothed array-power estimate directly:
 
 ```text
-MovingAverage(window=5) -> RandomForestRegressor
+Battery:    MovingAverage(window=5) -> RandomForestRegressor
+Break-even: RandomForestRegressor(BreakEven_Power_W, BP_PVS_Voltage)
 ```
 
-The `MovingAverage` transformer smooths the selected PV fields with a rolling
-average. The random forest uses:
+The battery random forest uses `min_samples_leaf=5`; break-even uses
+`min_samples_leaf=3`. Both use:
 
 ```text
 n_estimators=100
-min_samples_leaf=5
 random_state=42
 ```
 
-Random forests are a practical fit here because they handle non-linear
+Random forests are a practical fit here because they are actual supervised
+machine-learning models that handle non-linear
 relationships without needing much feature scaling or hand tuning. They are
 also easy to save, load, and inspect locally.
+
+Break-even training requires at least 20 steady-state rows. The last 20% of
+rows are held out chronologically to calculate validation MAE and R-squared;
+the production model is then refit on all valid rows. Validation results, row
+count, feature ranges, label definition, and training time are saved with the
+model.
 
 ## Uncertainty And Quality Flags
 
@@ -103,16 +113,23 @@ it lives in the active application data directory managed by `CSVHandler`.
 The required headers are:
 
 ```csv
-BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,Used_Ah_Remaining_Time,BreakEvenSpeed
+BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,Used_Ah_Remaining_Time,Array_Estimated_Power_W,BreakEven_Power_W,BreakEvenSpeed
 ```
 
-Rows are written only when all required values are present and numeric:
+Battery-life rows are written when its required values are present and numeric.
+The array-power column may be unavailable during stabilization, and the
+break-even power/target remain `N/A` unless the row passes the steady-state gate:
 
 - `BP_PVS_milliamp*s`: integrated PV current signal in milliamp-seconds
 - `BP_PVS_Ah`: integrated PV current converted to amp-hours
 - `BP_PVS_Voltage`: PV/battery-pack voltage used by the model
 - `Used_Ah_Remaining_Time`: calculated remaining time target, in hours
-- `BreakEvenSpeed`: current label for the speed model, saved from `MC1VEL_Speed`
+- `Array_Estimated_Power_W`: synchronized five-frame array-power feature
+- `BreakEven_Power_W`: measured total motor-controller bus power for a valid
+  steady-state training row; at prediction time this feature receives current
+  net array power
+- `BreakEvenSpeed`: observed speed only for a moving, steady-state sample;
+  otherwise `N/A`
 
 The training file deliberately excludes most display-only telemetry fields.
 Keeping the model input narrow reduces accidental coupling to GUI fields and
@@ -126,6 +143,13 @@ makes it easier to understand why a prediction changed.
 3. Click **Retrain Machine Learning Model**.
 4. Confirm the dialog.
 5. Wait for the success or failure message.
+
+Manual retraining remains available, but live operation also counts new valid
+break-even labels. After 20 new steady-state examples, the break-even forest
+re-trains in a background thread and atomically replaces the live model. This
+is periodic batch learning because scikit-learn random forests do not support
+incremental `partial_fit`; predictions continue using the prior model while the
+replacement is trained.
 
 Retraining calls:
 
@@ -149,15 +173,17 @@ missing or cannot be loaded, it attempts to retrain from the available
 
 The settings UI can also emit a retrain request with additional CSV files.
 Those files are combined with the current `training_data.csv`, normalized into
-the five training columns, written to `combined_training_data.csv`, and both
+the seven training columns, written to `combined_training_data.csv`, and both
 models are retrained from the combined data. After both models train
 successfully, the same normalized merged rows are promoted back into
 `training_data.csv`.
 
 Use this when merging prior runs, test sessions, or corrected labels. The
 additional files can be either sparse training CSVs or fuller telemetry CSVs.
-For full telemetry CSVs, the combiner keeps only the training columns and can
-derive `BreakEvenSpeed` from the first available speed field in this order:
+For full telemetry CSVs, the combiner can derive `BreakEvenSpeed` from the first
+available speed field below, but only on rows with positive motor bus power,
+speed of at least 5 mph, valid IMU data, and absolute forward acceleration no
+greater than 0.03 g:
 
 ```text
 MC1VEL_Speed
@@ -181,8 +207,8 @@ After a successful combined retrain, the files have these roles:
 
 This means a user can import older telemetry once, retrain, and keep driving.
 New valid rows from the current day append to the merged `training_data.csv`.
-The next normal retrain will use the historical imported data plus the newly
-gathered rows automatically.
+Break-even retraining occurs automatically in 20-label batches; normal manual
+retraining still uses the historical imported data plus newly gathered rows.
 
 ## Data Quality Checklist Before Training
 
@@ -239,11 +265,7 @@ non-numeric feature values, missing training data, or an unfitted model file.
 
 Good next improvements would be:
 
-- Train `BreakEvenSpeed` from a true energy-neutral-speed calculation instead
-  of observed motor-controller speed.
 - Add route/weather features only after they are stable and consistently
   present in the training data.
-- Add a validation split or backtest report before saving new model files.
-- Save row counts and validation metrics in the model metadata.
 - Add a small CLI retraining script that prints data coverage and model quality
   before replacing the current `.pkl` files.

@@ -22,9 +22,8 @@ class PredictionVoltageQualityTests(unittest.TestCase):
         self.model.batt_meta = {"feature_ranges": training_ranges}
         self.model.be_meta = {
             "feature_ranges": {
-                key: value
-                for key, value in training_ranges.items()
-                if key != "BP_PVS_Ah"
+                "BreakEven_Power_W": (0.0, 2000.0),
+                "BP_PVS_Voltage": training_ranges["BP_PVS_Voltage"],
             }
         }
 
@@ -40,7 +39,7 @@ class PredictionVoltageQualityTests(unittest.TestCase):
 
     def _break_even_details(self, voltage):
         return self.model.predict_break_even_speed_details({
-            "BP_PVS_milliamp*s": 5000.0,
+            "BreakEven_Power_W": 750.0,
             "BP_PVS_Voltage": voltage,
         })
 
