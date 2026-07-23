@@ -160,6 +160,61 @@ class ArrayEstimationTests(unittest.TestCase):
 
         self.assertTrue(math.isclose(buffer.combined_data["Array_Estimated_Power_W"], 2025.0))
 
+    def test_five_frame_inputs_and_session_quality_are_visible(self):
+        buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
+
+        for current in (5.0, 6.0, 7.0, 8.0, 9.0):
+            self._add_array_frame(
+                buffer,
+                mc1_current=current,
+                mc2_current=current,
+                pack_current=5.0,
+            )
+
+        expected = [675.0, 945.0, 1215.0, 1485.0, 1755.0]
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_W"], "[675.0, 945.0, 1215.0, 1485.0, 1755.0]")
+        for index, value in enumerate(expected, start=1):
+            self.assertEqual(buffer.combined_data[f"Array_Estimate_Sample_{index}_W"], value)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_Count"], 5)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_Spread_W"], 1080.0)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Total"], 5)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Usable"], 5)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Rejected"], 0)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frame_Usable_Pct"], 100.0)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Published_Count"], 1)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Unavailable_Count"], 4)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Availability_Pct"], 20.0)
+
+    def test_missing_frame_is_counted_and_clears_diagnostic_window(self):
+        buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
+        self._add_array_frame(buffer)
+
+        buffer.update_combined_data({"MC1BUS_Voltage": 135.0, "MC1BUS_Current": 8.0})
+        buffer.update_combined_data({"BP_ISH_Amps": 3.0})
+        buffer.update_combined_data({"BP_PVS_Voltage": 135.0})
+
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Total"], 2)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Usable"], 1)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Rejected"], 1)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Missing_Telemetry_Count"], 1)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Frame_Usable_Pct"], 50.0)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_Count"], 0)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_W"], "[]")
+
+    def test_signed_negative_balance_remains_visible_inside_window(self):
+        buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
+        for _ in range(4):
+            self._add_array_frame(buffer)
+        self._add_array_frame(
+            buffer,
+            mc1_current=2.0,
+            mc2_current=2.0,
+            pack_current=4.2,
+        )
+
+        self.assertAlmostEqual(buffer.combined_data["Array_Estimate_Sample_5_W"], -27.0)
+        self.assertGreater(buffer.combined_data["Array_Estimated_Power_W"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -396,7 +396,18 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.BATTERY_POWER_DIRECTION.value[0], TelemetryKey.BATTERY_C_RATE.value[0],
                 TelemetryKey.ARRAY_CURRENT_DIFFERENCE_A.value[0], TelemetryKey.ARRAY_ESTIMATED_CURRENT_A.value[0],
                 TelemetryKey.ARRAY_POWER_BALANCE_W.value[0], TelemetryKey.ARRAY_ESTIMATED_POWER_W.value[0],
-                TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0], TelemetryKey.ARRAY_ESTIMATE_STATUS.value[0]
+                TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0], TelemetryKey.ARRAY_ESTIMATE_STATUS.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_WINDOW_W.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_SAMPLE_1_W.value[0], TelemetryKey.ARRAY_ESTIMATE_SAMPLE_2_W.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_SAMPLE_3_W.value[0], TelemetryKey.ARRAY_ESTIMATE_SAMPLE_4_W.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_SAMPLE_5_W.value[0], TelemetryKey.ARRAY_ESTIMATE_WINDOW_COUNT.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_WINDOW_SPREAD_W.value[0], TelemetryKey.ARRAY_ESTIMATE_WINDOW_STDDEV_W.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_FRAMES_TOTAL.value[0], TelemetryKey.ARRAY_ESTIMATE_FRAMES_USABLE.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_FRAMES_REJECTED.value[0], TelemetryKey.ARRAY_ESTIMATE_FRAME_USABLE_PCT.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_PUBLISHED_COUNT.value[0], TelemetryKey.ARRAY_ESTIMATE_UNAVAILABLE_COUNT.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_AVAILABILITY_PCT.value[0], TelemetryKey.ARRAY_ESTIMATE_MISSING_COUNT.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_VOLTAGE_MISMATCH_COUNT.value[0],
+                TelemetryKey.ARRAY_ESTIMATE_NEGATIVE_WINDOW_COUNT.value[0]
             ],
             "Shunt Remaining": [
                 TelemetryKey.SHUNT_USED_AH.value[0], TelemetryKey.SHUNT_INTEGRATION_STATUS.value[0],

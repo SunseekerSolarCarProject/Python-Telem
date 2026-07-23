@@ -6,11 +6,14 @@ Use this page as the handoff map for a new maintainer.
 
 1. `README.md`
    - How to install, run, test with virtual serial ports, and use the main tabs.
-2. `docs/ARCHITECTURE.md`
+2. `docs/USER_GUIDE.md`
+   - Complete operator workflow, race modes, display interpretation, data
+     export, ML use, and troubleshooting.
+3. `docs/ARCHITECTURE.md`
    - How data moves through the app and which modules own each responsibility.
-3. `docs/TELEMETRY_FORMAT.md`
+4. `docs/TELEMETRY_FORMAT.md`
    - What raw serial lines look like and how they become canonical telemetry fields.
-4. `docs/MACHINE_LEARNING.md`
+5. `docs/MACHINE_LEARNING.md`
    - How prediction models are trained, saved, evaluated, and used at runtime.
 
 ## Common Tasks
@@ -18,6 +21,7 @@ Use this page as the handoff map for a new maintainer.
 | Task | Start With |
 | --- | --- |
 | Run the app from source | `README.md` |
+| Operate the app on race day | `docs/USER_GUIDE.md` |
 | Understand packet parsing | `docs/TELEMETRY_FORMAT.md`, then `src/data_processor.py` |
 | Add a telemetry field | `src/key_name_definitions.py`, `src/data_processor.py`, `src/csv_handler.py` |
 | Change GUI display groups | `src/gui_files/gui_display.py` and the relevant tab in `src/gui_files/` |

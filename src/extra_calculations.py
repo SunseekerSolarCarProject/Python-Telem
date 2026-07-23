@@ -293,7 +293,10 @@ class ExtraCalculations:
             self.logger.debug(f"bp_pvs_ah value: {bp_pvs_ah}, used_ah value: {used_ah}, total_capacity_ah value: {total_capacity_ah}")
             remaining_capacity = total_capacity_ah - bp_pvs_ah
             self.logger.debug(f"Calculated remaining capacity (Ah): {remaining_capacity} Ah")
-            return max(remaining_capacity, 0.0)
+            # BP_PVS is a signed net counter and may be negative while the car
+            # is charging. Preserve that signed raw telemetry, but do not let
+            # the derived physical remaining capacity exceed pack capacity.
+            return min(max(remaining_capacity, 0.0), max(total_capacity_ah, 0.0))
         except Exception as e:
             self.logger.error(f"Error calculating remaining capacity (Ah): {e}")
             return 0.0

@@ -71,7 +71,7 @@ class BreakEvenLearningTests(unittest.TestCase):
     def test_full_telemetry_only_derives_labels_at_steady_state(self):
         raw = pd.DataFrame({
             "BP_PVS_milliamp*s": [1.0, 2.0, 3.0],
-            "BP_PVS_Ah": [0.1, 0.2, 0.3],
+            "BP_PVS_Ah": [-0.1, 0.2, 0.3],
             "BP_PVS_Voltage": [135.0, 135.0, 135.0],
             "Used_Ah_Remaining_Time": [5.0, 4.9, 4.8],
             "Array_Estimated_Power_W": [600.0, 700.0, 800.0],
@@ -85,6 +85,7 @@ class BreakEvenLearningTests(unittest.TestCase):
 
         self.assertEqual(normalized["BreakEvenSpeed"].notna().sum(), 1)
         self.assertEqual(normalized["BreakEvenSpeed"].dropna().iloc[0], 25.0)
+        self.assertEqual(normalized["BP_PVS_Ah"].iloc[0], -0.1)
 
     def test_live_training_labels_each_steady_array_frame_once(self):
         csv_handler = MemoryCSVHandler()
@@ -96,6 +97,14 @@ class BreakEvenLearningTests(unittest.TestCase):
             "Used_Ah_Remaining_Time": 4.0,
             "Array_Estimated_Power_W": 750.0,
             "Array_Estimate_Status": "Estimated: synchronized 5-frame average",
+            "Array_Estimate_Sample_1_W": 700.0,
+            "Array_Estimate_Sample_2_W": 725.0,
+            "Array_Estimate_Sample_3_W": 750.0,
+            "Array_Estimate_Sample_4_W": 775.0,
+            "Array_Estimate_Sample_5_W": 800.0,
+            "Array_Estimate_Window_StdDev_W": 35.36,
+            "Array_Estimate_Frame_Usable_Pct": 92.0,
+            "Array_Estimate_Availability_Pct": 88.0,
             "Motors_Total_Bus_Power_W": 800.0,
             "IMU_FORWARD_G": 0.01,
             "IMU_G_VALID": 1,
@@ -110,6 +119,10 @@ class BreakEvenLearningTests(unittest.TestCase):
         self.assertFalse(second["break_even_label_written"])
         self.assertEqual(csv_handler.rows[0]["BreakEven_Power_W"], 800.0)
         self.assertEqual(csv_handler.rows[0]["BreakEvenSpeed"], 30.0)
+        self.assertEqual(csv_handler.rows[0]["Array_Estimate_Sample_1_W"], 700.0)
+        self.assertEqual(csv_handler.rows[0]["Array_Estimate_Sample_5_W"], 800.0)
+        self.assertEqual(csv_handler.rows[0]["Array_Estimate_Window_StdDev_W"], 35.36)
+        self.assertEqual(csv_handler.rows[0]["Array_Estimate_Frame_Usable_Pct"], 92.0)
         self.assertEqual(csv_handler.rows[1]["BreakEvenSpeed"], "N/A")
 
 

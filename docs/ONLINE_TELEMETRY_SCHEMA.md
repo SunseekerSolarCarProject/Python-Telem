@@ -277,7 +277,7 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | `BP_ISH_Amps` | A |
 | `BP_PVS_Voltage` | V |
 | `BP_PVS_milliamp*s` | mA*s |
-| `BP_PVS_Ah` | Ah |
+| `BP_PVS_Ah` | signed net Ah; negative means net charging |
 
 ### Battery Calculated Values
 
@@ -292,6 +292,22 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | `Total_Capacity_Wh` | Wh |
 | `Total_Capacity_Ah` | Ah |
 | `Total_Voltage` | V |
+
+### Array Estimate And ML Provenance
+
+| Field | Meaning |
+| --- | --- |
+| `Array_Estimated_Power_W` / `Array_Estimated_Power_kW` | Five-frame synchronized estimate |
+| `Array_Estimate_Window_W` | Readable oldest-to-newest list of the five signed balances |
+| `Array_Estimate_Sample_1_W` ... `Array_Estimate_Sample_5_W` | Numeric window inputs saved for ML |
+| `Array_Estimate_Window_Spread_W` / `Array_Estimate_Window_StdDev_W` | Within-window inconsistency |
+| `Array_Estimate_Frames_Total` / `Usable` / `Rejected` | Synchronized-frame session counters |
+| `Array_Estimate_Frame_Usable_Pct` | Input completeness percentage |
+| `Array_Estimate_Published_Count` / `Unavailable_Count` | Numeric-output session counters |
+| `Array_Estimate_Availability_Pct` | Percentage of attempts that published an estimate |
+| `Array_Estimate_Missing_Telemetry_Count` | Frames missing one or more required packets |
+| `Array_Estimate_Voltage_Mismatch_Count` | Frames rejected for inconsistent bus voltage |
+| `Array_Estimate_Negative_Window_Count` | Five-frame averages rejected as materially negative |
 
 ### Remaining Capacity And Prediction
 

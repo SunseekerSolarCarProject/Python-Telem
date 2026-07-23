@@ -113,7 +113,7 @@ it lives in the active application data directory managed by `CSVHandler`.
 The required headers are:
 
 ```csv
-BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,Used_Ah_Remaining_Time,Array_Estimated_Power_W,BreakEven_Power_W,BreakEvenSpeed
+BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,Used_Ah_Remaining_Time,Array_Estimated_Power_W,BreakEven_Power_W,BreakEvenSpeed,Array_Estimate_Sample_1_W,Array_Estimate_Sample_2_W,Array_Estimate_Sample_3_W,Array_Estimate_Sample_4_W,Array_Estimate_Sample_5_W,Array_Estimate_Window_Count,Array_Estimate_Window_Spread_W,Array_Estimate_Window_StdDev_W,Array_Estimate_Frames_Total,Array_Estimate_Frames_Usable,Array_Estimate_Frames_Rejected,Array_Estimate_Frame_Usable_Pct,Array_Estimate_Published_Count,Array_Estimate_Unavailable_Count,Array_Estimate_Availability_Pct,Array_Estimate_Missing_Telemetry_Count,Array_Estimate_Voltage_Mismatch_Count,Array_Estimate_Negative_Window_Count
 ```
 
 Battery-life rows are written when its required values are present and numeric.
@@ -130,6 +130,17 @@ break-even power/target remain `N/A` unless the row passes the steady-state gate
   net array power
 - `BreakEvenSpeed`: observed speed only for a moving, steady-state sample;
   otherwise `N/A`
+
+The remaining `Array_Estimate_*` columns are ML provenance: the five signed
+balance values, their spread/standard deviation, and cumulative missingness and
+availability counters. They are retained when training CSVs are combined, but
+are not automatically fed into the current break-even forest. Without an
+independent array-power sensor, treating the computed estimate as ground truth
+would train a model to reproduce its own formula. These columns instead support
+auditing, filtering, sample weighting, and a future supervised array model.
+
+Negative `BP_PVS_milliamp*s` and `BP_PVS_Ah` values are valid net-charging
+examples and remain numeric throughout CSV normalization.
 
 The training file deliberately excludes most display-only telemetry fields.
 Keeping the model input narrow reduces accidental coupling to GUI fields and
@@ -173,7 +184,7 @@ missing or cannot be loaded, it attempts to retrain from the available
 
 The settings UI can also emit a retrain request with additional CSV files.
 Those files are combined with the current `training_data.csv`, normalized into
-the seven training columns, written to `combined_training_data.csv`, and both
+the canonical training columns, written to `combined_training_data.csv`, and both
 models are retrained from the combined data. After both models train
 successfully, the same normalized merged rows are promoted back into
 `training_data.csv`.

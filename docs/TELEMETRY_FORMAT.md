@@ -46,6 +46,11 @@ BP_PVS_milliamp*s
 BP_PVS_Ah
 ```
 
+`BP_PVS_milliamp*s` is decoded as a signed firmware float and `BP_PVS_Ah`
+preserves that sign. Negative values therefore remain visible and are saved for
+ML as net charging rather than being clamped to zero. Only derived physical
+remaining capacity is bounded to the configured pack capacity.
+
 Array power is estimated from the synchronized DC-bus balance
 `MC1 power + MC2 power - battery power`. The calculation is published only
 after both controller bus packets, the battery-shunt packet, and the pack
@@ -56,6 +61,33 @@ power balance remains available for diagnostics, while estimated array power
 uses a five-frame average to cancel short motor-controller/battery-shunt sensor
 latency during acceleration and regenerative braking. Sustained high output is
 not clipped.
+
+Every estimate also publishes its exact five signed balance inputs and data
+quality history:
+
+```text
+Array_Estimate_Window_W
+Array_Estimate_Sample_1_W ... Array_Estimate_Sample_5_W
+Array_Estimate_Window_Count
+Array_Estimate_Window_Spread_W
+Array_Estimate_Window_StdDev_W
+Array_Estimate_Frames_Total
+Array_Estimate_Frames_Usable
+Array_Estimate_Frames_Rejected
+Array_Estimate_Frame_Usable_Pct
+Array_Estimate_Published_Count
+Array_Estimate_Unavailable_Count
+Array_Estimate_Availability_Pct
+Array_Estimate_Missing_Telemetry_Count
+Array_Estimate_Voltage_Mismatch_Count
+Array_Estimate_Negative_Window_Count
+```
+
+Samples 1 through 5 are oldest to newest. Signed negative balance samples stay
+visible because they can cancel controller/shunt latency spikes. Frame usable
+percentage measures synchronized input completeness; estimate availability
+percentage measures how often a numeric five-frame output was actually
+published. Spread and standard deviation describe within-window inconsistency.
 
 `BP_ISH` current samples also drive a race-session amp-hour integrator. The
 integrator uses the actual monotonic time between samples (normally about one

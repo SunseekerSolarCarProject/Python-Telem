@@ -11,6 +11,13 @@ from key_name_definitions import TelemetryKey
 
 class BufferData:
     ARRAY_ESTIMATE_WINDOW_FRAMES = 5
+    ARRAY_ESTIMATE_SAMPLE_KEYS = (
+        TelemetryKey.ARRAY_ESTIMATE_SAMPLE_1_W.value[0],
+        TelemetryKey.ARRAY_ESTIMATE_SAMPLE_2_W.value[0],
+        TelemetryKey.ARRAY_ESTIMATE_SAMPLE_3_W.value[0],
+        TelemetryKey.ARRAY_ESTIMATE_SAMPLE_4_W.value[0],
+        TelemetryKey.ARRAY_ESTIMATE_SAMPLE_5_W.value[0],
+    )
     MIN_BREAK_EVEN_SPEED_MPH = 5.0
     BREAK_EVEN_MAX_ABS_FORWARD_G = 0.03
     ARRAY_SOURCE_FIELDS = (
@@ -54,6 +61,7 @@ class BufferData:
         )
         self._array_estimate_generation = 0
         self._last_training_array_generation = 0
+        self._reset_array_diagnostic_counters()
         self.logger.info(f"BufferData initialized with buffer_size={buffer_size}, buffer_timeout={buffer_timeout}")
 
     def add_data(self, data):
@@ -90,6 +98,7 @@ class BufferData:
             self._array_power_balance_samples.clear()
             self._array_estimate_generation = 0
             self._last_training_array_generation = 0
+            self._reset_array_diagnostic_counters()
 
         # Each serial line only carries a small slice of the car state. This
         # dictionary is the latest-known snapshot assembled across many lines.
@@ -112,8 +121,70 @@ class BufferData:
             self._array_frame_data.clear()
         self.logger.debug(f"Combined data updated with: {new_data}")
 
+    def _reset_array_diagnostic_counters(self):
+        self._array_frames_total = 0
+        self._array_frames_usable = 0
+        self._array_frames_rejected = 0
+        self._array_estimates_published = 0
+        self._array_estimates_unavailable = 0
+        self._array_missing_telemetry_count = 0
+        self._array_voltage_mismatch_count = 0
+        self._array_negative_window_count = 0
+
+    def _add_array_diagnostics(self, insights):
+        """Attach the five-frame window and session data-quality counters."""
+        samples = list(self._array_power_balance_samples)
+        insights[TelemetryKey.ARRAY_ESTIMATE_WINDOW_W.value[0]] = (
+            "[" + ", ".join(f"{sample:.1f}" for sample in samples) + "]"
+        )
+        for index, key in enumerate(self.ARRAY_ESTIMATE_SAMPLE_KEYS):
+            insights[key] = round(samples[index], 3) if index < len(samples) else 'N/A'
+
+        sample_count = len(samples)
+        spread = max(samples) - min(samples) if samples else None
+        if samples:
+            mean = sum(samples) / sample_count
+            variance = sum((sample - mean) ** 2 for sample in samples) / sample_count
+            standard_deviation = math.sqrt(variance)
+        else:
+            standard_deviation = None
+
+        usable_pct = (
+            100.0 * self._array_frames_usable / self._array_frames_total
+            if self._array_frames_total
+            else 0.0
+        )
+        estimate_attempts = (
+            self._array_estimates_published + self._array_estimates_unavailable
+        )
+        availability_pct = (
+            100.0 * self._array_estimates_published / estimate_attempts
+            if estimate_attempts
+            else 0.0
+        )
+        insights.update({
+            TelemetryKey.ARRAY_ESTIMATE_WINDOW_COUNT.value[0]: sample_count,
+            TelemetryKey.ARRAY_ESTIMATE_WINDOW_SPREAD_W.value[0]: (
+                round(spread, 3) if spread is not None else 'N/A'
+            ),
+            TelemetryKey.ARRAY_ESTIMATE_WINDOW_STDDEV_W.value[0]: (
+                round(standard_deviation, 3) if standard_deviation is not None else 'N/A'
+            ),
+            TelemetryKey.ARRAY_ESTIMATE_FRAMES_TOTAL.value[0]: self._array_frames_total,
+            TelemetryKey.ARRAY_ESTIMATE_FRAMES_USABLE.value[0]: self._array_frames_usable,
+            TelemetryKey.ARRAY_ESTIMATE_FRAMES_REJECTED.value[0]: self._array_frames_rejected,
+            TelemetryKey.ARRAY_ESTIMATE_FRAME_USABLE_PCT.value[0]: round(usable_pct, 2),
+            TelemetryKey.ARRAY_ESTIMATE_PUBLISHED_COUNT.value[0]: self._array_estimates_published,
+            TelemetryKey.ARRAY_ESTIMATE_UNAVAILABLE_COUNT.value[0]: self._array_estimates_unavailable,
+            TelemetryKey.ARRAY_ESTIMATE_AVAILABILITY_PCT.value[0]: round(availability_pct, 2),
+            TelemetryKey.ARRAY_ESTIMATE_MISSING_COUNT.value[0]: self._array_missing_telemetry_count,
+            TelemetryKey.ARRAY_ESTIMATE_VOLTAGE_MISMATCH_COUNT.value[0]: self._array_voltage_mismatch_count,
+            TelemetryKey.ARRAY_ESTIMATE_NEGATIVE_WINDOW_COUNT.value[0]: self._array_negative_window_count,
+        })
+
     def _publish_completed_array_frame(self):
         """Publish a synchronized, latency-smoothed array power estimate."""
+        self._array_frames_total += 1
         insights = self.extra_calculations.compute_array_insights(self._array_frame_data)
         power_balance = self.extra_calculations.safe_float(
             insights.get('Array_Power_Balance_W')
@@ -132,6 +203,14 @@ class BufferData:
             # A broken frame also breaks continuity of the smoothing window.
             # Require a fresh run of complete frames before publishing again.
             self._array_power_balance_samples.clear()
+            self._array_frames_rejected += 1
+            self._array_estimates_unavailable += 1
+            status = str(insights.get('Array_Estimate_Status', ''))
+            if 'missing telemetry' in status.lower():
+                self._array_missing_telemetry_count += 1
+            elif 'voltage mismatch' in status.lower():
+                self._array_voltage_mismatch_count += 1
+            self._add_array_diagnostics(insights)
             self.combined_data.update(insights)
             return
 
@@ -139,6 +218,7 @@ class BufferData:
         # changes. Averaging the signed balance lets the later low/negative
         # residual cancel the earlier positive spike. This is a temporal filter,
         # not a wattage limit; sustained high generation remains high.
+        self._array_frames_usable += 1
         self._array_power_balance_samples.append(power_balance)
         sample_count = len(self._array_power_balance_samples)
         if sample_count < self.ARRAY_ESTIMATE_WINDOW_FRAMES:
@@ -148,6 +228,8 @@ class BufferData:
             insights['Array_Estimate_Status'] = (
                 f'Stabilizing: {sample_count}/{self.ARRAY_ESTIMATE_WINDOW_FRAMES} synchronized frames'
             )
+            self._array_estimates_unavailable += 1
+            self._add_array_diagnostics(insights)
             self.combined_data.update(insights)
             return
 
@@ -157,6 +239,8 @@ class BufferData:
             insights['Array_Estimated_Power_W'] = 'N/A'
             insights['Array_Estimated_Power_kW'] = 'N/A'
             insights['Array_Estimate_Status'] = 'Invalid: averaged negative power balance'
+            self._array_negative_window_count += 1
+            self._array_estimates_unavailable += 1
         else:
             estimated_power = max(0.0, averaged_balance)
             insights['Array_Estimated_Current_A'] = estimated_power / pack_voltage
@@ -166,6 +250,8 @@ class BufferData:
                 f'Estimated: synchronized {self.ARRAY_ESTIMATE_WINDOW_FRAMES}-frame average'
             )
             self._array_estimate_generation += 1
+            self._array_estimates_published += 1
+        self._add_array_diagnostics(insights)
         self.combined_data.update(insights)
 
     def is_ready_to_flush(self):
@@ -388,6 +474,27 @@ class BufferData:
             'Array_Estimated_Power_W': array_power if array_power is not None else 'N/A',
             'BreakEven_Power_W': motor_power if break_even_eligible else 'N/A',
             'BreakEvenSpeed': speed if break_even_eligible else 'N/A',
+            # ML provenance: preserve the five input balances and data-quality
+            # context for filtering, weighting, and future array models. The
+            # current break-even forest intentionally keeps its physics inputs.
+            'Array_Estimate_Sample_1_W': self.combined_data.get('Array_Estimate_Sample_1_W', 'N/A'),
+            'Array_Estimate_Sample_2_W': self.combined_data.get('Array_Estimate_Sample_2_W', 'N/A'),
+            'Array_Estimate_Sample_3_W': self.combined_data.get('Array_Estimate_Sample_3_W', 'N/A'),
+            'Array_Estimate_Sample_4_W': self.combined_data.get('Array_Estimate_Sample_4_W', 'N/A'),
+            'Array_Estimate_Sample_5_W': self.combined_data.get('Array_Estimate_Sample_5_W', 'N/A'),
+            'Array_Estimate_Window_Count': self.combined_data.get('Array_Estimate_Window_Count', 'N/A'),
+            'Array_Estimate_Window_Spread_W': self.combined_data.get('Array_Estimate_Window_Spread_W', 'N/A'),
+            'Array_Estimate_Window_StdDev_W': self.combined_data.get('Array_Estimate_Window_StdDev_W', 'N/A'),
+            'Array_Estimate_Frames_Total': self.combined_data.get('Array_Estimate_Frames_Total', 'N/A'),
+            'Array_Estimate_Frames_Usable': self.combined_data.get('Array_Estimate_Frames_Usable', 'N/A'),
+            'Array_Estimate_Frames_Rejected': self.combined_data.get('Array_Estimate_Frames_Rejected', 'N/A'),
+            'Array_Estimate_Frame_Usable_Pct': self.combined_data.get('Array_Estimate_Frame_Usable_Pct', 'N/A'),
+            'Array_Estimate_Published_Count': self.combined_data.get('Array_Estimate_Published_Count', 'N/A'),
+            'Array_Estimate_Unavailable_Count': self.combined_data.get('Array_Estimate_Unavailable_Count', 'N/A'),
+            'Array_Estimate_Availability_Pct': self.combined_data.get('Array_Estimate_Availability_Pct', 'N/A'),
+            'Array_Estimate_Missing_Telemetry_Count': self.combined_data.get('Array_Estimate_Missing_Telemetry_Count', 'N/A'),
+            'Array_Estimate_Voltage_Mismatch_Count': self.combined_data.get('Array_Estimate_Voltage_Mismatch_Count', 'N/A'),
+            'Array_Estimate_Negative_Window_Count': self.combined_data.get('Array_Estimate_Negative_Window_Count', 'N/A'),
         }
 
         self.csv_handler.append_to_csv(training_data_path, training_entry)

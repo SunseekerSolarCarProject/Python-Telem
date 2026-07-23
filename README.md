@@ -46,6 +46,10 @@ If the virtual COM port does not appear immediately, reopen the configuration di
 
 ## Key Tabs & Features
 
+For a complete operator walkthrough, race-day checklists, metric
+interpretation, and troubleshooting, see
+[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
+
 ### Data Display & Data Tables
 Real-time telemetry values grouped by subsystem (motor controllers, battery packs, solar data, etc.). Predictions such as remaining time and break-even speed are annotated with uncertainty bands, timestamps, and quality flags.
 
