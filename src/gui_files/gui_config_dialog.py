@@ -14,6 +14,7 @@ from PyQt6.QtCore import pyqtSignal, QTimer
 from updater.update_checker import UpdateChecker
 from Version import VERSION
 from serial_reader import SerialReaderThread
+from app_settings import seed_packaged_runtime_defaults
 
 class ConfigDialog(QDialog):
     config_data_signal = pyqtSignal(dict)
@@ -51,6 +52,8 @@ class ConfigDialog(QDialog):
             else:
                 app_install_dir = os.path.dirname(os.path.abspath(__file__))
         self.app_install_dir = app_install_dir
+        if self._running_from_bundle:
+            seed_packaged_runtime_defaults(self._execution_dir())
         self.config_dir = self._resolve_config_dir()
         self.vehicle_years_file = os.path.join(self._execution_dir(), "vehicle_years.txt")
         

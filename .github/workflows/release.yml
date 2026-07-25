@@ -18,7 +18,7 @@ jobs:
         include:
           - os: windows-latest
             py: '3.12.10'
-            sep: ';'
+            sep: ':'
             icon_arg: '--icon src/assets/logo-icon.ico --windowed'
             artifact: telemetry-windows.zip
           - os: macos-latest
@@ -101,6 +101,7 @@ jobs:
             --hidden-import pymysql
             --hidden-import pytz
             --hidden-import PyQt6.QtNetwork
+            --hidden-import asc_energy_forecast
             --hidden-import scipy._lib.array_api_compat.numpy.fft
             --hidden-import scipy._lib.array_api_compat.numpy.linalg
             --hidden-import scipy._external.array_api_compat.numpy.fft
@@ -120,14 +121,16 @@ jobs:
             --onedir --noupx \
             --distpath dist \
             ${{ matrix.icon_arg }} \
+            --paths src \
             --additional-hooks-dir src/hooks \
             --hidden-import pyqtgraph \
-            --add-data "src/gui_files${{ matrix.sep }}gui_files/" \
-            --add-data "src/learning_datasets${{ matrix.sep }}learning_datasets/" \
-            --add-data "src/updater${{ matrix.sep }}updater/" \
-            --add-data "src/updater/metadata${{ matrix.sep }}updater/metadata/" \
+            --add-data "src/gui_files/dark_stylesheet.qss${{ matrix.sep }}gui_files/" \
+            --add-data "src/updater/metadata/root.json${{ matrix.sep }}updater/metadata/" \
+            --add-data "config_files${{ matrix.sep }}config_files/" \
+            --add-data "vehicle_years.txt${{ matrix.sep }}." \
             --add-data "src/__init__.py${{ matrix.sep }}." \
             --add-data "src/app_settings.py${{ matrix.sep }}." \
+            --add-data "src/asc_energy_forecast.py${{ matrix.sep }}." \
             --add-data "src/buffer_data.py${{ matrix.sep }}." \
             --add-data "src/central_logger.py${{ matrix.sep }}." \
             --add-data "src/csv_handler.py${{ matrix.sep }}." \
@@ -142,6 +145,22 @@ jobs:
             --add-data "src/Version.py${{ matrix.sep }}." \
             --add-data "src/simulation.py${{ matrix.sep }}." \
             "${COLLECT_FLAGS[@]}"
+
+          for REQUIRED_FILE in \
+            asc_energy_forecast.py \
+            vehicle_years.txt \
+            Battery_Max_2023.txt \
+            Battery_Nominal_2023.txt \
+            dark_stylesheet.qss \
+            root.json
+          do
+            PACKAGED_FILE="$(find dist/telemetry -type f -name "$REQUIRED_FILE" -print -quit)"
+            if [ -z "$PACKAGED_FILE" ]; then
+              echo "Required application file is missing from the package: $REQUIRED_FILE"
+              exit 1
+            fi
+            echo "Packaged required file: $PACKAGED_FILE"
+          done
 
       - name: Package onedir as zip
         shell: bash

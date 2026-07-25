@@ -1,6 +1,8 @@
 """Application settings persisted in application_data/config.json."""
 
 import json
+import shutil
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,51 @@ APP_SETTINGS_SECTION = "app_settings"
 AUTH_SCHEMES = ("auto", "bearer", "x-api-token", "x-api-key", "none")
 PAYLOAD_FORMATS = ("legacy", "ionos", "dual")
 STORAGE_MODES = ("http", "api", "both", "db", "database", "mariadb", "mysql")
+
+
+def seed_packaged_runtime_defaults(
+    install_dir: str | Path,
+    packaged_root: str | Path | None = None,
+) -> list[Path]:
+    """Copy missing writable defaults out of a PyInstaller bundle.
+
+    PyInstaller one-file and modern one-dir builds expose added data through
+    ``sys._MEIPASS``. The application intentionally edits vehicle years and
+    battery profiles beside the executable, so seed those locations once
+    without overwriting operator changes during later updates.
+    """
+    if packaged_root is None:
+        if not getattr(sys, "frozen", False):
+            return []
+        packaged_root = getattr(sys, "_MEIPASS", None)
+        if not packaged_root:
+            return []
+
+    source_root = Path(packaged_root)
+    destination_root = Path(install_dir)
+    copied = []
+
+    source_years = source_root / "vehicle_years.txt"
+    destination_years = destination_root / "vehicle_years.txt"
+    if source_years.is_file() and not destination_years.exists():
+        destination_root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_years, destination_years)
+        copied.append(destination_years)
+
+    source_configs = source_root / "config_files"
+    destination_configs = destination_root / "config_files"
+    if source_configs.is_dir():
+        for source_file in source_configs.rglob("*"):
+            if not source_file.is_file():
+                continue
+            relative_path = source_file.relative_to(source_configs)
+            destination_file = destination_configs / relative_path
+            if destination_file.exists():
+                continue
+            destination_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, destination_file)
+            copied.append(destination_file)
+    return copied
 
 
 def _clean_string(value: Any, default: str = "") -> str:

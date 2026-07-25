@@ -144,6 +144,12 @@ python src/main_app.py
 3. Tag the release (`git tag vX.Y.Z`) and push; the GitHub Actions workflow builds Windows/macOS/Linux artifacts via PyInstaller, runs `scripts/build_tuf_repo.py`, and publishes signed assets plus TUF metadata.  
 4. Verify telemetry bundles and updater metadata before announcing.
 
+The PyInstaller build must keep `src` on its module search path and package the
+ASC forecaster, dark stylesheet, trusted updater `root.json`, vehicle-year
+list, and default battery profiles. The release workflow verifies those files
+after every build. Never add `src/updater/` or `src/updater/keys/` as packaged
+data; signing keys do not belong in the application bundle.
+
 ### Updating the Updater
 The application uses TUF for signed updates. When publishing new artifacts, ensure you upload the freshly generated `release/metadata/*.json` and `release/targets/*.tar.gz`. Timestamp validity defaults to 60 days; rerun the pipeline for each release.
 

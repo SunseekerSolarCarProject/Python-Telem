@@ -58,12 +58,20 @@
    "value": false
   },
   {
-   "optionDest": "datas",
-   "value": "src/gui_files;gui_files/"
+   "optionDest": "pathex",
+   "value": "src"
   },
   {
    "optionDest": "datas",
-   "value": "src/learning_datasets;learning_datasets/"
+   "value": "src/gui_files/dark_stylesheet.qss;gui_files/"
+  },
+  {
+   "optionDest": "datas",
+   "value": "config_files;config_files/"
+  },
+  {
+   "optionDest": "datas",
+   "value": "vehicle_years.txt;."
   },
   {
    "optionDest": "datas",
@@ -72,6 +80,10 @@
   {
    "optionDest": "datas",
    "value": "src/app_settings.py;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "src/asc_energy_forecast.py;."
   },
   {
    "optionDest": "datas",
@@ -139,6 +151,10 @@
   },
   {
    "optionDest": "hiddenimports",
+   "value": "asc_energy_forecast"
+  },
+  {
+   "optionDest": "hiddenimports",
    "value": "scipy._lib.array_api_compat.numpy.fft"
   },
   {
@@ -195,11 +211,7 @@
   },
   {
    "optionDest": "datas",
-   "value": "src/updater;updater/"
-  },
-  {
-   "optionDest": "datas",
-   "value": "src/updater/metadata;updater/metadata/"
+   "value": "src/updater/metadata/root.json;updater/metadata/"
   },
   {
    "optionDest": "hiddenimports",

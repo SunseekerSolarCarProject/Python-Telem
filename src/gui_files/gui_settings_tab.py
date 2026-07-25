@@ -26,6 +26,7 @@ import os
 import sys
 from pathlib import Path
 from serial_reader import SerialReaderThread
+from app_settings import seed_packaged_runtime_defaults
 
 
 class SettingsTab(QWidget):
@@ -50,6 +51,8 @@ class SettingsTab(QWidget):
         self.color_buttons = {}
         self.color_displays = {}
         self._running_from_bundle = getattr(sys, "frozen", False)
+        if self._running_from_bundle:
+            seed_packaged_runtime_defaults(self._execution_dir())
         self.vehicle_years_file = os.path.join(self._execution_dir(), "vehicle_years.txt")
         self.init_ui()
 
