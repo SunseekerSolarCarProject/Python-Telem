@@ -31,6 +31,7 @@ from csv_handler import CSVHandler
 from app_settings import APP_SETTINGS_SECTION, AppSettings, load_config, save_app_settings
 from learning_datasets.machine_learning import MachineLearningModel
 from learning_datasets.quality_diagnostics import QualityDiagnostics
+from asc_energy_forecast import ASCEnergyForecaster
 from simulation import TelemetrySimulator
 from db_writer import TelemetryDBWriter, DBConfig
 
@@ -151,6 +152,11 @@ class TelemetryApplication(QObject):
         self._solcast_initial_fetch_pending = False
         self.solcast_poll_interval_seconds = 5 * 60
         self._latest_solcast_gps_location = None
+        self._asc_route_forecast_cache = {}
+        self._asc_route_forecast_cache_lock = threading.Lock()
+        self._asc_route_forecast_refresh_lock = threading.Lock()
+        self.asc_route_forecast_ttl_seconds = 30 * 60
+        self.asc_route_forecast_max_requests_per_poll = 6
 
         # Runtime workers and lifecycle flags.
         self.serial_reader_thread = None
@@ -199,6 +205,7 @@ class TelemetryApplication(QObject):
         self.init_solcast()
         self.init_machine_learning()
         self.quality_diagnostics = QualityDiagnostics()
+        self.asc_energy_forecaster = ASCEnergyForecaster()
 
         # Simulation emits parsed dictionaries into the same process_data path
         # used by live serial traffic, which keeps GUI/prediction behavior close
@@ -378,6 +385,29 @@ class TelemetryApplication(QObject):
             TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0],
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0],
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
+            TelemetryKey.NAV_ASC_PLAN_SPEED_MPH.value[0],
+            TelemetryKey.NAV_ASC_CHECKPOINT_STOP_MIN.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_LEG_SOLAR_WH.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_STOP_SOLAR_WH.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_LEG_DRIVE_WH.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_LEG_NET_WH.value[0],
+            TelemetryKey.NAV_ASC_ROUTE_SOLAR_WH.value[0],
+            TelemetryKey.NAV_ASC_ROUTE_DRIVE_WH.value[0],
+            TelemetryKey.NAV_ASC_ROUTE_NET_WH.value[0],
+            TelemetryKey.NAV_ASC_NEXT_CHECKPOINT_SOC_PCT.value[0],
+            TelemetryKey.NAV_ASC_AFTER_CHECKPOINT_SOC_PCT.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_LEG_ARRIVAL_TIME.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_CLOSE.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_MARGIN_MIN.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_STATUS.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_IS_STAGE_STOP.value[0],
+            TelemetryKey.NAV_ASC_ROUTE_MIN_CHECKPOINT_MARGIN_MIN.value[0],
+            TelemetryKey.NAV_ASC_ARRAY_GAIN_W_PER_W_M2.value[0],
+            TelemetryKey.NAV_ASC_DRIVE_WH_PER_MILE.value[0],
+            TelemetryKey.NAV_ASC_FORECAST_STATUS.value[0],
+            TelemetryKey.NAV_ASC_FORECAST_CONFIDENCE.value[0],
+            TelemetryKey.NAV_ASC_FORECAST_UPDATED.value[0],
+            TelemetryKey.NAV_ASC_LEG_FORECAST_SUMMARY.value[0],
             TelemetryKey.NAV_RACE_MODE.value[0],
             TelemetryKey.NAV_GPS_TRIP_DISTANCE_MI.value[0],
             TelemetryKey.NAV_SESSION_AVERAGE_SPEED_MPH.value[0],
@@ -668,6 +698,13 @@ class TelemetryApplication(QObject):
                 self.gui.settings_tab.solcast_config_changed.connect(self.on_solcast_config_changed)
             if hasattr(self.gui.settings_tab, 'telemetry_ingestion_config_changed'):
                 self.gui.settings_tab.telemetry_ingestion_config_changed.connect(self.on_telemetry_ingestion_config_changed)
+            if (
+                hasattr(self.gui, "gps_map_tab")
+                and hasattr(self.gui.gps_map_tab, "asc_route_changed")
+            ):
+                self.gui.gps_map_tab.asc_route_changed.connect(
+                    self._handle_asc_route_changed
+                )
             self.signals_connected = True
             self._schedule_initial_solcast_fetch()
             self.logger.debug("Connected GUI signals.")
@@ -988,6 +1025,98 @@ class TelemetryApplication(QObject):
             return self._latest_solcast_gps_location
         return self._current_solcast_location_tuple()
 
+    def _asc_route_plan_context(self) -> dict:
+        if not self.gui or not hasattr(self.gui, "gps_map_tab"):
+            return {}
+        getter = getattr(
+            self.gui.gps_map_tab, "get_asc_energy_plan_context", None
+        )
+        return getter() if callable(getter) else {}
+
+    def _handle_asc_route_changed(self):
+        """Refresh location forecasts when the operator loads an ASC route."""
+        with self._asc_route_forecast_cache_lock:
+            self._asc_route_forecast_cache.clear()
+        if self.solcast_key and self._solcast_query_location() is not None:
+            QTimer.singleShot(0, self.fetch_solcast_data)
+
+    def _refresh_asc_route_forecasts(
+        self,
+        fetched_at,
+        headers,
+        output_parameters,
+        plan=None,
+    ):
+        """Cache forecast series at representative locations for remaining legs."""
+        if not self._asc_route_forecast_refresh_lock.acquire(blocking=False):
+            return
+        try:
+            plan = plan or {}
+            legs = list(plan.get("legs") or [])
+            if plan.get("race_mode") != "ASC Route" or not legs:
+                return
+
+            active_keys = {leg.get("cache_key") for leg in legs}
+            with self._asc_route_forecast_cache_lock:
+                self._asc_route_forecast_cache = {
+                    key: value
+                    for key, value in self._asc_route_forecast_cache.items()
+                    if key in active_keys
+                }
+            requests_made = 0
+            for leg in legs:
+                cache_key = leg.get("cache_key")
+                try:
+                    latitude = float(leg.get("latitude"))
+                    longitude = float(leg.get("longitude"))
+                except (TypeError, ValueError):
+                    continue
+                with self._asc_route_forecast_cache_lock:
+                    cached = dict(
+                        self._asc_route_forecast_cache.get(cache_key, {})
+                    )
+                cached_at = cached.get("fetched_at")
+                fresh = (
+                    isinstance(cached_at, datetime)
+                    and (fetched_at - cached_at).total_seconds()
+                    < self.asc_route_forecast_ttl_seconds
+                )
+                if fresh:
+                    continue
+                if requests_made >= self.asc_route_forecast_max_requests_per_poll:
+                    break
+
+                url = (
+                    "https://api.solcast.com.au/data/forecast/"
+                    "radiation_and_weather"
+                    f"?latitude={latitude:.6f}&longitude={longitude:.6f}"
+                    "&hours=48&period=PT30M"
+                    f"&output_parameters={output_parameters}&format=json"
+                )
+                requests_made += 1
+                try:
+                    response = requests.get(url, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    forecasts = response.json().get("forecasts", [])
+                except Exception as exc:
+                    self.logger.warning(
+                        "ASC route forecast failed for %s: %s",
+                        leg.get("name", "leg"),
+                        exc,
+                    )
+                    continue
+                if forecasts:
+                    with self._asc_route_forecast_cache_lock:
+                        self._asc_route_forecast_cache[cache_key] = {
+                            "forecasts": forecasts,
+                            "fetched_at": fetched_at,
+                            "latitude": latitude,
+                            "longitude": longitude,
+                            "source": "route-location",
+                        }
+        finally:
+            self._asc_route_forecast_refresh_lock.release()
+
     def fetch_solcast_data(self):
         """Fetch live and forecast irradiance/weather data and emit into the GUI."""
         using_live_gps = (
@@ -1048,6 +1177,23 @@ class TelemetryApplication(QObject):
 
                 if payload:
                     self.update_data_signal.emit(payload)
+
+            route_plan = self._asc_route_plan_context()
+            if route_plan.get("race_mode") == "ASC Route" and route_plan.get(
+                "legs"
+            ):
+                route_thread = threading.Thread(
+                    target=self._refresh_asc_route_forecasts,
+                    args=(
+                        fetched_at,
+                        headers,
+                        output_parameters,
+                        route_plan,
+                    ),
+                    name="asc-route-solcast",
+                    daemon=True,
+                )
+                route_thread.start()
 
             source = "vehicle GPS" if using_live_gps else "configured fallback"
             self.logger.info(
@@ -1788,6 +1934,25 @@ class TelemetryApplication(QObject):
                         )
                         if nav_metrics:
                             combined_data.update(nav_metrics)
+
+                    # ASC planning remains separate from steady-state
+                    # break-even learning. It learns actual array conversion
+                    # and route Wh/mi, then integrates cached irradiance over
+                    # each remaining GPX leg and planned checkpoint stop.
+                    if not self._simulation_mode:
+                        self.asc_energy_forecaster.update_observations(
+                            combined_data
+                        )
+                    with self._asc_route_forecast_cache_lock:
+                        route_forecasts = dict(
+                            self._asc_route_forecast_cache
+                        )
+                    asc_metrics = self.asc_energy_forecaster.forecast(
+                        self._asc_route_plan_context(),
+                        combined_data,
+                        route_forecasts,
+                    )
+                    combined_data.update(asc_metrics)
 
                     self._maybe_update_solcast_location_from_gps(combined_data)
 

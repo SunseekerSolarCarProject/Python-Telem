@@ -55,15 +55,20 @@ Array power is estimated from the synchronized DC-bus balance
 `MC1 power + MC2 power - battery power`. The calculation is published only
 after both controller bus packets, the battery-shunt packet, and the pack
 voltage packet have arrived in the same firmware telemetry frame. There is no
-fixed array-size or wattage cap; incomplete frames report the estimate as
-unavailable instead of mixing new and stale currents. The instantaneous signed
-power balance remains available for diagnostics, while estimated array power
-uses a five-frame average to cancel short motor-controller/battery-shunt sensor
-latency during acceleration and regenerative braking. Sustained high output is
-not clipped.
+fixed array-size or wattage cap. The instantaneous signed power balance remains
+available for diagnostics, while estimated array power uses a rolling window
+of five incoming one-second firmware frames to cancel short
+motor-controller/battery-shunt sensor latency during acceleration and
+regenerative braking. Sustained high output is not clipped.
 
-Every estimate also publishes its exact five signed balance inputs and data
-quality history:
+An incomplete attempted frame occupies an explicit `N/A` slot instead of
+clearing all preceding good values. A numeric estimate is published when at
+least three of the five one-second slots are usable; fewer than three reports
+the estimate as unavailable. This tolerates one or two dropped/inconsistent
+cycles without borrowing measurements outside the bounded five-slot window.
+
+Every estimate also publishes the exact five window slots and data-quality
+history:
 
 ```text
 Array_Estimate_Window_W
@@ -83,11 +88,14 @@ Array_Estimate_Voltage_Mismatch_Count
 Array_Estimate_Negative_Window_Count
 ```
 
-Samples 1 through 5 are oldest to newest. Signed negative balance samples stay
-visible because they can cancel controller/shunt latency spikes. Frame usable
-percentage measures synchronized input completeness; estimate availability
-percentage measures how often a numeric five-frame output was actually
-published. Spread and standard deviation describe within-window inconsistency.
+Samples 1 through 5 are oldest to newest; an unusable second is `N/A`.
+`Array_Estimate_Window_Count` is the number of usable numeric slots, from zero
+through five. Signed negative balance samples stay visible because they can
+cancel controller/shunt latency spikes. Frame usable percentage measures
+synchronized input completeness; estimate availability percentage measures how
+often a numeric five-second-window output was actually published. Spread and
+standard deviation use only the usable numeric slots and describe
+within-window inconsistency.
 
 `BP_ISH` current samples also drive a race-session amp-hour integrator. The
 integrator uses the actual monotonic time between samples (normally about one
@@ -163,6 +171,29 @@ NAV_Route_Distance_Remaining
 NAV_Route_Distance_Traveled
 NAV_Checkpoint_Distance_Remaining
 NAV_Checkpoint_ETA
+NAV_ASC_Plan_Speed
+NAV_ASC_Checkpoint_Stop
+NAV_ASC_Current_Leg_Solar
+NAV_ASC_Current_Stop_Solar
+NAV_ASC_Current_Leg_Drive_Energy
+NAV_ASC_Current_Leg_Net_Energy
+NAV_ASC_Route_Solar
+NAV_ASC_Route_Drive_Energy
+NAV_ASC_Route_Net_Energy
+NAV_ASC_Next_Checkpoint_SOC
+NAV_ASC_After_Checkpoint_SOC
+NAV_ASC_Current_Leg_Arrival_Time
+NAV_ASC_Current_Checkpoint_Close
+NAV_ASC_Current_Checkpoint_Margin
+NAV_ASC_Current_Checkpoint_Status
+NAV_ASC_Current_Is_Stage_Stop
+NAV_ASC_Route_Min_Checkpoint_Margin
+NAV_ASC_Array_Gain_Per_Irradiance
+NAV_ASC_Drive_Energy_Rate
+NAV_ASC_Forecast_Status
+NAV_ASC_Forecast_Confidence
+NAV_ASC_Forecast_Updated
+NAV_ASC_Leg_Forecast_Summary
 ```
 
 The map has separate **FSGP Track** and **ASC Route** modes. ASC mode treats
@@ -172,6 +203,15 @@ search normally checks a window around the prior GPX match so long ASC files
 remain responsive, with a full-route fallback if the vehicle is off that
 window. Changing race modes preserves completed laps but clears the partial lap
 in progress so time spent in ASC mode cannot inflate a later FSGP lap.
+
+ASC energy fields integrate cached Solcast irradiance over the remaining GPX
+legs at the entered planning speed. The planner learns effective array output
+per W/m² and motor-bus Wh/mi from the current session. Route-location forecasts
+are preferred; current-location horizon fields are a labeled fallback. The
+current-stop solar value uses the default intermediate-checkpoint dwell time or
+the per-segment schedule override. Per-segment stage-stop flags and official
+local closing date/times produce predicted arrival, close margin, and cutoff
+status fields. Arrival SOC is calculated before the dwell.
 
 The GPS map tab also adds session-distance and FSGP lap fields:
 

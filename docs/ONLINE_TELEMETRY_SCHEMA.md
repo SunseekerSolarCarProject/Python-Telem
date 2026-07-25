@@ -297,17 +297,18 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 
 | Field | Meaning |
 | --- | --- |
-| `Array_Estimated_Power_W` / `Array_Estimated_Power_kW` | Five-frame synchronized estimate |
-| `Array_Estimate_Window_W` | Readable oldest-to-newest list of the five signed balances |
-| `Array_Estimate_Sample_1_W` ... `Array_Estimate_Sample_5_W` | Numeric window inputs saved for ML |
-| `Array_Estimate_Window_Spread_W` / `Array_Estimate_Window_StdDev_W` | Within-window inconsistency |
+| `Array_Estimated_Power_W` / `Array_Estimated_Power_kW` | Five-second-window estimate using at least three usable slots |
+| `Array_Estimate_Window_W` | Readable oldest-to-newest list of five signed balances or `N/A` gaps |
+| `Array_Estimate_Sample_1_W` ... `Array_Estimate_Sample_5_W` | Per-second numeric/`N/A` window slots saved for ML |
+| `Array_Estimate_Window_Count` | Usable numeric slots in the current five-second window |
+| `Array_Estimate_Window_Spread_W` / `Array_Estimate_Window_StdDev_W` | Numeric-slot inconsistency |
 | `Array_Estimate_Frames_Total` / `Usable` / `Rejected` | Synchronized-frame session counters |
 | `Array_Estimate_Frame_Usable_Pct` | Input completeness percentage |
 | `Array_Estimate_Published_Count` / `Unavailable_Count` | Numeric-output session counters |
 | `Array_Estimate_Availability_Pct` | Percentage of attempts that published an estimate |
 | `Array_Estimate_Missing_Telemetry_Count` | Frames missing one or more required packets |
 | `Array_Estimate_Voltage_Mismatch_Count` | Frames rejected for inconsistent bus voltage |
-| `Array_Estimate_Negative_Window_Count` | Five-frame averages rejected as materially negative |
+| `Array_Estimate_Negative_Window_Count` | Five-second-window averages rejected as materially negative |
 
 ### Remaining Capacity And Prediction
 
@@ -432,6 +433,22 @@ valid GPS fix is received and whenever GPS following is disabled.
 | `NAV_Route_Distance_Remaining` | mi | Remaining route distance. |
 | `NAV_Checkpoint_Distance_Remaining` | mi | Remaining distance to checkpoint. |
 | `NAV_Checkpoint_ETA` | `hh:mm:ss` | ETA to checkpoint. |
+| `NAV_ASC_Plan_Speed` | mph | Operator-entered effective leg pace, including expected routine traffic delay. |
+| `NAV_ASC_Checkpoint_Stop` | min | Default solar-charging stop after intermediate checkpoints. |
+| `NAV_ASC_Current_Leg_Solar` / `Current_Stop_Solar` | Wh | Forecast travel and checkpoint-stop solar energy. |
+| `NAV_ASC_Current_Leg_Drive_Energy` / `Current_Leg_Net_Energy` | Wh | Learned propulsion energy and travel solar minus propulsion energy. |
+| `NAV_ASC_Route_Solar` / `Route_Drive_Energy` / `Route_Net_Energy` | Wh | Remaining-route forecast totals. |
+| `NAV_ASC_Next_Checkpoint_SOC` / `After_Checkpoint_SOC` | % | Projected arrival SOC before and after planned checkpoint charging. |
+| `NAV_ASC_Current_Leg_Arrival_Time` / `Current_Checkpoint_Close` | local time | Predicted arrival and configured official close date/time. |
+| `NAV_ASC_Current_Checkpoint_Margin` | min | Positive before close; negative after close. |
+| `NAV_ASC_Current_Checkpoint_Status` | text | No closing time, Open, At risk, or Missed. |
+| `NAV_ASC_Current_Is_Stage_Stop` | Yes/No | Whether the current segment ends at a scheduled stage stop. |
+| `NAV_ASC_Route_Min_Checkpoint_Margin` | min | Smallest predicted close margin among remaining scheduled checkpoints. |
+| `NAV_ASC_Array_Gain_Per_Irradiance` | W per W/m² | Telemetry-learned effective array conversion; not area-capped. |
+| `NAV_ASC_Drive_Energy_Rate` | Wh/mi | Median observed moving motor-bus energy rate. |
+| `NAV_ASC_Forecast_Status` / `Forecast_Confidence` | text | Readiness, source/fallback, and confidence. |
+| `NAV_ASC_Forecast_Updated` | UTC timestamp | Time the leg-energy calculation was refreshed. |
+| `NAV_ASC_Leg_Forecast_Summary` | text | Ordered human-readable remaining-leg forecast. |
 | `NAV_Lap_Count` | laps | Completed lap count. |
 | `NAV_Current_Lap_Time` | `hh:mm:ss` | Current lap timer. |
 | `NAV_Last_Lap_Time` | `hh:mm:ss` | Last completed lap. |
@@ -469,7 +486,7 @@ For a public live page possible information, start with:
 | Race | `NAV_Lap_Count`, `NAV_Current_Lap_Time`, `NAV_Last_Lap_Time`, `NAV_Best_Lap_Time`, `NAV_Lap_Status` |
 | Motion | `IMU_FORWARD_G`, `IMU_DYNAMIC_G`, `IMU_PEAK_BOOT_G`, `IMU_G_VALID`, `IMU_G_CALIBRATED` |
 | Health | `Telemetry_Status`, `Telemetry_Error`, `MC1LIM_Errors`, `MC2LIM_Errors`, `Prediction_Quality_Flags` |
-| Solar | `Solcast_Live_GHI`, `Solcast_Fcst_GHI`, `Solcast_Live_Temp`, `Solcast_Fcst_Temp` |
+| Solar | `Solcast_Live_GHI`, `Solcast_Fcst_GHI`, `NAV_ASC_Current_Leg_Solar`, `NAV_ASC_Current_Leg_Net_Energy`, `NAV_ASC_Forecast_Confidence` |
 
 ## Notes For Backend/Webpage Code
 

@@ -10,7 +10,11 @@ from extra_calculations import ExtraCalculations
 from key_name_definitions import TelemetryKey
 
 class BufferData:
+    # Firmware emits one BP_PVS-terminated telemetry frame per second. Keep the
+    # most recent five attempted frames (including explicit missing slots) so
+    # one dropped packet does not erase the preceding good measurements.
     ARRAY_ESTIMATE_WINDOW_FRAMES = 5
+    ARRAY_ESTIMATE_MIN_USABLE_FRAMES = 3
     ARRAY_ESTIMATE_SAMPLE_KEYS = (
         TelemetryKey.ARRAY_ESTIMATE_SAMPLE_1_W.value[0],
         TelemetryKey.ARRAY_ESTIMATE_SAMPLE_2_W.value[0],
@@ -114,8 +118,8 @@ class BufferData:
 
         # BP_PVS follows both controller bus packets and BP_ISH in the firmware
         # frame. Calculate only at this boundary. If a required packet was
-        # absent, compute_array_insights publishes N/A and the incomplete frame
-        # is discarded instead of borrowing a stale value from an older frame.
+        # absent, the attempted second becomes an explicit N/A window slot
+        # instead of borrowing a stale value or erasing the other good slots.
         if 'BP_PVS_Voltage' in new_data:
             self._publish_completed_array_frame()
             self._array_frame_data.clear()
@@ -132,19 +136,33 @@ class BufferData:
         self._array_negative_window_count = 0
 
     def _add_array_diagnostics(self, insights):
-        """Attach the five-frame window and session data-quality counters."""
+        """Attach the five one-second frame slots and quality counters."""
         samples = list(self._array_power_balance_samples)
         insights[TelemetryKey.ARRAY_ESTIMATE_WINDOW_W.value[0]] = (
-            "[" + ", ".join(f"{sample:.1f}" for sample in samples) + "]"
+            "["
+            + ", ".join(
+                "N/A" if sample is None else f"{sample:.1f}"
+                for sample in samples
+            )
+            + "]"
         )
         for index, key in enumerate(self.ARRAY_ESTIMATE_SAMPLE_KEYS):
-            insights[key] = round(samples[index], 3) if index < len(samples) else 'N/A'
+            sample = samples[index] if index < len(samples) else None
+            insights[key] = round(sample, 3) if sample is not None else 'N/A'
 
-        sample_count = len(samples)
-        spread = max(samples) - min(samples) if samples else None
-        if samples:
-            mean = sum(samples) / sample_count
-            variance = sum((sample - mean) ** 2 for sample in samples) / sample_count
+        usable_samples = [sample for sample in samples if sample is not None]
+        sample_count = len(usable_samples)
+        spread = (
+            max(usable_samples) - min(usable_samples)
+            if usable_samples
+            else None
+        )
+        if usable_samples:
+            mean = sum(usable_samples) / sample_count
+            variance = (
+                sum((sample - mean) ** 2 for sample in usable_samples)
+                / sample_count
+            )
             standard_deviation = math.sqrt(variance)
         else:
             standard_deviation = None
@@ -183,7 +201,7 @@ class BufferData:
         })
 
     def _publish_completed_array_frame(self):
-        """Publish a synchronized, latency-smoothed array power estimate."""
+        """Publish an estimate from five attempted one-second telemetry frames."""
         self._array_frames_total += 1
         insights = self.extra_calculations.compute_array_insights(self._array_frame_data)
         power_balance = self.extra_calculations.safe_float(
@@ -193,47 +211,68 @@ class BufferData:
             self._array_frame_data.get('BP_PVS_Voltage')
         )
 
-        if (
+        frame_usable = not (
             power_balance is None
             or not math.isfinite(power_balance)
             or pack_voltage is None
             or not math.isfinite(pack_voltage)
             or pack_voltage <= 0
-        ):
-            # A broken frame also breaks continuity of the smoothing window.
-            # Require a fresh run of complete frames before publishing again.
-            self._array_power_balance_samples.clear()
+        )
+        if frame_usable:
+            # Signed values remain important: a later low/negative residual can
+            # cancel a controller/shunt timing spike from an earlier second.
+            self._array_frames_usable += 1
+            self._array_power_balance_samples.append(power_balance)
+        else:
+            # Retain the other seconds and put an explicit gap in this slot.
+            # The bounded deque prevents old values from surviving indefinitely.
+            self._array_power_balance_samples.append(None)
             self._array_frames_rejected += 1
-            self._array_estimates_unavailable += 1
             status = str(insights.get('Array_Estimate_Status', ''))
             if 'missing telemetry' in status.lower():
                 self._array_missing_telemetry_count += 1
             elif 'voltage mismatch' in status.lower():
                 self._array_voltage_mismatch_count += 1
-            self._add_array_diagnostics(insights)
-            self.combined_data.update(insights)
-            return
 
-        # Controller current responds faster than the battery shunt during load
-        # changes. Averaging the signed balance lets the later low/negative
-        # residual cancel the earlier positive spike. This is a temporal filter,
-        # not a wattage limit; sustained high generation remains high.
-        self._array_frames_usable += 1
-        self._array_power_balance_samples.append(power_balance)
-        sample_count = len(self._array_power_balance_samples)
-        if sample_count < self.ARRAY_ESTIMATE_WINDOW_FRAMES:
+        attempted_frame_count = len(self._array_power_balance_samples)
+        usable_samples = [
+            sample
+            for sample in self._array_power_balance_samples
+            if sample is not None
+        ]
+        usable_count = len(usable_samples)
+        if attempted_frame_count < self.ARRAY_ESTIMATE_WINDOW_FRAMES:
             insights['Array_Estimated_Current_A'] = 'N/A'
             insights['Array_Estimated_Power_W'] = 'N/A'
             insights['Array_Estimated_Power_kW'] = 'N/A'
             insights['Array_Estimate_Status'] = (
-                f'Stabilizing: {sample_count}/{self.ARRAY_ESTIMATE_WINDOW_FRAMES} synchronized frames'
+                f'Stabilizing: {attempted_frame_count}/'
+                f'{self.ARRAY_ESTIMATE_WINDOW_FRAMES} one-second frames '
+                f'({usable_count} usable)'
             )
             self._array_estimates_unavailable += 1
             self._add_array_diagnostics(insights)
             self.combined_data.update(insights)
             return
 
-        averaged_balance = sum(self._array_power_balance_samples) / sample_count
+        if usable_count < self.ARRAY_ESTIMATE_MIN_USABLE_FRAMES:
+            insights['Array_Estimated_Current_A'] = 'N/A'
+            insights['Array_Estimated_Power_W'] = 'N/A'
+            insights['Array_Estimated_Power_kW'] = 'N/A'
+            insights['Array_Estimate_Status'] = (
+                f'Unavailable: only {usable_count}/'
+                f'{self.ARRAY_ESTIMATE_WINDOW_FRAMES} usable one-second frames'
+            )
+            self._array_estimates_unavailable += 1
+            self._add_array_diagnostics(insights)
+            self.combined_data.update(insights)
+            return
+
+        # Controller current responds faster than the battery shunt during load
+        # changes. Averaging the signed usable slots lets a later low/negative
+        # residual cancel an earlier positive spike. This is a temporal filter,
+        # not a wattage limit; sustained high generation remains high.
+        averaged_balance = sum(usable_samples) / usable_count
         if averaged_balance < -50.0:
             insights['Array_Estimated_Current_A'] = 'N/A'
             insights['Array_Estimated_Power_W'] = 'N/A'
@@ -243,11 +282,18 @@ class BufferData:
             self._array_estimates_unavailable += 1
         else:
             estimated_power = max(0.0, averaged_balance)
-            insights['Array_Estimated_Current_A'] = estimated_power / pack_voltage
+            insights['Array_Estimated_Current_A'] = (
+                estimated_power / pack_voltage
+                if pack_voltage is not None
+                and math.isfinite(pack_voltage)
+                and pack_voltage > 0
+                else 'N/A'
+            )
             insights['Array_Estimated_Power_W'] = estimated_power
             insights['Array_Estimated_Power_kW'] = estimated_power / 1000.0
             insights['Array_Estimate_Status'] = (
-                f'Estimated: synchronized {self.ARRAY_ESTIMATE_WINDOW_FRAMES}-frame average'
+                f'Estimated: five-second window '
+                f'({usable_count}/{self.ARRAY_ESTIMATE_WINDOW_FRAMES} usable frames)'
             )
             self._array_estimate_generation += 1
             self._array_estimates_published += 1
@@ -454,7 +500,7 @@ class BufferData:
             and imu_valid == 1
             and array_power is not None
             and math.isfinite(array_power)
-            and array_status.startswith('Estimated: synchronized')
+            and array_status.startswith('Estimated: five-second window')
         )
 
         training_data_path = self.csv_handler.get_training_data_csv_path()
@@ -474,9 +520,13 @@ class BufferData:
             'Array_Estimated_Power_W': array_power if array_power is not None else 'N/A',
             'BreakEven_Power_W': motor_power if break_even_eligible else 'N/A',
             'BreakEvenSpeed': speed if break_even_eligible else 'N/A',
-            # ML provenance: preserve the five input balances and data-quality
-            # context for filtering, weighting, and future array models. The
-            # current break-even forest intentionally keeps its physics inputs.
+            # Live IMU-gated observations are the highest-confidence labels.
+            # Imported legacy rows receive a lower weight during normalization.
+            'BreakEven_Label_Weight': 1.0 if break_even_eligible else 'N/A',
+            # ML provenance: preserve the five one-second input slots (including
+            # N/A gaps) and quality context for filtering, weighting, and future
+            # array models. The current break-even forest intentionally keeps
+            # its physics inputs.
             'Array_Estimate_Sample_1_W': self.combined_data.get('Array_Estimate_Sample_1_W', 'N/A'),
             'Array_Estimate_Sample_2_W': self.combined_data.get('Array_Estimate_Sample_2_W', 'N/A'),
             'Array_Estimate_Sample_3_W': self.combined_data.get('Array_Estimate_Sample_3_W', 'N/A'),

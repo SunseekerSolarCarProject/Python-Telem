@@ -9,8 +9,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 try:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QDateTime, Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication, QCheckBox, QDateTimeEdit, QDialog
     from gui_files.gui_gps_map_tab import GPSMapTab
 except ModuleNotFoundError:
     QApplication = None
@@ -125,6 +126,143 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
         self.tab._refresh_compact_summary()
         self.assertIn("ASC", self.tab.compact_summary_label.text())
         self.assertIn("Route", self.tab.compact_summary_label.text())
+
+    def test_asc_energy_plan_uses_remaining_route_legs(self):
+        first = self.tab._build_route_segment(
+            "First.gpx",
+            [(42.0, -85.0), (42.1, -85.0), (42.2, -85.0)],
+        )
+        second = self.tab._build_route_segment(
+            "Second.gpx",
+            [(42.2, -85.0), (42.3, -85.0), (42.4, -85.0)],
+        )
+        self.tab.route_segments = [first, second]
+        self.tab.race_mode = self.tab.RACE_MODE_ASC
+        self.tab.route_progress_miles = first["length_miles"] / 2.0
+        self.tab.asc_plan_speed_mph = 32.0
+        self.tab.asc_checkpoint_stop_minutes = 15.0
+
+        context = self.tab.get_asc_energy_plan_context()
+
+        self.assertEqual(context["race_mode"], self.tab.RACE_MODE_ASC)
+        self.assertEqual(context["plan_speed_mph"], 32.0)
+        self.assertEqual(context["checkpoint_stop_minutes"], 15.0)
+        self.assertEqual([leg["name"] for leg in context["legs"]], [
+            "First",
+            "Second",
+        ])
+        self.assertAlmostEqual(
+            context["legs"][0]["remaining_miles"],
+            first["length_miles"] / 2.0,
+        )
+        self.assertIn("First|", context["legs"][0]["cache_key"])
+        first_cache_key = context["legs"][0]["cache_key"]
+
+        self.tab.route_progress_miles = first["length_miles"] * 0.75
+        later_context = self.tab.get_asc_energy_plan_context()
+        self.assertEqual(
+            later_context["legs"][0]["cache_key"],
+            first_cache_key,
+        )
+
+    def test_asc_plan_includes_per_segment_schedule(self):
+        segment = self.tab._build_route_segment(
+            "Stage One.gpx",
+            [(42.0, -85.0), (42.1, -85.0)],
+        )
+        segment["schedule"] = {
+            "stage_stop": True,
+            "stop_minutes": 35.0,
+            "close_iso": "2026-07-25T17:00:00-05:00",
+        }
+        self.tab.route_segments = [segment]
+        self.tab.race_mode = self.tab.RACE_MODE_ASC
+
+        leg = self.tab.get_asc_energy_plan_context()["legs"][0]
+
+        self.assertTrue(leg["stage_stop"])
+        self.assertEqual(leg["scheduled_stop_minutes"], 35.0)
+        self.assertEqual(
+            leg["close_iso"], "2026-07-25T17:00:00-05:00"
+        )
+
+    def test_checkpoint_schedule_controls_are_clickable_and_date_is_editable(self):
+        segment = self.tab._build_route_segment(
+            "Stage One.gpx",
+            [(42.0, -85.0), (42.1, -85.0)],
+        )
+        segment["schedule"] = {}
+        self.tab.route_segments = [segment]
+
+        def inspect_dialog(dialog):
+            dialog.show()
+            self.app.processEvents()
+            schedule_enabled = dialog.findChild(
+                QCheckBox, "ascScheduleEnabled1"
+            )
+            stage = dialog.findChild(QCheckBox, "ascStageStop1")
+            stop_override = dialog.findChild(
+                QCheckBox, "ascStopOverride1"
+            )
+            has_close = dialog.findChild(QCheckBox, "ascHasClose1")
+            close_input = dialog.findChild(
+                QDateTimeEdit, "ascCloseDateTime1"
+            )
+            self.assertIsNotNone(schedule_enabled)
+            self.assertIsNotNone(stage)
+            self.assertIsNotNone(stop_override)
+            self.assertIsNotNone(has_close)
+            self.assertIsNotNone(close_input)
+            self.assertTrue(close_input.isEnabled())
+
+            for checkbox in (
+                schedule_enabled,
+                stage,
+                stop_override,
+                has_close,
+            ):
+                QTest.mouseClick(
+                    checkbox,
+                    Qt.MouseButton.LeftButton,
+                    pos=checkbox.rect().center(),
+                )
+                self.assertTrue(checkbox.isChecked())
+                self.assertTrue(checkbox.text().startswith("[X]"))
+
+            selected = QDateTime.fromString(
+                "2026-08-02T17:45:00-05:00",
+                Qt.DateFormat.ISODate,
+            )
+            close_input.setDateTime(selected)
+            self.assertEqual(
+                close_input.dateTime().toString("yyyy-MM-dd HH:mm"),
+                "2026-08-02 17:45",
+            )
+            return QDialog.DialogCode.Rejected
+
+        with patch.object(QDialog, "exec", inspect_dialog):
+            self.tab._edit_asc_checkpoint_schedule()
+
+    def test_unselected_checkpoint_schedule_is_ignored_by_forecast_context(self):
+        segment = self.tab._build_route_segment(
+            "Optional Checkpoint.gpx",
+            [(42.0, -85.0), (42.1, -85.0)],
+        )
+        segment["schedule"] = {
+            "enabled": False,
+            "stage_stop": True,
+            "stop_minutes": 45.0,
+            "close_iso": "2026-08-02T17:45:00-05:00",
+        }
+        self.tab.route_segments = [segment]
+        self.tab.race_mode = self.tab.RACE_MODE_ASC
+
+        leg = self.tab.get_asc_energy_plan_context()["legs"][0]
+
+        self.assertFalse(leg["schedule_enabled"])
+        self.assertFalse(leg["stage_stop"])
+        self.assertIsNone(leg["scheduled_stop_minutes"])
+        self.assertEqual(leg["close_iso"], "")
 
     def test_average_lap_time_appears_after_three_completed_laps(self):
         self.tab.completed_lap_seconds = [60.0, 66.0]

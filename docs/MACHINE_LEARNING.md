@@ -27,7 +27,9 @@ valid, and absolute forward acceleration is at most 0.03 g. Each example pairs
 measured total motor-controller bus power with observed speed. At runtime,
 synchronized net array power is placed into the same power feature to estimate
 the speed that available solar power can sustain. Acceleration and braking rows
-are stored without a break-even label and cannot train this model.
+are stored without a break-even label and cannot train this model. Historical
+files without IMU fields can also supply lower-confidence labels through the
+legacy stability checks described below.
 
 ## How Prediction Runs
 
@@ -70,8 +72,8 @@ also easy to save, load, and inspect locally.
 Break-even training requires at least 20 steady-state rows. The last 20% of
 rows are held out chronologically to calculate validation MAE and R-squared;
 the production model is then refit on all valid rows. Validation results, row
-count, feature ranges, label definition, and training time are saved with the
-model.
+count, effective sample-weight total, modern/legacy label counts, feature
+ranges, label definition, and training time are saved with the model.
 
 ## Uncertainty And Quality Flags
 
@@ -113,7 +115,7 @@ it lives in the active application data directory managed by `CSVHandler`.
 The required headers are:
 
 ```csv
-BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,Used_Ah_Remaining_Time,Array_Estimated_Power_W,BreakEven_Power_W,BreakEvenSpeed,Array_Estimate_Sample_1_W,Array_Estimate_Sample_2_W,Array_Estimate_Sample_3_W,Array_Estimate_Sample_4_W,Array_Estimate_Sample_5_W,Array_Estimate_Window_Count,Array_Estimate_Window_Spread_W,Array_Estimate_Window_StdDev_W,Array_Estimate_Frames_Total,Array_Estimate_Frames_Usable,Array_Estimate_Frames_Rejected,Array_Estimate_Frame_Usable_Pct,Array_Estimate_Published_Count,Array_Estimate_Unavailable_Count,Array_Estimate_Availability_Pct,Array_Estimate_Missing_Telemetry_Count,Array_Estimate_Voltage_Mismatch_Count,Array_Estimate_Negative_Window_Count
+BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,Used_Ah_Remaining_Time,Array_Estimated_Power_W,BreakEven_Power_W,BreakEvenSpeed,BreakEven_Label_Weight,Array_Estimate_Sample_1_W,Array_Estimate_Sample_2_W,Array_Estimate_Sample_3_W,Array_Estimate_Sample_4_W,Array_Estimate_Sample_5_W,Array_Estimate_Window_Count,Array_Estimate_Window_Spread_W,Array_Estimate_Window_StdDev_W,Array_Estimate_Frames_Total,Array_Estimate_Frames_Usable,Array_Estimate_Frames_Rejected,Array_Estimate_Frame_Usable_Pct,Array_Estimate_Published_Count,Array_Estimate_Unavailable_Count,Array_Estimate_Availability_Pct,Array_Estimate_Missing_Telemetry_Count,Array_Estimate_Voltage_Mismatch_Count,Array_Estimate_Negative_Window_Count
 ```
 
 Battery-life rows are written when its required values are present and numeric.
@@ -124,23 +126,33 @@ break-even power/target remain `N/A` unless the row passes the steady-state gate
 - `BP_PVS_Ah`: integrated PV current converted to amp-hours
 - `BP_PVS_Voltage`: PV/battery-pack voltage used by the model
 - `Used_Ah_Remaining_Time`: calculated remaining time target, in hours
-- `Array_Estimated_Power_W`: synchronized five-frame array-power feature
+- `Array_Estimated_Power_W`: synchronized five-second-window array-power feature
 - `BreakEven_Power_W`: measured total motor-controller bus power for a valid
   steady-state training row; at prediction time this feature receives current
   net array power
 - `BreakEvenSpeed`: observed speed only for a moving, steady-state sample;
   otherwise `N/A`
+- `BreakEven_Label_Weight`: confidence supplied to the forest; `1.0` for a
+  current IMU-gated label and `0.5` for a legacy stability-derived label
 
-The remaining `Array_Estimate_*` columns are ML provenance: the five signed
-balance values, their spread/standard deviation, and cumulative missingness and
-availability counters. They are retained when training CSVs are combined, but
-are not automatically fed into the current break-even forest. Without an
-independent array-power sensor, treating the computed estimate as ground truth
-would train a model to reproduce its own formula. These columns instead support
-auditing, filtering, sample weighting, and a future supervised array model.
+The remaining `Array_Estimate_*` columns are ML provenance: the five
+one-second slots, their spread/standard deviation, and cumulative missingness
+and availability counters. Unusable slots remain `N/A`; a window can publish
+with three, four, or five usable signed balance values. The columns are
+retained when training CSVs are combined, but are not automatically fed into
+the current break-even forest. Without an independent array-power sensor,
+treating the computed estimate as ground truth would train a model to reproduce
+its own formula. These columns instead support auditing, filtering, sample
+weighting, and a future supervised array model.
 
 Negative `BP_PVS_milliamp*s` and `BP_PVS_Ah` values are valid net-charging
 examples and remain numeric throughout CSV normalization.
+
+Battery training retains finite target rows with at least 100 V and more than
+zero but no more than 24 hours of calculated remaining time. This is a
+training-quality filter, not a cap on signed PVS Ah or on runtime predictions.
+It prevents legacy near-zero-current `infinity` values and extreme
+remaining-time ratios from dominating the fit.
 
 The training file deliberately excludes most display-only telemetry fields.
 Keeping the model input narrow reduces accidental coupling to GUI fields and
@@ -191,18 +203,43 @@ successfully, the same normalized merged rows are promoted back into
 
 Use this when merging prior runs, test sessions, or corrected labels. The
 additional files can be either sparse training CSVs or fuller telemetry CSVs.
-For full telemetry CSVs, the combiner can derive `BreakEvenSpeed` from the first
-available speed field below, but only on rows with positive motor bus power,
-speed of at least 5 mph, valid IMU data, and absolute forward acceleration no
-greater than 0.03 g:
+For current full telemetry CSVs, the combiner derives `BreakEvenSpeed` from
+motor-controller speed (or a navigation fallback), but only on rows with
+positive motor bus power, speed of at least 5 mph, valid IMU data, and absolute
+forward acceleration no greater than 0.03 g:
 
 ```text
-MC1VEL_Speed
-MC1VEL_Velocity
-NAV_VEHICLE_MPH
-NAV_GPS_MPH
-NAV_IMU_MPH
+average(MC1VEL_Speed, MC2VEL_Speed)
+NAV_VEHICLE_MPH -> NAV_GPS_MPH -> NAV_IMU_MPH
 ```
+
+### Legacy telemetry compatibility
+
+Older full telemetry exports can be imported without pre-editing them. The
+normalizer:
+
+- maps the historical `BP_PVS_milliamp/s` spelling to
+  `BP_PVS_milliamp*s` without changing its signed value;
+- reconstructs `BreakEven_Power_W` as
+  `MC1BUS_Voltage * MC1BUS_Current + MC2BUS_Voltage * MC2BUS_Current`;
+- averages the two controller speed readings when both are available;
+- converts historical controller velocity fields from metres per second to mph
+  only when speed fields are unavailable;
+- accepts a legacy break-even label only when the previous and next samples
+  are 0.25 to 60 seconds away, both adjacent speed changes are at most 1 mph,
+  the controllers agree within 2 mph, speed is at least 5 mph, bus power is
+  above 50 W, and pack voltage is at least 100 V.
+
+These legacy labels receive weight `0.5`. New IMU-gated labels receive weight
+`1.0`, so a mixed model can work immediately from old data while newer,
+higher-confidence track data increasingly controls the learned curve. The
+runtime feature remains actual available power; the compatibility path does
+not substitute a speed-only model.
+
+Both **Retrain Machine Learning Model** and **Add Training Data Files** use this
+normalization. A sparse historical file containing only an observed-speed
+column but no measured or reconstructable power is deliberately rejected for
+break-even training.
 
 Every selected file is parsed independently. Missing files, unreadable CSVs,
 missing required columns, and non-numeric/incomplete rows are skipped with log

@@ -67,6 +67,7 @@ class MachineLearningModel:
         'Array_Estimated_Power_W',
         'BreakEven_Power_W',
         'BreakEvenSpeed',
+        'BreakEven_Label_Weight',
         'Array_Estimate_Sample_1_W',
         'Array_Estimate_Sample_2_W',
         'Array_Estimate_Sample_3_W',
@@ -90,20 +91,43 @@ class MachineLearningModel:
     # accepted, in priority order, as the current speed label for that target.
     BREAK_EVEN_LABEL_ALIASES = [
         'MC1VEL_Speed',
-        'MC1VEL_Velocity',
+        'MC2VEL_Speed',
         'NAV_VEHICLE_MPH',
         'NAV_GPS_MPH',
         'NAV_IMU_MPH',
     ]
+    LEGACY_COLUMN_ALIASES = {
+        # Older telemetry exports used a slash in this integrated-current field
+        # name. The values are still milliamp-seconds, not a current-per-second
+        # measurement, so map the spelling without changing the value.
+        'BP_PVS_milliamp*s': (
+            'BP_PVS_milliamp/s',
+            'BP_PVS_milliamp_s',
+        ),
+        # Very old exports may only carry the shunt-derived remaining-time
+        # target. It is compatible after the same finite/range checks.
+        'Used_Ah_Remaining_Time': (
+            'Shunt_Remaining_Time',
+        ),
+    }
     # A narrow training run may never observe the lower end of the vehicle's
     # normal pack-voltage range. Do not report PVS voltage extrapolation until
     # it falls below this known operational floor.
     PVS_VOLTAGE_QUALITY_MIN = 100.0
     BREAK_EVEN_FEATURES = ['BreakEven_Power_W', 'BP_PVS_Voltage']
-    BREAK_EVEN_MODEL_VERSION = 2
+    BREAK_EVEN_MODEL_VERSION = 3
     MIN_BREAK_EVEN_TRAINING_ROWS = 20
     MIN_BREAK_EVEN_SPEED_MPH = 5.0
     STEADY_STATE_MAX_ABS_FORWARD_G = 0.03
+    LEGACY_STEADY_MAX_SPEED_CHANGE_MPH = 1.0
+    LEGACY_MAX_CONTROLLER_SPEED_DIFFERENCE_MPH = 2.0
+    LEGACY_MIN_PROPULSION_POWER_W = 50.0
+    LEGACY_MIN_SAMPLE_INTERVAL_SECONDS = 0.25
+    LEGACY_MAX_SAMPLE_INTERVAL_SECONDS = 60.0
+    LEGACY_LABEL_WEIGHT = 0.5
+    MODERN_LABEL_WEIGHT = 1.0
+    BATTERY_TARGET_MIN_HOURS = 0.0
+    BATTERY_TARGET_MAX_HOURS = 24.0
 
     def __init__(self, model_dir: str = None):
         # --- Logger ---
@@ -284,7 +308,8 @@ class MachineLearningModel:
           features = [ 'BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage' ]
           target   =   'Used_Ah_Remaining_Time'
         """
-        df = pd.read_csv(csv_path)
+        raw = pd.read_csv(csv_path, low_memory=False)
+        df = self._normalize_training_frame(raw, csv_path)
         feats  = ['BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
         target = 'Used_Ah_Remaining_Time'
 
@@ -295,7 +320,23 @@ class MachineLearningModel:
             self.log.error(f"Battery-life CSV missing columns: {missing}")
             return
 
+        for column in feats + [target]:
+            df[column] = pd.to_numeric(df[column], errors='coerce')
         df = self._clean_data(df, feats + [target])
+        before_quality = len(df)
+        df = df.loc[
+            (df['BP_PVS_Voltage'] >= self.PVS_VOLTAGE_QUALITY_MIN)
+            & (df[target] > self.BATTERY_TARGET_MIN_HOURS)
+            & (df[target] <= self.BATTERY_TARGET_MAX_HOURS)
+        ].copy()
+        excluded_quality = before_quality - len(df)
+        if excluded_quality:
+            self.log.info(
+                "Excluded %s battery rows outside voltage/remaining-time "
+                "training bounds from %s",
+                excluded_quality,
+                csv_path,
+            )
         if df.empty:
             self.log.error("Battery-life training skipped: no valid numeric rows after cleaning.")
             return False
@@ -309,6 +350,15 @@ class MachineLearningModel:
             "feature_ranges": self._collect_feature_ranges(X, feats),
             "target_stats": self._target_stats(y),
             "trained_at": datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            "row_count": int(len(df)),
+            "source": os.path.abspath(csv_path),
+            "training_bounds": {
+                "minimum_voltage": self.PVS_VOLTAGE_QUALITY_MIN,
+                "remaining_time_hours": [
+                    self.BATTERY_TARGET_MIN_HOURS,
+                    self.BATTERY_TARGET_MAX_HOURS,
+                ],
+            },
         }
         # Save both the fitted pipeline and its metadata together. Legacy loaders
         # still accept pipeline-only dumps, but metadata powers quality flags.
@@ -432,20 +482,29 @@ class MachineLearningModel:
           features = [ 'BreakEven_Power_W', 'BP_PVS_Voltage' ]
           target   = observed speed during steady-state driving
         """
-        df = pd.read_csv(csv_path)
+        raw = pd.read_csv(csv_path, low_memory=False)
+        df = self._normalize_training_frame(raw, csv_path)
         feats = self.BREAK_EVEN_FEATURES
         target = 'BreakEvenSpeed'
+        weight_column = 'BreakEven_Label_Weight'
 
-        missing = [c for c in feats + [target] if c not in df.columns]
+        missing = [
+            c for c in feats + [target, weight_column]
+            if c not in df.columns
+        ]
         if missing:
             # Just warn, do not crash. Older training files may not have a
             # BreakEvenSpeed label until telemetry data is normalized/combined.
             self.log.warning(f"Skipping break-even training, missing required columns: {missing}")
             return
 
-        for column in feats + [target]:
+        for column in feats + [target, weight_column]:
             df[column] = pd.to_numeric(df[column], errors='coerce')
-        df = self._clean_data(df, feats + [target])
+        df = self._clean_data(df, feats + [target, weight_column])
+        df = df.loc[
+            (df[target] >= self.MIN_BREAK_EVEN_SPEED_MPH)
+            & (df[weight_column] > 0.0)
+        ].copy()
         if len(df) < self.MIN_BREAK_EVEN_TRAINING_ROWS:
             self.log.error(
                 "Break-even training skipped: "
@@ -455,37 +514,71 @@ class MachineLearningModel:
             return False
         X = df[feats]
         y = df[target]
+        weights = df[weight_column].clip(
+            lower=0.1, upper=self.MODERN_LABEL_WEIGHT
+        )
 
         # Evaluate chronologically so later telemetry is not leaked into the
         # validation window, then refit on every valid row for live use.
         split_index = max(1, min(len(df) - 1, int(len(df) * 0.8)))
         validation_pipe = self._new_break_even_pipeline()
-        validation_pipe.fit(X.iloc[:split_index], y.iloc[:split_index])
+        validation_pipe.fit(
+            X.iloc[:split_index],
+            y.iloc[:split_index],
+            rf__sample_weight=weights.iloc[:split_index],
+        )
         validation_predictions = validation_pipe.predict(X.iloc[split_index:])
         validation_target = y.iloc[split_index:]
+        validation_weights = weights.iloc[split_index:]
         validation = {
             "rows": int(len(validation_target)),
-            "mae_mph": float(mean_absolute_error(validation_target, validation_predictions)),
+            "mae_mph": float(
+                mean_absolute_error(
+                    validation_target,
+                    validation_predictions,
+                    sample_weight=validation_weights,
+                )
+            ),
             "r2": (
-                float(r2_score(validation_target, validation_predictions))
+                float(
+                    r2_score(
+                        validation_target,
+                        validation_predictions,
+                        sample_weight=validation_weights,
+                    )
+                )
                 if len(validation_target) >= 2
                 else None
             ),
         }
 
         candidate_pipe = self._new_break_even_pipeline()
-        candidate_pipe.fit(X, y)
+        candidate_pipe.fit(X, y, rf__sample_weight=weights)
+        legacy_rows = int(
+            (weights < self.MODERN_LABEL_WEIGHT).sum()
+        )
+        modern_rows = int(
+            (weights >= self.MODERN_LABEL_WEIGHT).sum()
+        )
         meta = {
             "feature_ranges": self._collect_feature_ranges(X, feats),
             "target_stats": self._target_stats(y),
             "trained_at": datetime.now(timezone.utc).isoformat(timespec='seconds'),
             "row_count": int(len(df)),
+            "effective_weight_sum": float(weights.sum()),
             "model_version": self.BREAK_EVEN_MODEL_VERSION,
             "features": list(feats),
             "label_definition": (
-                "Observed vehicle speed while moving with absolute forward "
-                f"acceleration <= {self.STEADY_STATE_MAX_ABS_FORWARD_G:.2f} g"
+                "Observed steady vehicle speed at measured motor bus power. "
+                "Modern rows use the IMU acceleration gate; legacy rows use "
+                "adjacent speed, timestamp, and controller-agreement gates."
             ),
+            "label_quality": {
+                "modern_full_weight_rows": modern_rows,
+                "legacy_half_weight_rows": legacy_rows,
+                "legacy_weight": self.LEGACY_LABEL_WEIGHT,
+            },
+            "source": os.path.abspath(csv_path),
             "validation": validation,
         }
         joblib.dump({"pipeline": candidate_pipe, "meta": meta}, self.be_path)
@@ -610,46 +703,250 @@ class MachineLearningModel:
     # -------------------------------------------------------------------------
     # SECTION: COMBINING & RETRAINING
     # -------------------------------------------------------------------------
+    def _apply_legacy_column_aliases(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Fill canonical training fields from known historical spellings."""
+        normalized = frame.copy()
+        for canonical, aliases in self.LEGACY_COLUMN_ALIASES.items():
+            if canonical in normalized.columns:
+                canonical_values = pd.to_numeric(
+                    normalized[canonical], errors='coerce'
+                )
+            else:
+                canonical_values = pd.Series(
+                    np.nan, index=normalized.index, dtype=float
+                )
+
+            for alias in aliases:
+                if alias not in normalized.columns:
+                    continue
+                alias_values = pd.to_numeric(normalized[alias], errors='coerce')
+                newly_filled = canonical_values.isna() & alias_values.notna()
+                if newly_filled.any():
+                    canonical_values = canonical_values.where(
+                        ~newly_filled, alias_values
+                    )
+                    self.log.info(
+                        "Mapped %s legacy values from %s to %s",
+                        int(newly_filled.sum()),
+                        alias,
+                        canonical,
+                    )
+            normalized[canonical] = canonical_values
+        return normalized
+
+    @staticmethod
+    def _coalesce_numeric(
+        existing: pd.Series | None,
+        fallback: pd.Series | None,
+        index,
+    ) -> pd.Series:
+        """Return numeric existing values with missing rows filled by fallback."""
+        if existing is None:
+            result = pd.Series(np.nan, index=index, dtype=float)
+        else:
+            result = pd.to_numeric(existing, errors='coerce')
+        if fallback is None:
+            return result
+        fallback_numeric = pd.to_numeric(fallback, errors='coerce')
+        return result.where(result.notna(), fallback_numeric)
+
+    def _derive_motor_speed_mph(
+        self, frame: pd.DataFrame
+    ) -> tuple[pd.Series | None, pd.Series | None]:
+        """Return the best historical speed label and controller disagreement."""
+        mc1_speed = (
+            pd.to_numeric(frame['MC1VEL_Speed'], errors='coerce')
+            if 'MC1VEL_Speed' in frame.columns
+            else None
+        )
+        mc2_speed = (
+            pd.to_numeric(frame['MC2VEL_Speed'], errors='coerce')
+            if 'MC2VEL_Speed' in frame.columns
+            else None
+        )
+        if mc1_speed is not None or mc2_speed is not None:
+            available = [
+                series for series in (mc1_speed, mc2_speed) if series is not None
+            ]
+            speed = pd.concat(available, axis=1).mean(axis=1, skipna=True)
+            disagreement = (
+                (mc1_speed - mc2_speed).abs()
+                if mc1_speed is not None and mc2_speed is not None
+                else None
+            )
+            return speed, disagreement
+
+        for alias in (
+            'NAV_VEHICLE_MPH',
+            'NAV_GPS_MPH',
+            'NAV_IMU_MPH',
+        ):
+            if alias in frame.columns:
+                return pd.to_numeric(frame[alias], errors='coerce'), None
+
+        # Velocity fields are metres per second in historical exports. Convert
+        # them instead of treating them as the mph label used by the model.
+        velocities = []
+        for alias in ('MC1VEL_Velocity', 'MC2VEL_Velocity'):
+            if alias in frame.columns:
+                velocities.append(
+                    pd.to_numeric(frame[alias], errors='coerce') * 2.2369362921
+                )
+        if velocities:
+            return pd.concat(velocities, axis=1).mean(axis=1, skipna=True), None
+        return None, None
+
+    def _legacy_steady_state_mask(
+        self,
+        frame: pd.DataFrame,
+        speed_mph: pd.Series,
+        motor_power_w: pd.Series,
+        controller_disagreement_mph: pd.Series | None,
+    ) -> pd.Series:
+        """Conservatively identify steady rows when old data has no IMU."""
+        previous_change = speed_mph.diff().abs()
+        next_change = (speed_mph.shift(-1) - speed_mph).abs()
+        steady = (
+            (speed_mph >= self.MIN_BREAK_EVEN_SPEED_MPH)
+            & (motor_power_w > self.LEGACY_MIN_PROPULSION_POWER_W)
+            & (
+                previous_change
+                <= self.LEGACY_STEADY_MAX_SPEED_CHANGE_MPH
+            )
+            & (next_change <= self.LEGACY_STEADY_MAX_SPEED_CHANGE_MPH)
+        )
+
+        if controller_disagreement_mph is not None:
+            steady &= (
+                controller_disagreement_mph
+                <= self.LEGACY_MAX_CONTROLLER_SPEED_DIFFERENCE_MPH
+            )
+
+        if 'BP_PVS_Voltage' in frame.columns:
+            voltage = pd.to_numeric(frame['BP_PVS_Voltage'], errors='coerce')
+            steady &= voltage >= self.PVS_VOLTAGE_QUALITY_MIN
+
+        timestamp_column = next(
+            (
+                column
+                for column in ('timestamp', 'Timestamp')
+                if column in frame.columns
+            ),
+            None,
+        )
+        if timestamp_column:
+            timestamps = pd.to_datetime(
+                frame[timestamp_column], errors='coerce'
+            )
+            previous_interval = timestamps.diff().dt.total_seconds()
+            next_interval = (
+                timestamps.shift(-1) - timestamps
+            ).dt.total_seconds()
+            steady &= previous_interval.between(
+                self.LEGACY_MIN_SAMPLE_INTERVAL_SECONDS,
+                self.LEGACY_MAX_SAMPLE_INTERVAL_SECONDS,
+            )
+            steady &= next_interval.between(
+                self.LEGACY_MIN_SAMPLE_INTERVAL_SECONDS,
+                self.LEGACY_MAX_SAMPLE_INTERVAL_SECONDS,
+            )
+        else:
+            self.log.warning(
+                "Legacy break-even labels not derived because the source has "
+                "no timestamp for sample-gap validation."
+            )
+            return pd.Series(False, index=frame.index, dtype=bool)
+        return steady.fillna(False)
+
     def _normalize_training_frame(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
         """
         Convert either a sparse training CSV or a full telemetry CSV into the
         exact numeric columns used by the saved model files.
         """
-        normalized = df.copy()
+        normalized = self._apply_legacy_column_aliases(df)
+        original_power = (
+            pd.to_numeric(normalized['BreakEven_Power_W'], errors='coerce')
+            if 'BreakEven_Power_W' in normalized.columns
+            else pd.Series(np.nan, index=normalized.index, dtype=float)
+        )
+
         # Full telemetry exports teach the road-load curve only from steady
         # driving. Acceleration/braking power is not sustainable road load and
         # would bias the inferred break-even speed.
-        if 'BreakEven_Power_W' not in normalized.columns:
-            if 'Motors_Total_Bus_Power_W' in normalized.columns:
-                normalized['BreakEven_Power_W'] = normalized['Motors_Total_Bus_Power_W']
-            elif {
-                'MC1BUS_Voltage',
-                'MC1BUS_Current',
-                'MC2BUS_Voltage',
-                'MC2BUS_Current',
-            }.issubset(normalized.columns):
-                normalized['BreakEven_Power_W'] = (
-                    pd.to_numeric(normalized['MC1BUS_Voltage'], errors='coerce')
-                    * pd.to_numeric(normalized['MC1BUS_Current'], errors='coerce')
-                    + pd.to_numeric(normalized['MC2BUS_Voltage'], errors='coerce')
-                    * pd.to_numeric(normalized['MC2BUS_Current'], errors='coerce')
-                )
-
-        if 'BreakEvenSpeed' not in normalized.columns:
-            normalized['BreakEvenSpeed'] = np.nan
-            speed_column = next(
-                (alias for alias in self.BREAK_EVEN_LABEL_ALIASES if alias in normalized.columns),
-                None,
+        derived_power = None
+        if 'Motors_Total_Bus_Power_W' in normalized.columns:
+            derived_power = pd.to_numeric(
+                normalized['Motors_Total_Bus_Power_W'], errors='coerce'
             )
-            required = {'BreakEven_Power_W', 'IMU_FORWARD_G'}
-            if speed_column and required.issubset(normalized.columns):
-                speed = pd.to_numeric(normalized[speed_column], errors='coerce')
-                motor_power = pd.to_numeric(
-                    normalized['BreakEven_Power_W'], errors='coerce'
+        if {
+            'MC1BUS_Voltage',
+            'MC1BUS_Current',
+            'MC2BUS_Voltage',
+            'MC2BUS_Current',
+        }.issubset(normalized.columns):
+            bus_power = (
+                pd.to_numeric(
+                    normalized['MC1BUS_Voltage'], errors='coerce'
                 )
-                forward_g = pd.to_numeric(normalized['IMU_FORWARD_G'], errors='coerce')
-                steady = (
-                    (forward_g.abs() <= self.STEADY_STATE_MAX_ABS_FORWARD_G)
+                * pd.to_numeric(
+                    normalized['MC1BUS_Current'], errors='coerce'
+                )
+                + pd.to_numeric(
+                    normalized['MC2BUS_Voltage'], errors='coerce'
+                )
+                * pd.to_numeric(
+                    normalized['MC2BUS_Current'], errors='coerce'
+                )
+            )
+            derived_power = self._coalesce_numeric(
+                derived_power, bus_power, normalized.index
+            )
+        normalized['BreakEven_Power_W'] = self._coalesce_numeric(
+            original_power, derived_power, normalized.index
+        )
+
+        speed, controller_disagreement = self._derive_motor_speed_mph(normalized)
+        if 'BreakEvenSpeed' in normalized.columns:
+            labels = pd.to_numeric(
+                normalized['BreakEvenSpeed'], errors='coerce'
+            )
+        else:
+            labels = pd.Series(np.nan, index=normalized.index, dtype=float)
+        if 'BreakEven_Label_Weight' in normalized.columns:
+            label_weights = pd.to_numeric(
+                normalized['BreakEven_Label_Weight'], errors='coerce'
+            )
+        else:
+            label_weights = pd.Series(
+                np.nan, index=normalized.index, dtype=float
+            )
+
+        # Existing labels are trusted only when the canonical power feature
+        # already accompanied them. Otherwise an old ordinary-speed column
+        # could silently become a false break-even label.
+        trusted_existing = labels.notna() & original_power.notna()
+        labels = labels.where(trusted_existing)
+        label_weights = label_weights.where(trusted_existing)
+        label_weights.loc[trusted_existing & label_weights.isna()] = (
+            self.MODERN_LABEL_WEIGHT
+        )
+
+        if speed is not None:
+            motor_power = pd.to_numeric(
+                normalized['BreakEven_Power_W'], errors='coerce'
+            )
+            unlabeled = labels.isna()
+            if 'IMU_FORWARD_G' in normalized.columns:
+                forward_g = pd.to_numeric(
+                    normalized['IMU_FORWARD_G'], errors='coerce'
+                )
+                modern_steady = (
+                    unlabeled
+                    & forward_g.notna()
+                    & (
+                        forward_g.abs()
+                        <= self.STEADY_STATE_MAX_ABS_FORWARD_G
+                    )
                     & (speed >= self.MIN_BREAK_EVEN_SPEED_MPH)
                     & (motor_power > 0.0)
                 )
@@ -657,16 +954,49 @@ class MachineLearningModel:
                     imu_valid = pd.to_numeric(
                         normalized['IMU_G_VALID'], errors='coerce'
                     ) == 1
-                    steady &= imu_valid
-                normalized.loc[steady, 'BreakEvenSpeed'] = speed.loc[steady]
-                self.log.info(
-                    f"Derived {int(steady.sum())} steady-state road-load labels "
-                    f"from {source}"
+                    modern_steady &= imu_valid
+                labels.loc[modern_steady] = speed.loc[modern_steady]
+                label_weights.loc[modern_steady] = self.MODERN_LABEL_WEIGHT
+                if modern_steady.any():
+                    self.log.info(
+                        "Derived %s IMU-gated steady-state road-load labels "
+                        "from %s",
+                        int(modern_steady.sum()),
+                        source,
+                    )
+            else:
+                forward_g = pd.Series(
+                    np.nan, index=normalized.index, dtype=float
                 )
 
+            legacy_candidates = labels.isna() & forward_g.isna()
+            legacy_steady = pd.Series(
+                False, index=normalized.index, dtype=bool
+            )
+            if legacy_candidates.any():
+                legacy_steady = self._legacy_steady_state_mask(
+                    normalized,
+                    speed,
+                    motor_power,
+                    controller_disagreement,
+                )
+                legacy_steady &= legacy_candidates
+            labels.loc[legacy_steady] = speed.loc[legacy_steady]
+            label_weights.loc[legacy_steady] = self.LEGACY_LABEL_WEIGHT
+            if legacy_steady.any():
+                self.log.info(
+                    "Derived %s lower-weight legacy steady-state road-load "
+                    "labels from %s",
+                    int(legacy_steady.sum()),
+                    source,
+                )
+
+        normalized['BreakEvenSpeed'] = labels
+        normalized['BreakEven_Label_Weight'] = label_weights
+
         # Preserve rows usable by either model. Legacy sparse files will receive
-        # an empty array-power column: their battery rows remain useful, while
-        # old ordinary-speed labels cannot train the new break-even model.
+        # empty array provenance: their battery rows remain useful, while raw
+        # bus/speed rows can teach a lower-weight legacy road-load baseline.
         for col in self.TRAINING_COLUMNS:
             if col not in normalized.columns:
                 normalized[col] = np.nan
@@ -685,7 +1015,10 @@ class MachineLearningModel:
             'BP_PVS_Voltage',
             'Used_Ah_Remaining_Time',
         ]
-        break_even_required = self.BREAK_EVEN_FEATURES + ['BreakEvenSpeed']
+        break_even_required = self.BREAK_EVEN_FEATURES + [
+            'BreakEvenSpeed',
+            'BreakEven_Label_Weight',
+        ]
         usable = (
             normalized[battery_required].notna().all(axis=1)
             | normalized[break_even_required].notna().all(axis=1)
@@ -730,7 +1063,7 @@ class MachineLearningModel:
                     continue
 
                 try:
-                    raw = pd.read_csv(file_path)
+                    raw = pd.read_csv(file_path, low_memory=False)
                 except Exception as exc:
                     # Continue through the rest of the selected files; one bad
                     # export should not block the whole retrain attempt.

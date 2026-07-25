@@ -222,15 +222,21 @@ when diagnosing GPS loss, wheel-speed disagreement, or drivetrain telemetry.
 The cards cover:
 
 - vehicle speed;
-- battery SOC, voltage, current, power, and temperature;
-- maximum and minimum cell voltage;
-- estimated array power and five-frame quality;
-- PVS net amp-hours;
-- motor temperatures and efficiency;
+- battery SOC, pack voltage/current/power, minimum cell voltage, and temperature;
+- estimated array power;
+- motor temperatures;
 - remaining-time and break-even-speed predictions;
-- GPS fix, lap count, lap timing, lap speeds, distance, day averages, and FSGP
-  projection;
+- trip distance and day/moving speed averages;
+- FSGP lap timing, official distance, time remaining, and projected laps while
+  FSGP mode is selected;
+- ASC checkpoint distance/ETA, leg solar and net energy, projected checkpoint
+  SOC, and forecast confidence while ASC mode is selected;
 - telemetry health.
+
+Detailed array inputs, frame availability, window spread, PVS counters,
+efficiency, GPS diagnostics, and forecast calibration values remain in
+**Data > Data Table**. They are intentionally omitted from the race-day
+dashboard so diagnostic fields do not crowd out driving decisions.
 
 Double-click a metric card to choose an available unit override for that card.
 The override is remembered. Global Metric/Imperial selection is available in
@@ -245,6 +251,7 @@ The alert list summarizes active:
 - invalid or uncalibrated IMU data;
 - malformed telemetry packets;
 - machine-learning quality warnings.
+- a low or unavailable ASC route-energy forecast.
 
 **No active alerts** means the application has not identified a current
 problem. It is not a substitute for the vehicle's safety checks.
@@ -392,7 +399,16 @@ Use **ASC Route** for continuous point-to-point route progress.
 2. Press **Load GPX**.
 3. Select one or more GPX files in travel order.
 4. Each selected file becomes a route/checkpoint segment.
-5. Press **Reset Day** at the official start.
+5. Set **ASC plan speed** to the expected overall leg pace. Lower it to include
+   routine traffic-light delay rather than entering only open-road cruise speed.
+6. Set **Checkpoint stop** to the planned charging time after intermediate
+   checkpoints that do not have an individual override.
+7. Press **Checkpoint Schedule** after loading the route. For each GPX segment,
+   click **Use this checkpoint** until it displays `[X]`. You can then mark it
+   as a stage stop, enable **Use custom stop** to enter its own planned stop
+   duration, and enable an official local closing date/time. A `[ ]` setting
+   is not applied by the route forecast.
+8. Press **Reset Day** at the official start.
 
 The application reports:
 
@@ -400,7 +416,42 @@ The application reports:
 - current/next checkpoint segment;
 - distance traveled and remaining;
 - distance to the next checkpoint;
-- checkpoint ETA at current speed.
+- checkpoint ETA at current speed;
+- forecast solar, propulsion, and net energy for the current leg and remaining
+  route;
+- projected battery SOC on arrival and after the planned checkpoint stop;
+- predicted local arrival time, official close time, and minutes before or
+  after closing;
+- **At risk** warnings at 30 minutes or less and **Missed** warnings for a
+  predicted arrival after closing;
+- a per-leg summary and forecast-confidence status.
+
+The route-energy planner learns two values from live telemetry: effective array
+watts per W/m² of Solcast irradiance and propulsion Wh/mi while moving. Medians
+update throughout the drive, so a future 6 m² array or a different vehicle
+configuration is learned without a fixed array-size or power cap.
+
+Solcast forecasts are requested and cached for a representative midpoint of
+each remaining GPX leg. Until those route-location forecasts arrive, the
+planner can use the current-position 30-minute, 1-hour, and 24-hour fields and
+labels the result **Approximate** with lower confidence. Route-location
+forecasts are cached for 30 minutes to avoid unnecessary API calls.
+
+The current-leg solar value covers travel. **Checkpoint Stop Solar** covers the
+configured stop. The global stop value applies to intermediate checkpoints;
+the schedule editor can override any segment, including a final stage stop.
+Arrival SOC is before that stop; after-checkpoint SOC includes its forecast
+charging. Closing times are stored by GPX segment name and use the computer's
+local date/time, so loading the same named route restores the schedule. Drive
+energy uses observed motor-bus
+Wh/mi, so it learns real ASC acceleration and traffic behavior separately from
+the steady-state break-even model.
+
+Forecast limitations remain important. Motor-bus energy does not include every
+unmeasured auxiliary, and the forecast cannot know future shading, traffic,
+detours, wind gusts, or road-grade changes perfectly. Treat **Low** confidence
+or an **Approximate/Partial** status as planning guidance rather than a command
+to increase speed.
 
 ASC progress does not move backward when GPS jitters or the route doubles back.
 Circuit lap timing is paused in ASC mode.
@@ -590,6 +641,12 @@ fallback.
 - **Add Training Data Files** merges selected historical CSV files into the
   normalized training corpus and retrains both models.
 
+Older telemetry files do not need the current derived ML columns. The import
+path recognizes the older `BP_PVS_milliamp/s` spelling and can reconstruct
+motor bus power from both controllers' voltage/current fields. When no IMU
+exists, it derives conservative steady-speed labels from adjacent timestamped
+samples and gives those rows half the weight of current IMU-validated rows.
+
 Do not retrain merely because a prediction looks unexpected. First inspect
 sensor validity, quality flags, and the training-data operating range.
 
@@ -656,24 +713,30 @@ Controller voltage must be within 25 percent of pack voltage. Missing inputs or
 a voltage mismatch reject the frame instead of combining new and stale values.
 
 Because controller and shunt sensors respond at different times, the
-application averages five consecutive signed power-balance frames. The five
-values are shown oldest to newest in **Array 5-Frame Inputs**. A short positive
-spike can therefore be canceled by a later low or negative residual.
+application uses a rolling window of five incoming one-second firmware frames.
+The five slots are shown oldest to newest in **Array 5-Second Inputs**. A short
+positive spike can therefore be canceled by a later low or negative residual.
+
+An incomplete second appears as `N/A` and no longer clears all the preceding
+good values. The application publishes a numeric estimate with three, four, or
+five usable slots. With fewer than three usable slots, it keeps the estimate
+unavailable. This allows normal one-per-second telemetry to tolerate up to two
+dropped or inconsistent cycles while keeping the window bounded.
 
 Useful quality fields are:
 
 | Field | Meaning |
 | --- | --- |
 | `Array_Estimate_Status` | Stabilizing, estimated, or unavailable reason |
-| `Array_Estimate_Window_Count` | Number of current synchronized samples, up to 5 |
+| `Array_Estimate_Window_Count` | Number of usable numeric slots in the five-second window |
 | `Array_Estimate_Window_Spread_W` | Maximum minus minimum sample in the window |
 | `Array_Estimate_Window_StdDev_W` | Within-window inconsistency |
 | `Array_Estimate_Frame_Usable_Pct` | Percentage of complete synchronized frames |
-| `Array_Estimate_Availability_Pct` | Percentage of attempts that published a five-frame estimate |
+| `Array_Estimate_Availability_Pct` | Percentage of attempts that published a five-second-window estimate |
 | `Array_Estimate_Frames_Rejected` | Frames not suitable for the window |
 | `Array_Estimate_Missing_Telemetry_Count` | Rejections caused by missing inputs |
 | `Array_Estimate_Voltage_Mismatch_Count` | Rejections caused by implausible bus-voltage disagreement |
-| `Array_Estimate_Negative_Window_Count` | Five-frame averages that remained materially negative |
+| `Array_Estimate_Negative_Window_Count` | Five-second-window averages that remained materially negative |
 
 Interpret the estimate cautiously when availability is low or spread/standard
 deviation is high. The estimate can be numerically high without being clipped;
@@ -702,6 +765,18 @@ After 20 new valid steady-state labels, the break-even model retrains in a
 background batch. Predictions continue using the prior model until the
 replacement is ready.
 
+Historical telemetry without IMU data can provide an immediate baseline when
+imported through **Settings > Models > Add Training Data Files**. A legacy row
+is used only when adjacent timestamp intervals are plausible, adjacent speeds
+change by at most 1 mph, both motor controllers agree within 2 mph, vehicle
+speed is at least 5 mph, motor bus power exceeds 50 W, and pack voltage is at
+least 100 V. It receives half the training weight of a new IMU-gated row. The
+model therefore remains compatible with old data while automatically shifting
+toward better new telemetry as it is collected.
+
+Treat a legacy-only result as a rough starting estimate. Check its uncertainty
+and out-of-range flags before using it to decide how hard to push the car.
+
 ### Prediction quality
 
 Always read the prediction together with:
@@ -719,9 +794,10 @@ a warning indicator, not a guaranteed confidence interval.
 
 ### Array provenance for future ML
 
-The exact five signed array-balance samples and the missingness/consistency
-counters are retained in `training_data.csv`. They are provenance for auditing,
-filtering, sample weighting, and a future supervised array model.
+The exact five array-balance slots, including `N/A` gaps, and the
+missingness/consistency counters are retained in `training_data.csv`. They are
+provenance for auditing, filtering, sample weighting, and a future supervised
+array model.
 
 They are not automatically used as predictors in the current break-even model.
 Without an independent array-power sensor, training on the calculated estimate
@@ -833,7 +909,8 @@ Do not rely on only one copy of race-day data.
 
 Read `Array_Estimate_Status`.
 
-- `Stabilizing`: wait for five consecutive synchronized frames.
+- `Stabilizing`: wait until five one-second frame slots have been observed.
+- `only N/5 usable`: fewer than three slots in the current window are usable.
 - `missing telemetry`: inspect MC1BUS, MC2BUS, BP_ISH, and BP_PVS packets.
 - `DC-bus voltage mismatch`: check stale controller data, scaling, and
   endianness.

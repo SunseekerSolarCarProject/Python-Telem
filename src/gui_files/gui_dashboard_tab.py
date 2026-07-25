@@ -109,48 +109,55 @@ class DashboardTab(QWidget):
 
         self.cards = {}
         card_specs = [
-            ("Vehicle Speed", TelemetryKey.NAV_VEHICLE_MPH.value[0]),
-            ("Battery SOC", TelemetryKey.BP_ISH_SOC.value[0]),
-            ("Pack Voltage", TelemetryKey.BP_PVS_VOLTAGE.value[0]),
-            ("Max Cell Voltage", TelemetryKey.BP_VMX_VOLTAGE.value[0]),
-            ("Min Cell Voltage", TelemetryKey.BP_VMN_VOLTAGE.value[0]),
-            ("Pack Current", TelemetryKey.BP_ISH_AMPS.value[0]),
-            ("Pack Power", TelemetryKey.BATTERY_PACK_POWER_KW.value[0]),
-            ("Array Power (est.)", TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0]),
-            ("Array 5-Frame Inputs", TelemetryKey.ARRAY_ESTIMATE_WINDOW_W.value[0]),
-            ("Array Frame Usable", TelemetryKey.ARRAY_ESTIMATE_FRAME_USABLE_PCT.value[0]),
-            ("Array Estimate Available", TelemetryKey.ARRAY_ESTIMATE_AVAILABILITY_PCT.value[0]),
-            ("Array Window Spread", TelemetryKey.ARRAY_ESTIMATE_WINDOW_SPREAD_W.value[0]),
-            ("PVS Net Ah", TelemetryKey.BP_PVS_AH.value[0]),
-            ("Battery Temp", TelemetryKey.BP_TMX_TEMPERATURE.value[0]),
-            ("MC1 Temp", TelemetryKey.MC1TP1_MOTOR_TEMP.value[0]),
-            ("MC2 Temp", TelemetryKey.MC2TP1_MOTOR_TEMP.value[0]),
-            ("Motor Efficiency", TelemetryKey.MOTORS_AVERAGE_EFFICIENCY_PCT.value[0]),
-            ("Remaining Time", TelemetryKey.PREDICTED_EXACT_TIME.value[0]),
-            ("Break Even", TelemetryKey.PREDICTED_BREAK_EVEN_SPEED.value[0]),
-            ("GPS Fix", TelemetryKey.NAV_FIX.value[0]),
-            ("Lap Count", TelemetryKey.NAV_LAP_COUNT.value[0]),
-            ("Current Lap", TelemetryKey.NAV_CURRENT_LAP_TIME.value[0]),
-            ("Last Lap", TelemetryKey.NAV_LAST_LAP_TIME.value[0]),
-            ("Last Lap Speed", TelemetryKey.NAV_LAST_LAP_AVERAGE_SPEED_MPH.value[0]),
-            ("Average Lap Speed", TelemetryKey.NAV_AVERAGE_LAP_SPEED_MPH.value[0]),
-            ("GPS Trip Distance", TelemetryKey.NAV_GPS_TRIP_DISTANCE_MI.value[0]),
-            ("Day Average Speed", TelemetryKey.NAV_SESSION_AVERAGE_SPEED_MPH.value[0]),
-            ("Moving Average Speed", TelemetryKey.NAV_DAY_MOVING_AVERAGE_SPEED_MPH.value[0]),
-            ("Official Distance", TelemetryKey.NAV_FSGP_OFFICIAL_DISTANCE_MI.value[0]),
-            ("Possible FSGP Laps", TelemetryKey.NAV_FSGP_PROJECTED_TOTAL_LAPS.value[0]),
-            ("Telemetry", TelemetryKey.TELEMETRY_STATUS.value[0]),
+            ("Vehicle Speed", TelemetryKey.NAV_VEHICLE_MPH.value[0], "always"),
+            ("Battery SOC", TelemetryKey.BP_ISH_SOC.value[0], "always"),
+            ("Pack Voltage", TelemetryKey.BP_PVS_VOLTAGE.value[0], "always"),
+            ("Minimum Cell", TelemetryKey.BP_VMN_VOLTAGE.value[0], "always"),
+            ("Pack Current", TelemetryKey.BP_ISH_AMPS.value[0], "always"),
+            ("Pack Power", TelemetryKey.BATTERY_PACK_POWER_KW.value[0], "always"),
+            ("Array Power (est.)", TelemetryKey.ARRAY_ESTIMATED_POWER_KW.value[0], "always"),
+            ("Battery Temp", TelemetryKey.BP_TMX_TEMPERATURE.value[0], "always"),
+            ("MC1 Temp", TelemetryKey.MC1TP1_MOTOR_TEMP.value[0], "always"),
+            ("MC2 Temp", TelemetryKey.MC2TP1_MOTOR_TEMP.value[0], "always"),
+            ("Remaining Time", TelemetryKey.PREDICTED_EXACT_TIME.value[0], "always"),
+            ("Break Even", TelemetryKey.PREDICTED_BREAK_EVEN_SPEED.value[0], "always"),
+            ("GPS Trip Distance", TelemetryKey.NAV_GPS_TRIP_DISTANCE_MI.value[0], "always"),
+            ("Day Average Speed", TelemetryKey.NAV_SESSION_AVERAGE_SPEED_MPH.value[0], "always"),
+            ("Moving Average Speed", TelemetryKey.NAV_DAY_MOVING_AVERAGE_SPEED_MPH.value[0], "always"),
+            ("Telemetry", TelemetryKey.TELEMETRY_STATUS.value[0], "always"),
+            ("Lap Count", TelemetryKey.NAV_LAP_COUNT.value[0], "fsgp"),
+            ("Current Lap", TelemetryKey.NAV_CURRENT_LAP_TIME.value[0], "fsgp"),
+            ("Last Lap", TelemetryKey.NAV_LAST_LAP_TIME.value[0], "fsgp"),
+            ("Average Lap Speed", TelemetryKey.NAV_AVERAGE_LAP_SPEED_MPH.value[0], "fsgp"),
+            ("Official Distance", TelemetryKey.NAV_FSGP_OFFICIAL_DISTANCE_MI.value[0], "fsgp"),
+            ("FSGP Time Remaining", TelemetryKey.NAV_FSGP_TIME_REMAINING.value[0], "fsgp"),
+            ("Possible FSGP Laps", TelemetryKey.NAV_FSGP_PROJECTED_TOTAL_LAPS.value[0], "fsgp"),
+            ("Checkpoint", TelemetryKey.NAV_CHECKPOINT_NAME.value[0], "asc"),
+            ("Checkpoint Remaining", TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0], "asc"),
+            ("Checkpoint ETA", TelemetryKey.NAV_CHECKPOINT_ETA.value[0], "asc"),
+            ("Planned Arrival", TelemetryKey.NAV_ASC_CURRENT_LEG_ARRIVAL_TIME.value[0], "asc"),
+            ("Checkpoint Close Margin", TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_MARGIN_MIN.value[0], "asc"),
+            ("Leg Solar Forecast", TelemetryKey.NAV_ASC_CURRENT_LEG_SOLAR_WH.value[0], "asc"),
+            ("Checkpoint Stop Solar", TelemetryKey.NAV_ASC_CURRENT_STOP_SOLAR_WH.value[0], "asc"),
+            ("Leg Net Energy", TelemetryKey.NAV_ASC_CURRENT_LEG_NET_WH.value[0], "asc"),
+            ("Checkpoint Arrival SOC", TelemetryKey.NAV_ASC_NEXT_CHECKPOINT_SOC_PCT.value[0], "asc"),
+            ("Route Remaining", TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0], "asc"),
+            ("Remaining Route Net", TelemetryKey.NAV_ASC_ROUTE_NET_WH.value[0], "asc"),
         ]
 
         self.card_grid = QGridLayout()
         self.card_grid.setHorizontalSpacing(12)
         self.card_grid.setVerticalSpacing(12)
         self.card_order = []
-        for index, (title, key) in enumerate(card_specs):
+        self.card_modes = {}
+        self._active_race_mode = "fsgp"
+        for title, key, mode in card_specs:
             card = MetricCard(title, key, self._display_unit(key))
             card.unit_change_requested.connect(self._on_card_unit_change)
             self.cards[key] = card
             self.card_order.append(card)
+            self.card_modes[key] = mode
+            card.setHidden(mode == "asc")
         self._card_columns = 0
         self._reflow_cards(4)
         layout.addLayout(self.card_grid)
@@ -180,7 +187,10 @@ class DashboardTab(QWidget):
         if columns == self._card_columns:
             return
         self._card_columns = columns
-        for index, card in enumerate(self.card_order):
+        visible_cards = [card for card in self.card_order if not card.isHidden()]
+        for card in self.card_order:
+            self.card_grid.removeWidget(card)
+        for index, card in enumerate(visible_cards):
             self.card_grid.addWidget(card, index // columns, index % columns)
         for column in range(4):
             self.card_grid.setColumnStretch(column, 1 if column < columns else 0)
@@ -204,6 +214,18 @@ class DashboardTab(QWidget):
 
     def update_data(self, telemetry_data):
         self.last_telemetry_data = telemetry_data.copy()
+        race_mode = str(
+            telemetry_data.get(TelemetryKey.NAV_RACE_MODE.value[0], "")
+        ).strip()
+        desired_mode = "asc" if race_mode == "ASC Route" else "fsgp"
+        if desired_mode != self._active_race_mode:
+            self._active_race_mode = desired_mode
+            for key, card in self.cards.items():
+                mode = self.card_modes.get(key, "always")
+                card.setHidden(mode not in ("always", desired_mode))
+            columns = self._card_columns or 4
+            self._card_columns = 0
+            self._reflow_cards(columns)
         for key, card in self.cards.items():
             if key == TelemetryKey.NAV_VEHICLE_MPH.value[0]:
                 display, target, state = self._speed_card_display(telemetry_data, card.unit)
@@ -316,11 +338,29 @@ class DashboardTab(QWidget):
         return value
 
     def _state_for_value(self, key, value):
+        if key == TelemetryKey.NAV_ASC_FORECAST_CONFIDENCE.value[0]:
+            confidence = str(value or "").strip().lower()
+            if confidence in ("low", "unavailable"):
+                return "warning"
+        if key == TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_MARGIN_MIN.value[0]:
+            try:
+                margin = float(value)
+            except (TypeError, ValueError):
+                return "normal"
+            if margin < 0:
+                return "danger"
+            if margin <= 30:
+                return "warning"
         try:
             number = float(value)
         except (TypeError, ValueError):
             return "normal"
         if key == TelemetryKey.BP_ISH_SOC.value[0] and number < 20:
+            return "danger"
+        if (
+            key == TelemetryKey.NAV_ASC_NEXT_CHECKPOINT_SOC_PCT.value[0]
+            and number < 20
+        ):
             return "danger"
         if key in (TelemetryKey.MC1TP1_MOTOR_TEMP.value[0], TelemetryKey.MC2TP1_MOTOR_TEMP.value[0], TelemetryKey.BP_TMX_TEMPERATURE.value[0]) and number > 150:
             return "danger"
@@ -364,6 +404,40 @@ class DashboardTab(QWidget):
         quality = str(telemetry_data.get(TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0], "")).strip()
         if quality and quality.lower() not in ("0", "none", "ok", "n/a"):
             alerts.append(f"Prediction quality: {quality}")
+
+        if (
+            telemetry_data.get(TelemetryKey.NAV_RACE_MODE.value[0])
+            == "ASC Route"
+        ):
+            confidence = str(
+                telemetry_data.get(
+                    TelemetryKey.NAV_ASC_FORECAST_CONFIDENCE.value[0], ""
+                )
+            ).strip()
+            if confidence.lower() in ("low", "unavailable"):
+                status = str(
+                    telemetry_data.get(
+                        TelemetryKey.NAV_ASC_FORECAST_STATUS.value[0],
+                        confidence,
+                    )
+                ).strip()
+                alerts.append(f"ASC forecast: {status}")
+            checkpoint_status = str(
+                telemetry_data.get(
+                    TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_STATUS.value[0],
+                    "",
+                )
+            ).strip()
+            if checkpoint_status.startswith(("Missed", "At risk")):
+                checkpoint_name = str(
+                    telemetry_data.get(
+                        TelemetryKey.NAV_CHECKPOINT_NAME.value[0],
+                        "checkpoint",
+                    )
+                ).strip()
+                alerts.append(
+                    f"ASC cutoff — {checkpoint_name}: {checkpoint_status}"
+                )
 
         self.alerts.clear()
         if alerts:

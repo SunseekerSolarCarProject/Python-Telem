@@ -4,14 +4,18 @@ import os
 import time
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
+from datetime import datetime
 
-from PyQt6.QtCore import QSettings, QStandardPaths, Qt, QUrl
+from PyQt6.QtCore import QDateTime, QSettings, QStandardPaths, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPixmapCache
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkDiskCache, QNetworkReply, QNetworkRequest
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QDialog,
+    QDialogButtonBox,
+    QDateTimeEdit,
     QFileDialog,
     QFrame,
     QGraphicsEllipseItem,
@@ -28,12 +32,29 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from key_name_definitions import TelemetryKey
+
+
+class VisibleCheckBox(QCheckBox):
+    """Checkbox whose selected state remains obvious in every Qt theme."""
+
+    def __init__(self, label, parent=None):
+        super().__init__(parent)
+        self._label = str(label)
+        self.toggled.connect(self._refresh_visible_state)
+        self._refresh_visible_state(self.isChecked())
+
+    def _refresh_visible_state(self, checked):
+        self.setText(f"[X] {self._label}" if checked else f"[ ] {self._label}")
+        self.setProperty("selected", bool(checked))
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class MapGraphicsView(QGraphicsView):
@@ -92,6 +113,7 @@ class GPSMapTab(QWidget):
     MAX_MOVING_TIME_SAMPLE_GAP_SECONDS = 5.0
     KALAMAZOO_LAT = 42.291707
     KALAMAZOO_LON = -85.587229
+    asc_route_changed = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -125,6 +147,8 @@ class GPSMapTab(QWidget):
             self.race_mode,
             self.track_lap_length_miles,
             self.fsgp_day_duration_hours,
+            self.asc_plan_speed_mph,
+            self.asc_checkpoint_stop_minutes,
         ) = self._load_race_settings()
         if self.race_mode == self.RACE_MODE_ASC:
             self.lap_status = "ASC route mode"
@@ -134,12 +158,14 @@ class GPSMapTab(QWidget):
         self.previous_trip_at = None
         self.day_moving_seconds = 0.0
         self.day_max_speed_mph = 0.0
+        self.last_asc_energy_metrics = {}
         self.tile_cache = OrderedDict()
         self.tile_items = {}
         self.visible_tile_keys = set()
         self.pending_tiles = set()
         self.pending_replies = {}
         self.saved_locations = self._load_saved_locations()
+        self.asc_checkpoint_schedules = self._load_asc_checkpoint_schedules()
 
         self.network = QNetworkAccessManager(self)
         self.network.setCache(self._create_tile_disk_cache())
@@ -240,6 +266,17 @@ class GPSMapTab(QWidget):
         load_gpx_button = QPushButton("Load GPX")
         load_gpx_button.clicked.connect(self._load_gpx_route)
         route_row.addWidget(load_gpx_button)
+        self.asc_schedule_button = QPushButton("Checkpoint Schedule")
+        self.asc_schedule_button.setToolTip(
+            "Set stage stops, per-checkpoint stop durations, and local closing date/times."
+        )
+        self.asc_schedule_button.setEnabled(
+            self.race_mode == self.RACE_MODE_ASC and bool(self.route_segments)
+        )
+        self.asc_schedule_button.clicked.connect(
+            self._edit_asc_checkpoint_schedule
+        )
+        route_row.addWidget(self.asc_schedule_button)
         self.set_lap_start_button = QPushButton("Set Start")
         self.set_lap_start_button.setToolTip("Click, then double-click the first end of the timing line on the map.")
         self.set_lap_start_button.clicked.connect(self._set_lap_start)
@@ -294,6 +331,43 @@ class GPSMapTab(QWidget):
         self.day_duration_input.setEnabled(self.race_mode == self.RACE_MODE_FSGP)
         self.day_duration_input.valueChanged.connect(self._day_duration_changed)
         race_row.addWidget(self.day_duration_input)
+        race_row.addWidget(QLabel("ASC plan speed:"))
+        self.asc_plan_speed_input = QDoubleSpinBox()
+        self.asc_plan_speed_input.setDecimals(1)
+        self.asc_plan_speed_input.setRange(5.0, 80.0)
+        self.asc_plan_speed_input.setSingleStep(1.0)
+        self.asc_plan_speed_input.setSuffix(" mph")
+        self.asc_plan_speed_input.setValue(self.asc_plan_speed_mph)
+        self.asc_plan_speed_input.setToolTip(
+            "Expected overall leg pace used for travel time and energy. Enter a lower value when routine traffic-light delays are expected."
+        )
+        self.asc_plan_speed_input.setEnabled(
+            self.race_mode == self.RACE_MODE_ASC
+        )
+        self.asc_plan_speed_input.valueChanged.connect(
+            self._asc_plan_speed_changed
+        )
+        race_row.addWidget(self.asc_plan_speed_input)
+        race_row.addWidget(QLabel("Checkpoint stop:"))
+        self.asc_checkpoint_stop_input = QDoubleSpinBox()
+        self.asc_checkpoint_stop_input.setDecimals(0)
+        self.asc_checkpoint_stop_input.setRange(0.0, 180.0)
+        self.asc_checkpoint_stop_input.setSingleStep(5.0)
+        self.asc_checkpoint_stop_input.setSuffix(" min")
+        self.asc_checkpoint_stop_input.setValue(
+            self.asc_checkpoint_stop_minutes
+        )
+        self.asc_checkpoint_stop_input.setToolTip(
+            "Default solar-charging time after intermediate ASC checkpoints. "
+            "Checkpoint Schedule can override individual segments."
+        )
+        self.asc_checkpoint_stop_input.setEnabled(
+            self.race_mode == self.RACE_MODE_ASC
+        )
+        self.asc_checkpoint_stop_input.valueChanged.connect(
+            self._asc_checkpoint_stop_changed
+        )
+        race_row.addWidget(self.asc_checkpoint_stop_input)
         reset_trip_button = QPushButton("Reset Trip")
         reset_trip_button.setToolTip("Reset GPS trip distance and ASC route progress.")
         reset_trip_button.clicked.connect(self._reset_trip)
@@ -339,6 +413,10 @@ class GPSMapTab(QWidget):
         details_layout.addWidget(self.day_summary_label)
         self.fsgp_projection_label = QLabel("FSGP projection: set race-day duration")
         details_layout.addWidget(self.fsgp_projection_label)
+        self.asc_energy_label = QLabel(
+            "ASC energy: load a GPX route and wait for telemetry calibration"
+        )
+        details_layout.addWidget(self.asc_energy_label)
 
         self.tile_status_label = QLabel("Map tiles: idle")
         details_layout.addWidget(self.tile_status_label)
@@ -349,6 +427,7 @@ class GPSMapTab(QWidget):
             self.distance_label,
             self.day_summary_label,
             self.fsgp_projection_label,
+            self.asc_energy_label,
             self.tile_status_label,
         ):
             detail_label.setWordWrap(True)
@@ -423,6 +502,7 @@ class GPSMapTab(QWidget):
         self._refresh_distance_labels()
 
     def update_data(self, telemetry_data, update_laps=True):
+        self._update_asc_energy_display(telemetry_data)
         lat = self._as_float(telemetry_data.get(TelemetryKey.NAV_LATITUDE.value[0]))
         lon = self._as_float(telemetry_data.get(TelemetryKey.NAV_LONGITUDE.value[0]))
         valid = self._as_int(telemetry_data.get(TelemetryKey.NAV_GPS_VALID.value[0]))
@@ -562,7 +642,23 @@ class GPSMapTab(QWidget):
         day_duration = self._as_float(settings.value("map/fsgp_day_duration_hours", 0.0))
         if day_duration is None or not (0.0 <= day_duration <= 24.0):
             day_duration = 0.0
-        return mode, track_length, day_duration
+        asc_plan_speed = self._as_float(
+            settings.value("map/asc_plan_speed_mph", 35.0)
+        )
+        if asc_plan_speed is None or not (5.0 <= asc_plan_speed <= 80.0):
+            asc_plan_speed = 35.0
+        checkpoint_stop = self._as_float(
+            settings.value("map/asc_checkpoint_stop_minutes", 0.0)
+        )
+        if checkpoint_stop is None or not (0.0 <= checkpoint_stop <= 180.0):
+            checkpoint_stop = 0.0
+        return (
+            mode,
+            track_length,
+            day_duration,
+            asc_plan_speed,
+            checkpoint_stop,
+        )
 
     def _race_mode_changed(self, mode):
         if mode not in {self.RACE_MODE_FSGP, self.RACE_MODE_ASC}:
@@ -572,6 +668,11 @@ class GPSMapTab(QWidget):
         QSettings("SunseekerSolarCarProject", "Python-Telem").setValue("map/race_mode", mode)
         self.track_length_input.setEnabled(mode == self.RACE_MODE_FSGP)
         self.day_duration_input.setEnabled(mode == self.RACE_MODE_FSGP)
+        self.asc_plan_speed_input.setEnabled(mode == self.RACE_MODE_ASC)
+        self.asc_checkpoint_stop_input.setEnabled(mode == self.RACE_MODE_ASC)
+        self.asc_schedule_button.setEnabled(
+            mode == self.RACE_MODE_ASC and bool(self.route_segments)
+        )
         if mode != previous_mode:
             # Completed laps remain available, but a partial circuit cannot be
             # meaningfully resumed after operating in point-to-point mode.
@@ -586,6 +687,8 @@ class GPSMapTab(QWidget):
             )
         self._refresh_lap_label()
         self._refresh_distance_labels()
+        if mode == self.RACE_MODE_ASC and self.route_segments:
+            self.asc_route_changed.emit()
 
     def _track_length_changed(self, miles):
         self.track_lap_length_miles = max(0.0, float(miles))
@@ -601,6 +704,252 @@ class GPSMapTab(QWidget):
             "map/fsgp_day_duration_hours", self.fsgp_day_duration_hours
         )
         self._refresh_distance_labels()
+
+    def _asc_plan_speed_changed(self, speed_mph):
+        self.asc_plan_speed_mph = max(5.0, float(speed_mph))
+        QSettings("SunseekerSolarCarProject", "Python-Telem").setValue(
+            "map/asc_plan_speed_mph", self.asc_plan_speed_mph
+        )
+
+    def _asc_checkpoint_stop_changed(self, minutes):
+        self.asc_checkpoint_stop_minutes = max(0.0, float(minutes))
+        QSettings("SunseekerSolarCarProject", "Python-Telem").setValue(
+            "map/asc_checkpoint_stop_minutes",
+            self.asc_checkpoint_stop_minutes,
+        )
+
+    def _load_asc_checkpoint_schedules(self):
+        settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
+        raw = settings.value("map/asc_checkpoint_schedules", "{}")
+        if not isinstance(raw, str):
+            return {}
+        try:
+            data = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        schedules = {}
+        for name, item in data.items() if isinstance(data, dict) else []:
+            if not isinstance(item, dict):
+                continue
+            stop_minutes = self._as_float(item.get("stop_minutes"))
+            schedules[str(name)] = {
+                # Existing saved schedules predate the explicit enable flag;
+                # keep those active when upgrading.
+                "enabled": bool(item.get("enabled", True)),
+                "stage_stop": bool(item.get("stage_stop", False)),
+                "stop_minutes": (
+                    None
+                    if stop_minutes is None
+                    else max(0.0, min(720.0, stop_minutes))
+                ),
+                "close_iso": str(item.get("close_iso") or "").strip(),
+            }
+        return schedules
+
+    def _save_asc_checkpoint_schedules(self):
+        QSettings("SunseekerSolarCarProject", "Python-Telem").setValue(
+            "map/asc_checkpoint_schedules",
+            json.dumps(self.asc_checkpoint_schedules, sort_keys=True),
+        )
+
+    def _set_asc_segment_schedule(
+        self,
+        segment_name,
+        *,
+        enabled=True,
+        stage_stop=False,
+        stop_minutes=None,
+        close_iso="",
+    ):
+        """Apply and persist schedule data for a named GPX segment."""
+        stop_value = self._as_float(stop_minutes)
+        schedule = {
+            "enabled": bool(enabled),
+            "stage_stop": bool(stage_stop),
+            "stop_minutes": (
+                None
+                if stop_value is None
+                else max(0.0, min(720.0, stop_value))
+            ),
+            "close_iso": str(close_iso or "").strip(),
+        }
+        self.asc_checkpoint_schedules[str(segment_name)] = schedule
+        for segment in self.route_segments:
+            if segment.get("name") == segment_name:
+                segment["schedule"] = dict(schedule)
+        self._save_asc_checkpoint_schedules()
+        self.asc_route_changed.emit()
+
+    def _edit_asc_checkpoint_schedule(self):
+        if not self.route_segments:
+            QMessageBox.information(
+                self, "ASC Checkpoint Schedule", "Load the ASC GPX route first."
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("ASC Checkpoint and Stage Schedule")
+        dialog.resize(1180, min(650, 180 + len(self.route_segments) * 54))
+        dialog.setStyleSheet(
+            "QCheckBox { spacing: 8px; padding: 6px; min-height: 24px; "
+            "border: 1px solid #5b5750; border-radius: 4px; }"
+            "QCheckBox:hover { border-color: #ff9f1a; }"
+            "QCheckBox[selected=\"true\"] { background-color: #5a3b18; "
+            "border: 2px solid #ffd400; color: #ffd400; font-weight: bold; }"
+            "QCheckBox::indicator { width: 20px; height: 20px; }"
+            "QDateTimeEdit { min-height: 28px; padding: 3px; }"
+        )
+        outer = QVBoxLayout(dialog)
+        help_label = QLabel(
+            "Click Use this checkpoint until it shows [X]. Closing times use "
+            "this computer's local time. Settings in rows showing [ ] are "
+            "saved but ignored by the route forecast."
+        )
+        help_label.setWordWrap(True)
+        outer.addWidget(help_label)
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        editor = QWidget(scroll)
+        grid = QGridLayout(editor)
+        for column, heading in enumerate(
+            (
+                "Segment / checkpoint",
+                "Use schedule",
+                "Stage",
+                "Stop setting",
+                "Stop duration",
+                "Closing setting",
+                "Local close date/time",
+            )
+        ):
+            grid.addWidget(QLabel(f"<b>{heading}</b>"), 0, column)
+
+        rows = []
+        default_close = QDateTime.currentDateTime()
+        default_close = default_close.addSecs(2 * 60 * 60)
+        for row, segment in enumerate(self.route_segments, start=1):
+            schedule = segment.get("schedule") or {}
+            name = str(segment.get("name") or f"Segment {row}")
+            name_label = QLabel(name)
+            schedule_enabled = VisibleCheckBox("Use this checkpoint")
+            schedule_enabled.setObjectName(f"ascScheduleEnabled{row}")
+            schedule_enabled.setChecked(
+                bool(schedule.get("enabled", bool(schedule)))
+            )
+            schedule_enabled.setToolTip(
+                f"Checked applies the schedule settings for {name}."
+            )
+            stage_stop = VisibleCheckBox("Stage stop")
+            stage_stop.setObjectName(f"ascStageStop{row}")
+            stage_stop.setChecked(bool(schedule.get("stage_stop", False)))
+            stage_stop.setToolTip(
+                f"Mark {name} as the end of an ASC stage."
+            )
+            stop_override = VisibleCheckBox("Use custom stop")
+            stop_override.setObjectName(f"ascStopOverride{row}")
+            stop_override.setToolTip(
+                "Checked uses this row's stop duration; unchecked uses the "
+                "global intermediate-checkpoint default."
+            )
+            stop_input = QDoubleSpinBox()
+            stop_input.setObjectName(f"ascStopMinutes{row}")
+            stop_input.setRange(0.0, 720.0)
+            stop_input.setDecimals(0)
+            stop_input.setSingleStep(5.0)
+            stop_input.setSuffix(" min")
+            saved_stop = self._as_float(schedule.get("stop_minutes"))
+            stop_override.setChecked(saved_stop is not None)
+            stop_input.setValue(
+                self.asc_checkpoint_stop_minutes
+                if saved_stop is None
+                else saved_stop
+            )
+            # Keep the field editable so a value can be prepared before its
+            # override is enabled. The checkbox controls whether it is used.
+            has_close = VisibleCheckBox("Use closing time")
+            has_close.setObjectName(f"ascHasClose{row}")
+            has_close.setToolTip(
+                "Checked makes the entered local date/time an official cutoff."
+            )
+            close_input = QDateTimeEdit()
+            close_input.setObjectName(f"ascCloseDateTime{row}")
+            close_input.setCalendarPopup(True)
+            close_input.setDisplayFormat("yyyy-MM-dd HH:mm")
+            close_input.setMinimumWidth(190)
+            close_input.setToolTip(
+                "Enter the checkpoint's official local closing date and time."
+            )
+            close_iso = str(schedule.get("close_iso") or "")
+            parsed_close = QDateTime.fromString(close_iso, Qt.DateFormat.ISODate)
+            if parsed_close.isValid():
+                close_input.setDateTime(parsed_close.toLocalTime())
+                has_close.setChecked(True)
+            else:
+                close_input.setDateTime(default_close)
+            grid.addWidget(name_label, row, 0)
+            grid.addWidget(schedule_enabled, row, 1)
+            grid.addWidget(stage_stop, row, 2)
+            grid.addWidget(stop_override, row, 3)
+            grid.addWidget(stop_input, row, 4)
+            grid.addWidget(has_close, row, 5)
+            grid.addWidget(close_input, row, 6)
+            rows.append(
+                (
+                    name,
+                    schedule_enabled,
+                    stage_stop,
+                    stop_override,
+                    stop_input,
+                    has_close,
+                    close_input,
+                )
+            )
+        grid.setColumnStretch(6, 1)
+        scroll.setWidget(editor)
+        outer.addWidget(scroll)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        outer.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        for (
+            name,
+            schedule_enabled,
+            stage_stop,
+            stop_override,
+            stop_input,
+            has_close,
+            close_input,
+        ) in rows:
+            close_iso = ""
+            if has_close.isChecked():
+                local_value = close_input.dateTime().toPyDateTime()
+                if local_value.tzinfo is None:
+                    local_value = local_value.replace(
+                        tzinfo=datetime.now().astimezone().tzinfo
+                    )
+                close_iso = local_value.isoformat(timespec="minutes")
+            self.asc_checkpoint_schedules[name] = {
+                "enabled": schedule_enabled.isChecked(),
+                "stage_stop": stage_stop.isChecked(),
+                "stop_minutes": (
+                    float(stop_input.value())
+                    if stop_override.isChecked()
+                    else None
+                ),
+                "close_iso": close_iso,
+            }
+        self._save_asc_checkpoint_schedules()
+        for segment in self.route_segments:
+            segment["schedule"] = dict(
+                self.asc_checkpoint_schedules.get(segment["name"], {})
+            )
+        self.asc_route_changed.emit()
 
     def _reset_trip(self):
         self.trip_distance_miles = 0.0
@@ -1170,7 +1519,11 @@ class GPSMapTab(QWidget):
         self.route_label.setText(
             f"Route: {len(segments)} segment(s), {len(self.route_points)} points, {total_miles:.1f} mi"
         )
+        self.asc_schedule_button.setEnabled(
+            self.race_mode == self.RACE_MODE_ASC
+        )
         self._center_on_route()
+        self.asc_route_changed.emit()
 
     def _center_on_route(self):
         if not self.route_points:
@@ -1193,7 +1546,79 @@ class GPSMapTab(QWidget):
             "points": points,
             "cumulative_miles": cumulative,
             "length_miles": cumulative[-1],
+            "schedule": dict(
+                self.asc_checkpoint_schedules.get(name, {})
+            ),
         }
+
+    def get_asc_energy_plan_context(self):
+        """Return remaining GPX legs and planning settings for the forecaster."""
+        context = {
+            "race_mode": self.race_mode,
+            "plan_speed_mph": self.asc_plan_speed_mph,
+            "checkpoint_stop_minutes": self.asc_checkpoint_stop_minutes,
+            "route_loaded": bool(self.route_segments),
+            "legs": [],
+        }
+        if self.race_mode != self.RACE_MODE_ASC or not self.route_segments:
+            return context
+
+        miles_before = 0.0
+        for segment in self.route_segments:
+            segment_end = miles_before + segment["length_miles"]
+            if self.route_progress_miles >= segment_end:
+                miles_before = segment_end
+                continue
+
+            local_progress = max(
+                0.0, self.route_progress_miles - miles_before
+            )
+            remaining_miles = max(
+                0.0, segment["length_miles"] - local_progress
+            )
+            # Keep one stable representative location per GPX leg. If the
+            # midpoint moved forward with every GPS update, its cache key would
+            # constantly change and route forecasts would never remain warm.
+            target_miles = segment["length_miles"] / 2.0
+            point_index = min(
+                range(len(segment["cumulative_miles"])),
+                key=lambda index: abs(
+                    segment["cumulative_miles"][index] - target_miles
+                ),
+            )
+            latitude, longitude = segment["points"][point_index]
+            cache_key = (
+                f"{segment['name']}|{latitude:.4f}|{longitude:.4f}"
+            )
+            schedule = segment.get("schedule") or {}
+            schedule_enabled = bool(
+                schedule.get("enabled", bool(schedule))
+            )
+            context["legs"].append({
+                "name": segment["name"],
+                "remaining_miles": remaining_miles,
+                "latitude": latitude,
+                "longitude": longitude,
+                "cache_key": cache_key,
+                "schedule_enabled": schedule_enabled,
+                "stage_stop": (
+                    bool(schedule.get("stage_stop", False))
+                    if schedule_enabled
+                    else False
+                ),
+                "scheduled_stop_minutes": (
+                    schedule.get("stop_minutes")
+                    if schedule_enabled
+                    else None
+                ),
+                "close_iso": str(
+                    (schedule.get("close_iso") or "")
+                    if schedule_enabled
+                    else ""
+                ),
+            })
+            miles_before = segment_end
+        return context
 
     def _build_route_metrics(self, speed_mph, lat=None, lon=None):
         # Route metrics are returned as telemetry fields so the normal GUI and
@@ -1205,6 +1630,12 @@ class GPSMapTab(QWidget):
             TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0]: "N/A",
+            TelemetryKey.NAV_ASC_PLAN_SPEED_MPH.value[0]: round(
+                self.asc_plan_speed_mph, 1
+            ),
+            TelemetryKey.NAV_ASC_CHECKPOINT_STOP_MIN.value[0]: round(
+                self.asc_checkpoint_stop_minutes, 1
+            ),
         }
         route_lat = self.vehicle_lat if lat is None else lat
         route_lon = self.vehicle_lon if lon is None else lon
@@ -1262,6 +1693,12 @@ class GPSMapTab(QWidget):
             TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0]: round(self.route_progress_miles, 2),
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0]: round(checkpoint_remaining, 2),
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0]: eta,
+            TelemetryKey.NAV_ASC_PLAN_SPEED_MPH.value[0]: round(
+                self.asc_plan_speed_mph, 1
+            ),
+            TelemetryKey.NAV_ASC_CHECKPOINT_STOP_MIN.value[0]: round(
+                self.asc_checkpoint_stop_minutes, 1
+            ),
         }
 
     def _build_navigation_metrics(self, speed_mph, update_laps=False, lat=None, lon=None):
@@ -1653,6 +2090,62 @@ class GPSMapTab(QWidget):
             self.fsgp_projection_label.setText(f"FSGP projection: {projection_text}")
         self._refresh_compact_summary()
 
+    def _update_asc_energy_display(self, telemetry_data):
+        """Keep the map summary focused on the current leg's energy decision."""
+        status_key = TelemetryKey.NAV_ASC_FORECAST_STATUS.value[0]
+        relevant_keys = (
+            status_key,
+            TelemetryKey.NAV_ASC_FORECAST_CONFIDENCE.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_LEG_SOLAR_WH.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_LEG_NET_WH.value[0],
+            TelemetryKey.NAV_ASC_NEXT_CHECKPOINT_SOC_PCT.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_LEG_ARRIVAL_TIME.value[0],
+            TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_STATUS.value[0],
+        )
+        if not any(key in telemetry_data for key in relevant_keys):
+            return
+        self.last_asc_energy_metrics = {
+            key: telemetry_data.get(key) for key in relevant_keys
+        }
+        if not hasattr(self, "asc_energy_label"):
+            return
+
+        status = str(telemetry_data.get(status_key, "Unavailable"))
+        solar = self._as_float(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_CURRENT_LEG_SOLAR_WH.value[0]
+            )
+        )
+        net = self._as_float(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_CURRENT_LEG_NET_WH.value[0]
+            )
+        )
+        arrival_soc = self._as_float(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_NEXT_CHECKPOINT_SOC_PCT.value[0]
+            )
+        )
+        solar_text = "N/A" if solar is None else f"{solar:.0f} Wh"
+        net_text = "N/A" if net is None else f"{net:+.0f} Wh"
+        soc_text = "N/A" if arrival_soc is None else f"{arrival_soc:.1f}%"
+        arrival_text = str(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_CURRENT_LEG_ARRIVAL_TIME.value[0], "N/A"
+            )
+        )
+        cutoff_text = str(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_STATUS.value[0],
+                "No closing time",
+            )
+        )
+        self.asc_energy_label.setText(
+            f"ASC energy: leg solar {solar_text} | leg net {net_text} | "
+            f"checkpoint SOC {soc_text} | arrival {arrival_text} | "
+            f"cutoff {cutoff_text} | {status}"
+        )
+
     def _refresh_compact_summary(self):
         if not hasattr(self, "compact_summary_label"):
             return
@@ -1663,9 +2156,43 @@ class GPSMapTab(QWidget):
                 route_progress = f"{self.route_progress_miles:.1f}/{route_total:.1f} mi"
             else:
                 route_progress = "no GPX"
+            net = self._as_float(
+                self.last_asc_energy_metrics.get(
+                    TelemetryKey.NAV_ASC_CURRENT_LEG_NET_WH.value[0]
+                )
+            )
+            arrival_soc = self._as_float(
+                self.last_asc_energy_metrics.get(
+                    TelemetryKey.NAV_ASC_NEXT_CHECKPOINT_SOC_PCT.value[0]
+                )
+            )
+            arrival_time = str(
+                self.last_asc_energy_metrics.get(
+                    TelemetryKey.NAV_ASC_CURRENT_LEG_ARRIVAL_TIME.value[0],
+                    "N/A",
+                )
+            )
+            cutoff_status = str(
+                self.last_asc_energy_metrics.get(
+                    TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_STATUS.value[0],
+                    "No closing time",
+                )
+            )
+            energy_text = (
+                "forecast learning"
+                if net is None
+                else f"leg net {net:+.0f} Wh"
+            )
+            soc_text = (
+                "SOC --"
+                if arrival_soc is None
+                else f"checkpoint SOC {arrival_soc:.1f}%"
+            )
             self.compact_summary_label.setText(
                 f"<b>ASC</b> &nbsp; Route {route_progress} &nbsp;|&nbsp; "
                 f"GPS trip {self.trip_distance_miles:.1f} mi &nbsp;|&nbsp; "
+                f"{energy_text} &nbsp;|&nbsp; {soc_text} &nbsp;|&nbsp; "
+                f"arrival {arrival_time} &nbsp;|&nbsp; {cutoff_status} &nbsp;|&nbsp; "
                 f"Day average {day_average}"
             )
             return

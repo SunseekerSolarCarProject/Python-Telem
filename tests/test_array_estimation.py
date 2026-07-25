@@ -24,6 +24,14 @@ class ArrayEstimationTests(unittest.TestCase):
         buffer.update_combined_data({"BP_ISH_Amps": pack_current})
         buffer.update_combined_data({"BP_PVS_Voltage": voltage})
 
+    @staticmethod
+    def _add_incomplete_array_frame(buffer, voltage=135.0):
+        buffer.update_combined_data(
+            {"MC1BUS_Voltage": voltage, "MC1BUS_Current": 8.0}
+        )
+        buffer.update_combined_data({"BP_ISH_Amps": 3.0})
+        buffer.update_combined_data({"BP_PVS_Voltage": voltage})
+
     def test_uses_power_balance_and_discharge_sign(self):
         result = ExtraCalculations().compute_array_insights({
             "MC1BUS_Voltage": 134.0,
@@ -119,21 +127,25 @@ class ArrayEstimationTests(unittest.TestCase):
         buffer.update_combined_data({"BP_PVS_Voltage": 135.0})
         self.assertTrue(math.isclose(buffer.combined_data["Array_Estimated_Power_W"], 675.0))
 
-    def test_incomplete_array_frame_clears_previous_estimate(self):
+    def test_incomplete_array_frame_becomes_gap_without_erasing_window(self):
         buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
 
         for _ in range(buffer.ARRAY_ESTIMATE_WINDOW_FRAMES):
             self._add_array_frame(buffer)
         self.assertNotEqual(buffer.combined_data["Array_Estimated_Power_W"], "N/A")
 
-        buffer.update_combined_data({"MC1BUS_Voltage": 135.0, "MC1BUS_Current": 8.0})
-        buffer.update_combined_data({"BP_ISH_Amps": 3.0})
-        buffer.update_combined_data({"BP_PVS_Voltage": 135.0})
+        self._add_incomplete_array_frame(buffer)
 
-        self.assertEqual(buffer.combined_data["Array_Estimated_Power_W"], "N/A")
+        self.assertTrue(
+            math.isclose(buffer.combined_data["Array_Estimated_Power_W"], 675.0)
+        )
         self.assertEqual(
             buffer.combined_data["Array_Estimate_Status"],
-            "Unavailable: missing telemetry",
+            "Estimated: five-second window (4/5 usable frames)",
+        )
+        self.assertEqual(
+            buffer.combined_data["Array_Estimate_Window_W"],
+            "[675.0, 675.0, 675.0, 675.0, N/A]",
         )
 
     def test_transient_balance_spike_is_averaged_not_capped(self):
@@ -160,7 +172,7 @@ class ArrayEstimationTests(unittest.TestCase):
 
         self.assertTrue(math.isclose(buffer.combined_data["Array_Estimated_Power_W"], 2025.0))
 
-    def test_five_frame_inputs_and_session_quality_are_visible(self):
+    def test_five_second_inputs_and_session_quality_are_visible(self):
         buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
 
         for current in (5.0, 6.0, 7.0, 8.0, 9.0):
@@ -185,21 +197,56 @@ class ArrayEstimationTests(unittest.TestCase):
         self.assertEqual(buffer.combined_data["Array_Estimate_Unavailable_Count"], 4)
         self.assertEqual(buffer.combined_data["Array_Estimate_Availability_Pct"], 20.0)
 
-    def test_missing_frame_is_counted_and_clears_diagnostic_window(self):
+    def test_missing_frame_is_counted_and_retained_as_explicit_gap(self):
         buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
         self._add_array_frame(buffer)
 
-        buffer.update_combined_data({"MC1BUS_Voltage": 135.0, "MC1BUS_Current": 8.0})
-        buffer.update_combined_data({"BP_ISH_Amps": 3.0})
-        buffer.update_combined_data({"BP_PVS_Voltage": 135.0})
+        self._add_incomplete_array_frame(buffer)
 
         self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Total"], 2)
         self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Usable"], 1)
         self.assertEqual(buffer.combined_data["Array_Estimate_Frames_Rejected"], 1)
         self.assertEqual(buffer.combined_data["Array_Estimate_Missing_Telemetry_Count"], 1)
         self.assertEqual(buffer.combined_data["Array_Estimate_Frame_Usable_Pct"], 50.0)
-        self.assertEqual(buffer.combined_data["Array_Estimate_Window_Count"], 0)
-        self.assertEqual(buffer.combined_data["Array_Estimate_Window_W"], "[]")
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_Count"], 1)
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_W"], "[675.0, N/A]")
+        self.assertEqual(buffer.combined_data["Array_Estimate_Sample_2_W"], "N/A")
+
+    def test_five_second_window_publishes_with_three_usable_frames(self):
+        buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
+        self._add_array_frame(buffer, mc1_current=5.0, mc2_current=5.0)
+        self._add_incomplete_array_frame(buffer)
+        self._add_array_frame(buffer, mc1_current=6.0, mc2_current=6.0)
+        self._add_incomplete_array_frame(buffer)
+        self._add_array_frame(buffer, mc1_current=7.0, mc2_current=7.0)
+
+        expected = (675.0 + 945.0 + 1215.0) / 3.0
+        self.assertTrue(
+            math.isclose(buffer.combined_data["Array_Estimated_Power_W"], expected)
+        )
+        self.assertEqual(
+            buffer.combined_data["Array_Estimate_Window_W"],
+            "[675.0, N/A, 945.0, N/A, 1215.0]",
+        )
+        self.assertEqual(buffer.combined_data["Array_Estimate_Window_Count"], 3)
+        self.assertEqual(
+            buffer.combined_data["Array_Estimate_Status"],
+            "Estimated: five-second window (3/5 usable frames)",
+        )
+
+    def test_five_second_window_requires_three_usable_frames(self):
+        buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)
+        self._add_array_frame(buffer)
+        self._add_incomplete_array_frame(buffer)
+        self._add_incomplete_array_frame(buffer)
+        self._add_array_frame(buffer)
+        self._add_incomplete_array_frame(buffer)
+
+        self.assertEqual(buffer.combined_data["Array_Estimated_Power_W"], "N/A")
+        self.assertEqual(
+            buffer.combined_data["Array_Estimate_Status"],
+            "Unavailable: only 2/5 usable one-second frames",
+        )
 
     def test_signed_negative_balance_remains_visible_inside_window(self):
         buffer = BufferData(None, [], [], buffer_size=20, buffer_timeout=2.0)

@@ -8,6 +8,12 @@ This project is a PyQt telemetry dashboard for live vehicle data, simulation rep
 
 `src/telemetry_application.py` is the main orchestrator. It owns app startup, config handoff, the serial reader lifecycle, buffering, Solcast polling, simulation, ML prediction, GUI signal wiring, and telemetry storage handoff.
 
+`src/asc_energy_forecast.py` owns the ASC planning calculation. It learns
+effective array conversion and moving Wh/mi from live telemetry, then integrates
+cached route-location Solcast forecasts over the remaining GPX legs. Keeping
+this separate prevents stop-and-go route energy from contaminating the
+steady-state break-even training target.
+
 `src/app_settings.py` defines the canonical persisted settings names used in `application_data/config.json`. New config fields should be added to the `AppSettings` dataclass first, then read by the UI/application layer.
 
 ## Data Flow
