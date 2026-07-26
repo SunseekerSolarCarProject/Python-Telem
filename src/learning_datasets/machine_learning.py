@@ -14,11 +14,13 @@ uncertainty, stale/unfitted flags, or out-of-range warnings without guessing.
 import os
 import logging
 import threading
+from collections import deque
 import joblib
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 
+from sklearn import __version__ as sklearn_version
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.exceptions import NotFittedError
@@ -54,7 +56,7 @@ class MovingAverage(TransformerMixin, BaseEstimator):
 class MachineLearningModel:
     """
     Encapsulates both:
-      - Battery life:   RF([PV_Ah, PV_V]) -> Used_Ah_Remaining_Time
+      - Battery life:   RF(saved feature schema) -> Used_Ah_Remaining_Time
       - Break-even:     RF([propulsion power, pack V]) -> sustainable speed
     """
     # The canonical sparse training schema. Full telemetry CSVs are normalized
@@ -63,6 +65,9 @@ class MachineLearningModel:
         'BP_PVS_milliamp*s',
         'BP_PVS_Ah',
         'BP_PVS_Voltage',
+        'BP_ISH_Amps',
+        'BP_ISH_SOC',
+        'Shunt_Remaining_Ah',
         'Used_Ah_Remaining_Time',
         'Array_Estimated_Power_W',
         'BreakEven_Power_W',
@@ -114,6 +119,20 @@ class MachineLearningModel:
     # normal pack-voltage range. Do not report PVS voltage extrapolation until
     # it falls below this known operational floor.
     PVS_VOLTAGE_QUALITY_MIN = 100.0
+    BATTERY_BASE_FEATURES = [
+        'BP_PVS_milliamp*s',
+        'BP_PVS_Ah',
+        'BP_PVS_Voltage',
+    ]
+    BATTERY_ENHANCED_FEATURES = BATTERY_BASE_FEATURES + [
+        'BP_ISH_Amps',
+        'BP_ISH_SOC',
+        'Shunt_Remaining_Ah',
+    ]
+    BATTERY_MODEL_VERSION = 2
+    MIN_BATTERY_TRAINING_ROWS = 20
+    MIN_ENHANCED_BATTERY_TRAINING_ROWS = 50
+    BATTERY_MIN_DISCHARGE_CURRENT_A = 0.5
     BREAK_EVEN_FEATURES = ['BreakEven_Power_W', 'BP_PVS_Voltage']
     BREAK_EVEN_MODEL_VERSION = 3
     MIN_BREAK_EVEN_TRAINING_ROWS = 20
@@ -156,6 +175,8 @@ class MachineLearningModel:
         # whether a live feature is outside the range seen during training.
         self.batt_meta: dict = {}
         self.be_meta: dict = {}
+        self._battery_runtime_history = deque(maxlen=5)
+        self._battery_runtime_feature_schema = None
 
         # --- Load or train on startup ---
         # Startup should prefer existing fitted .pkl files. If a model is
@@ -253,15 +274,17 @@ class MachineLearningModel:
     def _build_battery_pipeline(self):
         """
         Pipeline:
-          - smooth PV_mA_s, PV_Ah, PV_V
+          - smooth the selected battery feature schema
           - RandomForestRegressor
         """
-        self.batt_pipe = Pipeline([
-            ('smooth', MovingAverage(window=5, cols=[
-                'BP_PVS_milliamp*s',
-                'BP_PVS_Ah',
-                'BP_PVS_Voltage'
-            ])),
+        self.batt_pipe = self._new_battery_pipeline(
+            self.BATTERY_BASE_FEATURES
+        )
+
+    @staticmethod
+    def _new_battery_pipeline(features):
+        return Pipeline([
+            ('smooth', MovingAverage(window=5, cols=list(features))),
             ('rf', RandomForestRegressor(
                 # A modest forest keeps retraining responsive from the GUI while
                 # still giving enough trees for a useful ensemble spread.
@@ -270,6 +293,44 @@ class MachineLearningModel:
                 random_state=42
             )),
         ])
+
+    def battery_model_features(self) -> list[str]:
+        """Return the exact feature schema expected by the loaded battery PKL."""
+        configured = self.batt_meta.get("features")
+        configured_features = (
+            [str(feature) for feature in configured]
+            if isinstance(configured, (list, tuple)) and configured
+            else []
+        )
+
+        try:
+            model = self.batt_pipe.steps[-1][1]
+            learned = getattr(model, "feature_names_in_", None)
+            if learned is not None and len(learned):
+                learned_features = [str(feature) for feature in learned]
+                if (
+                    configured_features
+                    and configured_features != learned_features
+                ):
+                    self.log.warning(
+                        "Battery model metadata features do not match the "
+                        "fitted estimator; using the estimator schema."
+                    )
+                return learned_features
+        except Exception:
+            pass
+
+        if configured_features:
+            return configured_features
+
+        try:
+            smoother = self.batt_pipe.named_steps.get("smooth")
+            columns = getattr(smoother, "cols", None)
+            if columns:
+                return [str(feature) for feature in columns]
+        except Exception:
+            pass
+        return list(self.BATTERY_BASE_FEATURES)
 
 
     def _collect_feature_ranges(self, df: pd.DataFrame, feats: list[str]) -> dict:
@@ -303,33 +364,47 @@ class MachineLearningModel:
 
 
     def train_battery_life_model(self, csv_path: str):
+        """Serialize manual and automatic battery model training runs."""
+        with self._training_lock:
+            return self._train_battery_life_model_unlocked(csv_path)
+
+    def _train_battery_life_model_unlocked(self, csv_path: str):
         """
-        Train battery-life model:
-          features = [ 'BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage' ]
-          target   =   'Used_Ah_Remaining_Time'
+        Train a legacy-compatible three-input model, then automatically upgrade
+        to current/SOC/capacity inputs once enough complete race rows exist.
         """
         raw = pd.read_csv(csv_path, low_memory=False)
         df = self._normalize_training_frame(raw, csv_path)
-        feats  = ['BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
         target = 'Used_Ah_Remaining_Time'
 
-        missing = [c for c in feats + [target] if c not in df.columns]
+        missing = [
+            column
+            for column in self.BATTERY_BASE_FEATURES + [target]
+            if column not in df.columns
+        ]
         if missing:
-            # Returning a falsey value lets the GUI report a failed retrain
-            # instead of silently continuing with stale model files.
             self.log.error(f"Battery-life CSV missing columns: {missing}")
-            return
+            return False
 
-        for column in feats + [target]:
+        battery_columns = list(dict.fromkeys(
+            self.BATTERY_ENHANCED_FEATURES + [target]
+        ))
+        for column in battery_columns:
+            if column not in df.columns:
+                df[column] = np.nan
             df[column] = pd.to_numeric(df[column], errors='coerce')
-        df = self._clean_data(df, feats + [target])
-        before_quality = len(df)
-        df = df.loc[
-            (df['BP_PVS_Voltage'] >= self.PVS_VOLTAGE_QUALITY_MIN)
-            & (df[target] > self.BATTERY_TARGET_MIN_HOURS)
-            & (df[target] <= self.BATTERY_TARGET_MAX_HOURS)
+
+        base_rows = self._clean_data(
+            df,
+            self.BATTERY_BASE_FEATURES + [target],
+        )
+        before_quality = len(base_rows)
+        base_rows = base_rows.loc[
+            (base_rows['BP_PVS_Voltage'] >= self.PVS_VOLTAGE_QUALITY_MIN)
+            & (base_rows[target] > self.BATTERY_TARGET_MIN_HOURS)
+            & (base_rows[target] <= self.BATTERY_TARGET_MAX_HOURS)
         ].copy()
-        excluded_quality = before_quality - len(df)
+        excluded_quality = before_quality - len(base_rows)
         if excluded_quality:
             self.log.info(
                 "Excluded %s battery rows outside voltage/remaining-time "
@@ -337,46 +412,92 @@ class MachineLearningModel:
                 excluded_quality,
                 csv_path,
             )
-        if df.empty:
-            self.log.error("Battery-life training skipped: no valid numeric rows after cleaning.")
+        if len(base_rows) < self.MIN_BATTERY_TRAINING_ROWS:
+            self.log.error(
+                "Battery-life training skipped: "
+                f"{len(base_rows)} valid rows; "
+                f"need at least {self.MIN_BATTERY_TRAINING_ROWS}."
+            )
             return False
-        X = df[feats]
-        y = df[target]
 
-        # Fit the complete preprocessing+forest pipeline so the saved artifact
-        # exactly matches the runtime prediction path.
-        self.batt_pipe.fit(X, y)
+        enhanced_rows = self._clean_data(
+            base_rows,
+            self.BATTERY_ENHANCED_FEATURES + [target],
+        )
+        enhanced_rows = enhanced_rows.loc[
+            (
+                enhanced_rows['BP_ISH_Amps']
+                >= self.BATTERY_MIN_DISCHARGE_CURRENT_A
+            )
+            & enhanced_rows['BP_ISH_SOC'].between(0.0, 100.0)
+            & (enhanced_rows['Shunt_Remaining_Ah'] > 0.0)
+        ].copy()
+
+        if len(enhanced_rows) >= self.MIN_ENHANCED_BATTERY_TRAINING_ROWS:
+            training_rows = enhanced_rows
+            feats = list(self.BATTERY_ENHANCED_FEATURES)
+            schema = "enhanced-current-soc-capacity"
+        else:
+            training_rows = base_rows
+            feats = list(self.BATTERY_BASE_FEATURES)
+            schema = "legacy-compatible"
+
+        X = training_rows[feats]
+        y = training_rows[target]
+        candidate_pipe = self._new_battery_pipeline(feats)
+        candidate_pipe.fit(X, y)
         meta = {
             "feature_ranges": self._collect_feature_ranges(X, feats),
             "target_stats": self._target_stats(y),
-            "trained_at": datetime.now(timezone.utc).isoformat(timespec='seconds'),
-            "row_count": int(len(df)),
+            "trained_at": datetime.now(timezone.utc).isoformat(
+                timespec='seconds'
+            ),
+            "row_count": int(len(training_rows)),
+            "base_valid_row_count": int(len(base_rows)),
+            "enhanced_valid_row_count": int(len(enhanced_rows)),
             "source": os.path.abspath(csv_path),
+            "model_version": self.BATTERY_MODEL_VERSION,
+            "sklearn_version": sklearn_version,
+            "features": list(feats),
+            "feature_schema": schema,
             "training_bounds": {
                 "minimum_voltage": self.PVS_VOLTAGE_QUALITY_MIN,
+                "minimum_discharge_current_a": (
+                    self.BATTERY_MIN_DISCHARGE_CURRENT_A
+                ),
                 "remaining_time_hours": [
                     self.BATTERY_TARGET_MIN_HOURS,
                     self.BATTERY_TARGET_MAX_HOURS,
                 ],
             },
         }
-        # Save both the fitted pipeline and its metadata together. Legacy loaders
-        # still accept pipeline-only dumps, but metadata powers quality flags.
-        joblib.dump({"pipeline": self.batt_pipe, "meta": meta}, self.batt_path)
-        self.batt_meta.clear()
-        self.batt_meta.update(meta)
-        self.log.info(f"Trained battery-life model -> {self.batt_path}")
+
+        temp_path = f"{self.batt_path}.tmp"
+        joblib.dump({"pipeline": candidate_pipe, "meta": meta}, temp_path)
+        os.replace(temp_path, self.batt_path)
+        with self._model_lock:
+            self.batt_pipe = candidate_pipe
+            self.batt_meta.clear()
+            self.batt_meta.update(meta)
+            self._battery_runtime_history.clear()
+            self._battery_runtime_feature_schema = tuple(feats)
+        self.log.info(
+            "Trained battery-life model (%s, %s rows) -> %s",
+            schema,
+            len(training_rows),
+            self.batt_path,
+        )
         return True
 
 
     def predict_battery_life_details(self, data: dict) -> dict:
         """
-        Predict remaining time (hours) given:
-          data['BP_PVS_milliamp*s'],
-          data['BP_PVS_Ah'],
-          data['BP_PVS_Voltage']
+        Predict remaining time from the exact named features saved in the PKL.
+
+        Legacy artifacts use three PVS values. Current artifacts may additionally
+        use shunt current, SOC, and remaining capacity.
         """
-        feats = ['BP_PVS_milliamp*s', 'BP_PVS_Ah', 'BP_PVS_Voltage']
+        feats = self.battery_model_features()
         details = {
             # Keep the prediction response structured. TelemetryApplication can
             # display a best effort value while QualityDiagnostics expands flags.
@@ -386,6 +507,9 @@ class MachineLearningModel:
             "missing_features": [],
             "invalid_features": [],
             "out_of_range": {},
+            "model_features": list(feats),
+            "model_version": self.batt_meta.get("model_version", 1),
+            "training_rows": self.batt_meta.get("row_count"),
         }
 
         missing = [k for k in feats if k not in data]
@@ -400,7 +524,10 @@ class MachineLearningModel:
             try:
                 # Convert every feature explicitly so strings from CSV/replay
                 # behave the same as numeric live telemetry values.
-                values.append(float(data[k]))
+                value = float(data[k])
+                if not np.isfinite(value):
+                    raise ValueError("non-finite")
+                values.append(value)
             except (TypeError, ValueError):
                 invalid.append(k)
         if invalid:
@@ -408,9 +535,30 @@ class MachineLearningModel:
             details["invalid_features"] = invalid
             return details
 
-        row = pd.DataFrame([values], columns=feats)
+        raw_row = pd.DataFrame([values], columns=feats)
         try:
-            pred, sigma = self._predict_with_uncertainty(self.batt_pipe, row)
+            with self._model_lock:
+                schema = tuple(feats)
+                if self._battery_runtime_feature_schema != schema:
+                    self._battery_runtime_history.clear()
+                    self._battery_runtime_feature_schema = schema
+                self._battery_runtime_history.append(dict(zip(feats, values)))
+                smoothed_values = [
+                    float(np.mean([
+                        sample[feature]
+                        for sample in self._battery_runtime_history
+                    ]))
+                    for feature in feats
+                ]
+                prediction_row = pd.DataFrame(
+                    [smoothed_values],
+                    columns=feats,
+                )
+                pred, sigma = self._predict_with_uncertainty(
+                    self.batt_pipe,
+                    prediction_row,
+                )
+                ranges = dict(self.batt_meta.get("feature_ranges", {}))
         except NotFittedError:
             self.log.warning("Battery-life model not fitted yet, skipping prediction.")
             details["not_fitted"] = True
@@ -426,9 +574,8 @@ class MachineLearningModel:
         # warning signal, not a strict statistical guarantee.
         details["uncertainty"] = 1.96 * sigma if sigma is not None else None
 
-        ranges = self.batt_meta.get("feature_ranges", {}) if isinstance(self.batt_meta, dict) else {}
         outliers = {}
-        for col, value in row.iloc[0].items():
+        for col, value in raw_row.iloc[0].items():
             # Flag extrapolation beyond the training feature envelope. The model
             # can still predict, but the GUI should show caution.
             rng = ranges.get(col)

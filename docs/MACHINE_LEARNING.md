@@ -15,7 +15,7 @@ There are two independent regression models:
 
 | Model | Runtime output | Target column | Feature columns |
 | --- | --- | --- | --- |
-| Battery life | `Predicted_Remaining_Time` | `Used_Ah_Remaining_Time` | `BP_PVS_milliamp*s`, `BP_PVS_Ah`, `BP_PVS_Voltage` |
+| Battery life | `Predicted_Remaining_Time` | `Used_Ah_Remaining_Time` | Legacy: `BP_PVS_milliamp*s`, `BP_PVS_Ah`, `BP_PVS_Voltage`; enhanced models also use `BP_ISH_Amps`, `BP_ISH_SOC`, `Shunt_Remaining_Ah` |
 | Break-even speed | `Predicted_BreakEven_Speed` | `BreakEvenSpeed` | `BreakEven_Power_W`, `BP_PVS_Voltage` |
 
 The battery-life model estimates remaining runtime in hours. The app also
@@ -115,16 +115,23 @@ it lives in the active application data directory managed by `CSVHandler`.
 The required headers are:
 
 ```csv
-BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,Used_Ah_Remaining_Time,Array_Estimated_Power_W,BreakEven_Power_W,BreakEvenSpeed,BreakEven_Label_Weight,Array_Estimate_Sample_1_W,Array_Estimate_Sample_2_W,Array_Estimate_Sample_3_W,Array_Estimate_Sample_4_W,Array_Estimate_Sample_5_W,Array_Estimate_Window_Count,Array_Estimate_Window_Spread_W,Array_Estimate_Window_StdDev_W,Array_Estimate_Frames_Total,Array_Estimate_Frames_Usable,Array_Estimate_Frames_Rejected,Array_Estimate_Frame_Usable_Pct,Array_Estimate_Published_Count,Array_Estimate_Unavailable_Count,Array_Estimate_Availability_Pct,Array_Estimate_Missing_Telemetry_Count,Array_Estimate_Voltage_Mismatch_Count,Array_Estimate_Negative_Window_Count
+BP_PVS_milliamp*s,BP_PVS_Ah,BP_PVS_Voltage,BP_ISH_Amps,BP_ISH_SOC,Shunt_Remaining_Ah,Used_Ah_Remaining_Time,Array_Estimated_Power_W,BreakEven_Power_W,BreakEvenSpeed,BreakEven_Label_Weight,Array_Estimate_Sample_1_W,Array_Estimate_Sample_2_W,Array_Estimate_Sample_3_W,Array_Estimate_Sample_4_W,Array_Estimate_Sample_5_W,Array_Estimate_Window_Count,Array_Estimate_Window_Spread_W,Array_Estimate_Window_StdDev_W,Array_Estimate_Frames_Total,Array_Estimate_Frames_Usable,Array_Estimate_Frames_Rejected,Array_Estimate_Frame_Usable_Pct,Array_Estimate_Published_Count,Array_Estimate_Unavailable_Count,Array_Estimate_Availability_Pct,Array_Estimate_Missing_Telemetry_Count,Array_Estimate_Voltage_Mismatch_Count,Array_Estimate_Negative_Window_Count
 ```
 
-Battery-life rows are written when its required values are present and numeric.
+Battery-life rows are written when the base values are numeric, voltage is at
+least 100 V, and the finite target is above 0 and no more than 24 hours.
+Near-zero-current stopped samples can produce hundreds of calculated hours;
+those remain available in the primary telemetry CSV but do not enter the ML
+training corpus.
 The array-power column may be unavailable during stabilization, and the
 break-even power/target remain `N/A` unless the row passes the steady-state gate:
 
 - `BP_PVS_milliamp*s`: integrated PV current signal in milliamp-seconds
 - `BP_PVS_Ah`: integrated PV current converted to amp-hours
 - `BP_PVS_Voltage`: PV/battery-pack voltage used by the model
+- `BP_ISH_Amps`: present shunt discharge current used by enhanced models
+- `BP_ISH_SOC`: shunt/BMS state of charge used by enhanced models
+- `Shunt_Remaining_Ah`: integrated remaining capacity used by enhanced models
 - `Used_Ah_Remaining_Time`: calculated remaining time target, in hours
 - `Array_Estimated_Power_W`: synchronized five-second-window array-power feature
 - `BreakEven_Power_W`: measured total motor-controller bus power for a valid
@@ -167,12 +174,22 @@ makes it easier to understand why a prediction changed.
 4. Confirm the dialog.
 5. Wait for the success or failure message.
 
-Manual retraining remains available, but live operation also counts new valid
-break-even labels. After 20 new steady-state examples, the break-even forest
-re-trains in a background thread and atomically replaces the live model. This
-is periodic batch learning because scikit-learn random forests do not support
-incremental `partial_fit`; predictions continue using the prior model while the
-replacement is trained.
+Manual retraining remains available. Live operation counts battery rows and
+break-even labels independently:
+
+- after 100 valid battery rows, the battery forest retrains from a locked CSV
+  snapshot in a background thread;
+- after 20 new steady-state examples, the break-even forest retrains in a
+  background thread.
+
+An older battery `.pkl` without current version/row metadata is also scheduled
+for one background refresh after startup. Battery training remains on the
+legacy three-input schema until at least 50 complete current/SOC/remaining-Ah
+rows exist, then upgrades automatically to the enhanced schema. Saved metadata
+records the exact features, schema, model version, scikit-learn version, and
+row counts. This is periodic batch learning because scikit-learn random forests
+do not support incremental `partial_fit`; predictions continue using the prior
+model while its replacement trains.
 
 Retraining calls:
 
@@ -190,7 +207,11 @@ The trained models are saved under the active CSV/application data directory:
 
 On startup, the app first tries to load these saved models. If a model is
 missing or cannot be loaded, it attempts to retrain from the available
-`training_data.csv`.
+`training_data.csv`. Pipeline-only legacy battery files remain supported: the
+runtime infers their trained feature names. Newer bundles use their saved
+`features` metadata. The application passes the complete telemetry snapshot to
+the predictor, which selects only the exact named inputs expected by that
+artifact.
 
 ## Training With Additional CSV Files
 

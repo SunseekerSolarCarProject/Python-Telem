@@ -14,8 +14,11 @@ import logging
 import re
 import math
 import requests
+import shutil
 import threading
 import time
+import tempfile
+from collections import deque
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
@@ -167,6 +170,24 @@ class TelemetryApplication(QObject):
         self.serial_reconnect_timer = QTimer(self)
         self.serial_reconnect_timer.setInterval(2000)
         self.serial_reconnect_timer.timeout.connect(self._check_serial_connection)
+        # Serial bursts are queued once per line and drained in short slices.
+        # This prevents a busy CAN/serial stream from starving Qt paint/input
+        # events while retaining a generous bounded backlog for slow laptops.
+        self._serial_line_queue = deque()
+        self._serial_line_queue_limit = 5000
+        self._serial_drain_scheduled = False
+        self._serial_drain_batch_size = 25
+        self._serial_drain_budget_seconds = 0.008
+        self._serial_dropped_lines = 0
+
+        # Network jobs use one worker apiece and retain only the newest pending
+        # telemetry snapshot. Slow/offline endpoints therefore cannot create an
+        # unbounded number of threads or queued payload copies.
+        self._online_send_lock = threading.Lock()
+        self._online_send_in_progress = False
+        self._pending_online_send = None
+        self._solcast_fetch_lock = threading.Lock()
+        self._solcast_fetch_in_progress = False
         self.signals_connected = False
         self.used_Ah = 0
         self.shunt_integrator = AmpHourIntegrator(
@@ -175,6 +196,10 @@ class TelemetryApplication(QObject):
         )
         # Break-even learning is refreshed in batches so predictions improve
         # during a drive without fitting a forest on every telemetry row.
+        self._battery_auto_retrain_lock = threading.Lock()
+        self._battery_auto_retrain_in_progress = False
+        self._battery_rows_pending = 0
+        self.battery_auto_retrain_batch_rows = 100
         self._break_even_auto_retrain_lock = threading.Lock()
         self._break_even_auto_retrain_in_progress = False
         self._break_even_labels_pending = 0
@@ -535,7 +560,10 @@ class TelemetryApplication(QObject):
             TelemetryKey.PREDICTED_BREAK_EVEN_SPEED.value[0],
             TelemetryKey.PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY.value[0],
             TelemetryKey.PREDICTION_DATA_AGE_S.value[0],
-            TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0]
+            TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0],
+            TelemetryKey.BATTERY_MODEL_SCHEMA.value[0],
+            TelemetryKey.BATTERY_MODEL_TRAINING_ROWS.value[0],
+            TelemetryKey.BATTERY_MODEL_VERSION.value[0],
         ]
 
     def init_csv_handler(self):
@@ -671,8 +699,8 @@ class TelemetryApplication(QObject):
         """
         Create the ML model object and load any compatible saved models.
 
-        Manual retraining remains available; break-even also retrains in the
-        background after enough new steady-state labels have accumulated.
+        Manual retraining remains available; battery and break-even models also
+        retrain in the background after enough new valid rows accumulate.
         """
         # Keep model artifacts beside the active CSV data so packaged/source
         # runs do not accidentally share incompatible model files.
@@ -691,7 +719,7 @@ class TelemetryApplication(QObject):
             self.gui.vehicle_year_changed_signal.connect(self.on_vehicle_year_changed)
             self.gui.driver_name_changed_signal.connect(self.on_driver_name_changed)
             self.update_data_signal.connect(self.buffer.add_data)
-            self.update_data_signal.connect(self.gui.update_all_tabs)
+            self.update_data_signal.connect(self.gui.queue_telemetry_update)
             self.gui.machine_learning_retrain_signal.connect(self.handle_retrain_model)
             self.gui.machine_learning_retrain_signal_with_files.connect(self.handle_retrain_with_files)
             self.gui.export_bundle_requested.connect(self.handle_export_bundle)
@@ -714,13 +742,57 @@ class TelemetryApplication(QObject):
                 )
             self.signals_connected = True
             self._schedule_initial_solcast_fetch()
+            QTimer.singleShot(
+                0,
+                self._refresh_legacy_battery_model_if_needed,
+            )
             self.logger.debug("Connected GUI signals.")
 
     def send_telemetry_data_to_server_async(self, data, device_tag="device1"):
-        """Send remote telemetry on a daemon thread so serial/UI work stays responsive."""
-        thread = threading.Thread(target=self.send_telemetry_data_to_server, args=(data, device_tag))
-        thread.daemon = True  # Daemonize thread so it won't block program exit
-        thread.start()
+        """Queue a bounded latest-value remote send off the GUI thread."""
+        request = (dict(data), device_tag)
+        with self._online_send_lock:
+            if self._online_send_in_progress:
+                # Replace an older unsent snapshot. CSV remains the lossless
+                # local record; online storage gets the freshest state without
+                # one five-second-timeout thread per telemetry update.
+                self._pending_online_send = request
+                return
+            self._online_send_in_progress = True
+
+        thread = threading.Thread(
+            target=self._drain_online_send_queue,
+            args=(request,),
+            name="telemetry-online-send",
+            daemon=True,
+        )
+        try:
+            thread.start()
+        except Exception:
+            with self._online_send_lock:
+                self._online_send_in_progress = False
+            raise
+
+    def _drain_online_send_queue(self, request):
+        """Send serially, consuming at most one newest pending snapshot."""
+        current = request
+        while current is not None and not self._serial_shutdown:
+            data, device_tag = current
+            try:
+                self.send_telemetry_data_to_server(data, device_tag)
+            except Exception as exc:
+                self.logger.error("Unexpected online telemetry worker error: %s", exc)
+
+            with self._online_send_lock:
+                current = self._pending_online_send
+                self._pending_online_send = None
+                if current is None:
+                    self._online_send_in_progress = False
+                    return
+
+        with self._online_send_lock:
+            self._pending_online_send = None
+            self._online_send_in_progress = False
 
     def _build_http_headers(self) -> dict:
         """Build auth headers for the configured ingestion endpoint."""
@@ -1125,7 +1197,7 @@ class TelemetryApplication(QObject):
             self._asc_route_forecast_refresh_lock.release()
 
     def fetch_solcast_data(self):
-        """Fetch live and forecast irradiance/weather data and emit into the GUI."""
+        """Schedule one bounded Solcast fetch without blocking the Qt thread."""
         using_live_gps = (
             self.solcast_follow_gps and self._latest_solcast_gps_location is not None
         )
@@ -1133,12 +1205,52 @@ class TelemetryApplication(QObject):
         if not self.solcast_key or query_location is None:
             self.logger.warning("Missing Solcast configuration; skipping solar data fetch.")
             return
-        query_lat, query_lon = query_location
-        headers = {"Authorization": f"Bearer {self.solcast_key}"}
-        fetched_at = datetime.now(timezone.utc)
-        fetched_at_text = self._format_fetch_time(fetched_at)
-        output_parameters = self._solcast_output_parameters()
 
+        with self._solcast_fetch_lock:
+            if self._solcast_fetch_in_progress:
+                self.logger.debug("Solcast fetch already running; skipped overlapping poll.")
+                return
+            self._solcast_fetch_in_progress = True
+
+        try:
+            query_lat, query_lon = query_location
+            headers = {"Authorization": f"Bearer {self.solcast_key}"}
+            fetched_at = datetime.now(timezone.utc)
+            output_parameters = self._solcast_output_parameters()
+            route_plan = self._asc_route_plan_context()
+
+            worker = threading.Thread(
+                target=self._fetch_solcast_data_worker,
+                args=(
+                    query_lat,
+                    query_lon,
+                    headers,
+                    fetched_at,
+                    output_parameters,
+                    route_plan,
+                    using_live_gps,
+                ),
+                name="solcast-fetch",
+                daemon=True,
+            )
+            worker.start()
+        except Exception:
+            with self._solcast_fetch_lock:
+                self._solcast_fetch_in_progress = False
+            raise
+
+    def _fetch_solcast_data_worker(
+        self,
+        query_lat,
+        query_lon,
+        headers,
+        fetched_at,
+        output_parameters,
+        route_plan,
+        using_live_gps,
+    ):
+        """Perform Solcast HTTP and route-cache work on a single worker."""
+        fetched_at_text = self._format_fetch_time(fetched_at)
         try:
             # Live estimated actuals (last 7 days): get most recent point
             url_live = (
@@ -1149,7 +1261,7 @@ class TelemetryApplication(QObject):
             r_live = requests.get(url_live, headers=headers, timeout=10)
             r_live.raise_for_status()
             live = r_live.json().get("estimated_actuals", [])
-            if live:
+            if live and not self._serial_shutdown:
                 last = live[0]
                 # Emit through the normal update signal so Solcast fields merge
                 # into the same buffer as serial telemetry.
@@ -1182,25 +1294,18 @@ class TelemetryApplication(QObject):
                 if sample_30m:
                     payload.update(self._build_solcast_payload("Solcast_Fcst", sample_30m, fetched_at_text))
 
-                if payload:
+                if payload and not self._serial_shutdown:
                     self.update_data_signal.emit(payload)
 
-            route_plan = self._asc_route_plan_context()
             if route_plan.get("race_mode") == "ASC Route" and route_plan.get(
                 "legs"
             ):
-                route_thread = threading.Thread(
-                    target=self._refresh_asc_route_forecasts,
-                    args=(
-                        fetched_at,
-                        headers,
-                        output_parameters,
-                        route_plan,
-                    ),
-                    name="asc-route-solcast",
-                    daemon=True,
+                self._refresh_asc_route_forecasts(
+                    fetched_at,
+                    headers,
+                    output_parameters,
+                    route_plan,
                 )
-                route_thread.start()
 
             source = "vehicle GPS" if using_live_gps else "configured fallback"
             self.logger.info(
@@ -1211,6 +1316,9 @@ class TelemetryApplication(QObject):
             )
         except Exception as e:
             self.logger.error(f"Solcast fetch failed: {e}")
+        finally:
+            with self._solcast_fetch_lock:
+                self._solcast_fetch_in_progress = False
 
     def set_battery_info(self, config_data):
         """Apply startup dialog settings and calculate static battery capacity fields."""
@@ -1453,8 +1561,7 @@ class TelemetryApplication(QObject):
             process_data_callback=self.process_data,
             process_raw_data_callback=self.process_raw_data
         )
-        reader.data_received.connect(self.process_data)
-        reader.raw_data_received.connect(self.process_raw_data)
+        reader.line_received.connect(self.enqueue_serial_line)
         reader.connection_opened.connect(self._on_serial_connection_opened)
         reader.connection_error.connect(self._on_serial_connection_error)
         reader.finished.connect(
@@ -1471,6 +1578,43 @@ class TelemetryApplication(QObject):
             f"Serial connection attempt started on {self.selected_port} "
             f"with baudrate {self.baudrate}"
         )
+
+    def enqueue_serial_line(self, raw_line):
+        """Queue one serial line for fair, bounded processing on the Qt thread."""
+        if len(self._serial_line_queue) >= self._serial_line_queue_limit:
+            self._serial_line_queue.popleft()
+            self._serial_dropped_lines += 1
+            if self._serial_dropped_lines == 1 or self._serial_dropped_lines % 100 == 0:
+                self.logger.warning(
+                    "Telemetry processing backlog reached %d lines; dropped %d "
+                    "oldest line(s) to keep the application responsive.",
+                    self._serial_line_queue_limit,
+                    self._serial_dropped_lines,
+                )
+        self._serial_line_queue.append(raw_line)
+        if not self._serial_drain_scheduled:
+            self._serial_drain_scheduled = True
+            QTimer.singleShot(0, self._drain_serial_line_queue)
+
+    def _drain_serial_line_queue(self):
+        """Process a small serial batch, then yield back to Qt."""
+        self._serial_drain_scheduled = False
+        if self._serial_shutdown:
+            self._serial_line_queue.clear()
+            return
+        started = time.monotonic()
+        processed = 0
+        while self._serial_line_queue and processed < self._serial_drain_batch_size:
+            raw_line = self._serial_line_queue.popleft()
+            self.process_raw_data(raw_line)
+            self.process_data(raw_line)
+            processed += 1
+            if time.monotonic() - started >= self._serial_drain_budget_seconds:
+                break
+
+        if self._serial_line_queue and not self._serial_shutdown:
+            self._serial_drain_scheduled = True
+            QTimer.singleShot(1, self._drain_serial_line_queue)
 
     def stop_serial_reader(self, suspend_reconnect=True):
         """Stop live serial input and clear the thread reference."""
@@ -1654,6 +1798,107 @@ class TelemetryApplication(QObject):
         finally:
             # signal the GUI (with or without an error) so it can re-enable the button
             self.training_complete_signal.emit(error)
+
+    def _refresh_legacy_battery_model_if_needed(self):
+        """Refresh old/frozen battery PKLs after the GUI becomes responsive."""
+        metadata = self.ml_model.batt_meta or {}
+        if (
+            metadata.get("model_version")
+            == self.ml_model.BATTERY_MODEL_VERSION
+            and metadata.get("row_count") is not None
+        ):
+            return
+        with self._battery_auto_retrain_lock:
+            self._battery_rows_pending = max(
+                self._battery_rows_pending,
+                self.battery_auto_retrain_batch_rows,
+            )
+        self.logger.info(
+            "Legacy battery model detected; scheduling a background refresh "
+            "from the active training CSV."
+        )
+        self._start_battery_auto_retrain_if_ready()
+
+    def _note_model_training_result(self, result):
+        """Count new battery rows and steady-state break-even labels."""
+        if not isinstance(result, dict):
+            return
+        if result.get(
+            "battery_row_written",
+            result.get("row_written"),
+        ):
+            with self._battery_auto_retrain_lock:
+                self._battery_rows_pending += 1
+            self._start_battery_auto_retrain_if_ready()
+        self._note_break_even_training_result(result)
+
+    def _start_battery_auto_retrain_if_ready(self):
+        with self._battery_auto_retrain_lock:
+            if (
+                self._battery_auto_retrain_in_progress
+                or self._battery_rows_pending
+                < self.battery_auto_retrain_batch_rows
+            ):
+                return
+            self._battery_auto_retrain_in_progress = True
+            self._battery_rows_pending -= self.battery_auto_retrain_batch_rows
+
+        worker = threading.Thread(
+            target=self._auto_retrain_battery_model,
+            name="battery-auto-retrain",
+            daemon=True,
+        )
+        worker.start()
+
+    def _auto_retrain_battery_model(self):
+        """Rebuild and atomically replace the battery model off the GUI thread."""
+        training_path = self.csv_handler.get_training_data_csv_path()
+        snapshot_path = None
+        succeeded = False
+        try:
+            if not training_path or not os.path.exists(training_path):
+                raise FileNotFoundError(
+                    "Active battery training CSV does not exist."
+                )
+            handle, snapshot_path = tempfile.mkstemp(
+                prefix="battery-training-",
+                suffix=".csv",
+            )
+            os.close(handle)
+            # Hold the CSV lock only for the quick file copy. Forest fitting
+            # happens on the snapshot, so live CSV writes remain responsive.
+            with self.csv_handler.lock:
+                shutil.copyfile(training_path, snapshot_path)
+            succeeded = bool(
+                self.ml_model.train_battery_life_model(snapshot_path)
+            )
+            if succeeded:
+                metadata = self.ml_model.batt_meta or {}
+                self.logger.info(
+                    "Battery model auto-retrained from %s rows using %s.",
+                    metadata.get("row_count", "unknown"),
+                    metadata.get("feature_schema", "legacy-compatible"),
+                )
+            else:
+                self.logger.warning(
+                    "Battery auto-retrain skipped because training data "
+                    "was insufficient."
+                )
+        except Exception as exc:
+            self.logger.error(f"Battery auto-retrain failed: {exc}")
+        finally:
+            if snapshot_path:
+                try:
+                    os.remove(snapshot_path)
+                except OSError:
+                    pass
+            with self._battery_auto_retrain_lock:
+                self._battery_auto_retrain_in_progress = False
+            # A failed startup refresh must not retrain on every subsequent
+            # one-second telemetry row. The consumed batch remains consumed;
+            # another attempt occurs after a fresh full batch has accumulated.
+            if succeeded:
+                self._start_battery_auto_retrain_if_ready()
 
     def _note_break_even_training_result(self, result):
         """Queue background retraining after enough new steady-state labels."""
@@ -2014,20 +2259,12 @@ class TelemetryApplication(QObject):
 
                     combined_data[TelemetryKey.DRIVER.value[0]] = self.driver_name or "N/A"
 
-                    # The trained models expect exact column names and feature
-                    # counts. Keep this narrow even though combined_data carries
-                    # many more fields for display and logging.
-                    feat_batt = {
-                        'BP_PVS_milliamp*s': self.buffer.safe_float(
-                            combined_data.get('BP_PVS_milliamp*s', 0)
-                        ),
-                        'BP_PVS_Ah': self.buffer.safe_float(
-                            combined_data.get('BP_PVS_Ah', 0)
-                        ),
-                        'BP_PVS_Voltage': self.buffer.safe_float(
-                            combined_data.get('BP_PVS_Voltage', 0)
-                        ),
-                    }
+                    # Give the battery predictor the complete current snapshot.
+                    # The loaded PKL selects its exact named feature schema, so
+                    # legacy three-input artifacts, enhanced local models, and
+                    # future compatible artifacts can all consume the fields
+                    # they were actually trained to accept.
+                    feat_batt = dict(combined_data)
 
                     # The break-even RF learns steady motor power versus speed.
                     # Query that road-load curve with current net array power.
@@ -2035,7 +2272,7 @@ class TelemetryApplication(QObject):
                         'BreakEven_Power_W': combined_data.get(
                             'Array_Estimated_Power_W'
                         ),
-                        'BP_PVS_Voltage': feat_batt['BP_PVS_Voltage'],
+                        'BP_PVS_Voltage': feat_batt.get('BP_PVS_Voltage'),
                     }
 
                     # --- battery-life prediction + diagnostics ---
@@ -2055,6 +2292,22 @@ class TelemetryApplication(QObject):
                     combined_data['Predicted_Remaining_Time_Uncertainty'] = (
                         batt_uncertainty if batt_uncertainty is not None else 'N/A'
                     )
+                    combined_data[
+                        TelemetryKey.BATTERY_MODEL_SCHEMA.value[0]
+                    ] = self.ml_model.batt_meta.get(
+                        "feature_schema",
+                        "legacy-loaded",
+                    )
+                    combined_data[
+                        TelemetryKey.BATTERY_MODEL_TRAINING_ROWS.value[0]
+                    ] = (
+                        batt_details.get("training_rows")
+                        if batt_details.get("training_rows") is not None
+                        else "legacy/unknown"
+                    )
+                    combined_data[
+                        TelemetryKey.BATTERY_MODEL_VERSION.value[0]
+                    ] = batt_details.get("model_version", 1)
 
                     # --- break-even prediction + diagnostics ---
                     be_details = self.ml_model.predict_break_even_speed_details(feat_be)
@@ -2124,7 +2377,7 @@ class TelemetryApplication(QObject):
                         csv_row = self._build_primary_csv_row(combined_data)
                         self.csv_handler.append_to_csv(self.csv_handler.get_csv_file_path(), csv_row)
                         training_result = self.buffer.save_training_data()
-                        self._note_break_even_training_result(training_result)
+                        self._note_model_training_result(training_result)
 
                     # --- emit to GUI & server ---
                     self.update_data_signal.emit(combined_data)

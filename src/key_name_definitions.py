@@ -334,6 +334,9 @@ class TelemetryKey(Enum):
     PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY = ("Predicted_BreakEven_Speed_Uncertainty", "mph")
     PREDICTION_DATA_AGE_S = ("Prediction_Data_Age_s", "s")
     PREDICTION_QUALITY_FLAGS = ("Prediction_Quality_Flags", "")
+    BATTERY_MODEL_SCHEMA = ("Battery_Model_Feature_Schema", "")
+    BATTERY_MODEL_TRAINING_ROWS = ("Battery_Model_Training_Rows", "rows")
+    BATTERY_MODEL_VERSION = ("Battery_Model_Version", "")
     
 # Solcast fields below are generated from this list for all prefixes:
 # Solcast_Live_*, Solcast_Fcst_*, Solcast_Fcst_30m_*, Solcast_Fcst_1h_*,

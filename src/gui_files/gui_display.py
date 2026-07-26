@@ -21,6 +21,7 @@ from PyQt6.QtCore import pyqtSignal, QTimer
 import json
 import os
 import logging
+import threading
 
 # Make sure this import is correct in your environment.
 from key_name_definitions import TelemetryKey, solcast_keys_for_prefix
@@ -60,6 +61,7 @@ class TelemetryGUI(QWidget):
     simulation_replay_speed_changed = pyqtSignal(float)
     start_simulation_scenario_requested = pyqtSignal(str, float, dict)
     stop_simulation_requested = pyqtSignal()
+    versions_loaded_signal = pyqtSignal(object, object)
 
     def __init__(self, data_keys, units, csv_handler, config_file='config.json'):
         super().__init__()
@@ -79,6 +81,8 @@ class TelemetryGUI(QWidget):
         self.config_file = config_file
         self.last_telemetry_data = {}
         self.last_update = None
+        self._pending_telemetry_data = None
+        self._version_refresh_in_progress = False
         self.logger = logging.getLogger(__name__)
 
         # Load or create color mapping
@@ -87,6 +91,15 @@ class TelemetryGUI(QWidget):
 
         self.init_ui()
         self.apply_dark_mode()
+        # Collapse bursts to the newest snapshot. This bounds expensive map,
+        # graph, table, and dashboard repaints without slowing CSV ingestion.
+        self.telemetry_update_timer = QTimer(self)
+        self.telemetry_update_timer.setSingleShot(True)
+        self.telemetry_update_timer.setInterval(100)
+        self.telemetry_update_timer.timeout.connect(
+            self._flush_pending_telemetry_update
+        )
+        self.versions_loaded_signal.connect(self._on_versions_loaded)
         self.header_age_timer = QTimer(self)
         self.header_age_timer.timeout.connect(self._refresh_header_age)
         self.header_age_timer.start(1000)
@@ -433,6 +446,9 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.PREDICTED_BREAK_EVEN_SPEED_UNCERTAINTY.value[0],
                 TelemetryKey.PREDICTION_DATA_AGE_S.value[0],
                 TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0],
+                TelemetryKey.BATTERY_MODEL_SCHEMA.value[0],
+                TelemetryKey.BATTERY_MODEL_TRAINING_ROWS.value[0],
+                TelemetryKey.BATTERY_MODEL_VERSION.value[0],
             ],
             "DC Controls": [
                 TelemetryKey.DC_DRV_MOTOR_VELOCITY_SETPOINT.value[0],
@@ -583,6 +599,15 @@ class TelemetryGUI(QWidget):
         # GPS Map Tab
         self.gps_map_tab = GPSMapTab()
         self.tabs.addTab(self.gps_map_tab, "Map")
+        # Dashboard and Map are two controls for one persisted operating mode.
+        # Blocking inside DashboardTab.set_race_mode prevents signal loops.
+        self.dashboard_tab.race_mode_change_requested.connect(
+            self.gps_map_tab.set_race_mode
+        )
+        self.gps_map_tab.race_mode_changed.connect(
+            self.dashboard_tab.set_race_mode
+        )
+        self.dashboard_tab.set_race_mode(self.gps_map_tab.race_mode)
 
         # Image Annotation Tabs
         try:
@@ -776,13 +801,52 @@ class TelemetryGUI(QWidget):
 
     # ----- Updater version management -----
     def on_refresh_versions(self):
+        """Refresh updater versions once in the background."""
+        if self._version_refresh_in_progress:
+            return
+        self._version_refresh_in_progress = True
         try:
-            versions = self.updater.list_available_versions(limit=20)
-            self.settings_tab.set_versions(versions, self.current_version)
-            if not versions:
-                QMessageBox.information(self, "Versions", "No versions found or network error.")
-        except Exception as e:
-            QMessageBox.warning(self, "Versions", f"Failed to fetch versions: {e}")
+            self.settings_tab.set_update_status("Checking available versions...")
+        except Exception:
+            pass
+
+        def refresh():
+            error = None
+            versions = []
+            try:
+                versions = self.updater.list_available_versions(limit=20)
+            except Exception as exc:
+                error = str(exc)
+            self.versions_loaded_signal.emit(versions, error)
+
+        worker = threading.Thread(
+            target=refresh,
+            name="updater-version-refresh",
+            daemon=True,
+        )
+        try:
+            worker.start()
+        except Exception:
+            self._version_refresh_in_progress = False
+            raise
+
+    def _on_versions_loaded(self, versions, error):
+        self._version_refresh_in_progress = False
+        self.settings_tab.set_versions(versions or [], self.current_version)
+        if error:
+            self.settings_tab.set_update_status(
+                f"Version check failed: {error}",
+                reset_progress=True,
+            )
+        elif versions:
+            self.settings_tab.set_update_status(
+                f"Found {len(versions)} available version(s)."
+            )
+        else:
+            self.settings_tab.set_update_status(
+                "No versions found or the network is unavailable.",
+                reset_progress=True,
+            )
 
     def on_install_version_requested(self, version: str):
         reply = QMessageBox.question(
@@ -862,6 +926,19 @@ class TelemetryGUI(QWidget):
                 self.logger.error(f"Image tab update error: {e}")
         except Exception as e:
             self.logger.error(f"Error updating all tabs: {e}")
+
+    def queue_telemetry_update(self, telemetry_data: dict):
+        """Retain only the newest pending GUI snapshot during telemetry bursts."""
+        self._pending_telemetry_data = dict(telemetry_data)
+        if not self.telemetry_update_timer.isActive():
+            self.telemetry_update_timer.start()
+
+    def _flush_pending_telemetry_update(self):
+        """Apply one coalesced GUI update after returning to the event loop."""
+        telemetry_data = self._pending_telemetry_data
+        self._pending_telemetry_data = None
+        if telemetry_data is not None:
+            self.update_all_tabs(telemetry_data)
 
     def _refresh_active_view(self, *_args):
         """Refresh a newly selected tab without adding a duplicate graph sample."""

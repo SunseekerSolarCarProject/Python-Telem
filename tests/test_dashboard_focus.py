@@ -89,6 +89,30 @@ class DashboardFocusTests(unittest.TestCase):
         )
         self.assertIn("ASC forecast", alert_text)
 
+    def test_race_view_selector_switches_cards_and_requests_shared_mode(self):
+        asc_key = TelemetryKey.NAV_ASC_CURRENT_LEG_SOLAR_WH.value[0]
+        fsgp_key = TelemetryKey.NAV_FSGP_PROJECTED_TOTAL_LAPS.value[0]
+        requested_modes = []
+        self.tab.race_mode_change_requested.connect(requested_modes.append)
+
+        asc_index = self.tab.race_mode_selector.findData(
+            self.tab.RACE_MODE_ASC
+        )
+        self.tab.race_mode_selector.setCurrentIndex(asc_index)
+
+        self.assertEqual(self.tab.race_mode, self.tab.RACE_MODE_ASC)
+        self.assertEqual(requested_modes, [self.tab.RACE_MODE_ASC])
+        self.assertFalse(self.tab.cards[asc_key].isHidden())
+        self.assertTrue(self.tab.cards[fsgp_key].isHidden())
+        self.assertIn("ASC Route cockpit", self.tab.race_mode_summary.text())
+
+        # Telemetry/map synchronization changes the selector without creating
+        # a second user request and signal loop.
+        self.tab.set_race_mode(self.tab.RACE_MODE_FSGP)
+        self.assertEqual(requested_modes, [self.tab.RACE_MODE_ASC])
+        self.assertTrue(self.tab.cards[asc_key].isHidden())
+        self.assertFalse(self.tab.cards[fsgp_key].isHidden())
+
     def test_asc_cutoff_risk_is_prominent(self):
         margin_key = (
             TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_MARGIN_MIN.value[0]

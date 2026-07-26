@@ -212,6 +212,21 @@ tab instead of making the application wider.
 The Dashboard is the primary race-day cockpit. It collects the values an
 operator is most likely to need without searching the detailed tables.
 
+### Race View
+
+Use **Race View** to switch the shared operating mode:
+
+- **FSGP Track** shows circuit-focused lap timing, official distance, race time
+  remaining, average pace, and projected possible laps.
+- **ASC Route** shows point-to-point route progress, checkpoint arrival and
+  closing-time margin, battery-safe speed, solar/energy forecasts, and projected
+  arrival SOC.
+
+The Dashboard selector and **Map > Race mode** control stay synchronized and
+save one setting. Changing either one immediately changes both tabs. Both modes
+remain available every year, so ASC planning can also be used for preparation
+or simulation outside an ASC event year.
+
 ### Speed Source
 
 Use **Speed Source** to select:
@@ -332,8 +347,14 @@ progress, lap timing, distance, and race-day averages.
 
 - Drag the map to pan.
 - Use the on-map **+** and **-** buttons for fine zoom control.
-- Enable **Follow vehicle** to keep the newest valid GPS position centered.
-- Disable it to inspect another part of the route.
+- Use the mouse wheel or touchpad over a location to zoom while keeping that
+  geographic point beneath the pointer.
+- Use the always-visible **Follow** button beside **+** and **-** to keep the
+  newest valid GPS position centered. The matching **Follow vehicle** checkbox
+  is also available under Map setup.
+- Dragging or wheel-zooming enters map-browse mode and releases Follow. Press
+  **Follow** again to return immediately to the vehicle without changing the
+  selected zoom level.
 - Expand **Map setup** for controls.
 - Expand **Race details** for full lap, distance, route, and tile status.
 - The compact race summary remains visible while both drawers are collapsed.
@@ -633,6 +654,12 @@ Configure:
 **Refresh Ports** rescans connected and virtual serial devices. Applying a new
 port or baud rate restarts the live serial reader.
 
+The selected port is saved. If it is unplugged or unavailable at startup, the
+header shows **Waiting** and the application checks again every two seconds.
+It reconnects when that port returns. If Windows changes the COM number, the
+application adopts and saves the new number only when it is the sole detected
+serial device; it will not guess when multiple ports are present.
+
 Changing global units updates the UI and future CSV output. Individual cards,
 graphs, and data-table fields can still have their own saved unit overrides.
 
@@ -788,8 +815,25 @@ The application uses two local scikit-learn random-forest regression models.
 
 | Prediction | Inputs | Output |
 | --- | --- | --- |
-| Battery life | PVS milliamp-seconds, signed PVS Ah, and PVS voltage | Remaining runtime |
+| Battery life | Legacy: PVS milliamp-seconds, signed PVS Ah, and PVS voltage. Enhanced: those fields plus shunt current, SOC, and remaining Ah | Remaining runtime |
 | Break-even speed | Available power and PVS voltage | Sustainable steady speed estimate |
+
+Saved battery models declare or expose their exact named feature list. The app
+now supplies the complete telemetry snapshot and lets the loaded model select
+those inputs, rather than forcing every `.pkl` through the old three-column
+runtime dictionary. Legacy three-input files remain compatible.
+
+New valid battery rows are counted separately from break-even labels. After
+100 valid rows, the battery forest retrains in the background from a locked CSV
+snapshot. An older model without current metadata is refreshed after startup.
+Once at least 50 complete current/SOC/remaining-capacity rows are available,
+training automatically upgrades to the enhanced input schema. Until then, it
+continues using all valid legacy rows.
+
+Near-zero-current stopped samples can calculate hundreds of hours of remaining
+time. Those values stay in the full telemetry CSV for diagnosis but are not
+added to the ML training CSV. Battery training accepts finite targets from 0
+to 24 hours with pack voltage of at least 100 V.
 
 The break-even model learns from measured steady-state driving. A training row
 receives a break-even label only while:
@@ -912,8 +956,22 @@ Do not rely on only one copy of race-day data.
 
 - Treat the displayed values as stale.
 - Check radio/serial power, cable, port, and transmitter activity.
-- Refresh ports and apply the correct connection settings.
-- Restart the application if the operating system has reassigned the port.
+- Watch the connection header for the automatic reconnect status.
+- If multiple ports are detected after Windows reassigns the device, choose the
+  correct port once in Settings and press **Apply Settings**.
+
+### Window freezes, paints slowly, or shows “Not Responding”
+
+- Allow several seconds the first time a graph page is opened; graph canvases
+  load in small batches and remain available afterward.
+- Check the log for `Telemetry processing backlog` warnings. The app keeps up
+  to 5,000 pending serial lines and discards the oldest only at that emergency
+  limit so the window and newest telemetry can recover.
+- A slow Solcast, updater, or telemetry-server connection should not block the
+  window. These jobs are bounded in background workers; local Primary and Raw
+  CSV recording remains the authoritative lossless record.
+- Close other memory-heavy programs if the operating system is paging. Do not
+  enlarge graph windows beyond what is needed for the current session.
 
 ### GPS map is blank or gray
 
@@ -976,6 +1034,9 @@ synchronized inputs and quality counters to find the data problem.
 
 - Read `Prediction_Quality_Flags`.
 - Confirm the model files exist and the Training CSV contains valid rows.
+- Allow the background refresh to complete when upgrading a legacy battery
+  model. The log reports its row count and `legacy-compatible` or
+  `enhanced-current-soc-capacity` feature schema.
 - Check whether live inputs are outside the model's training range.
 - Inspect uncertainty before using the result.
 - Collect representative real driving data, then retrain.

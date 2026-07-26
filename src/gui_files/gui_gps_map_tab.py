@@ -63,14 +63,40 @@ class MapGraphicsView(QGraphicsView):
         super().__init__(parent_tab.scene, parent_tab)
         self.parent_tab = parent_tab
         self._suppress_next_left_release = False
+        self._left_press_position = None
+        self._left_dragged = False
 
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         if delta > 0:
-            self.parent_tab._set_zoom(self.parent_tab.zoom + 1)
+            self.parent_tab._zoom_at_view_position(
+                self.parent_tab.zoom + 1,
+                event.position().toPoint(),
+            )
         elif delta < 0:
-            self.parent_tab._set_zoom(self.parent_tab.zoom - 1)
+            self.parent_tab._zoom_at_view_position(
+                self.parent_tab.zoom - 1,
+                event.position().toPoint(),
+            )
         event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._left_press_position = event.position().toPoint()
+            self._left_dragged = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            self._left_press_position is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            distance = (
+                event.position().toPoint() - self._left_press_position
+            ).manhattanLength()
+            if distance >= 4:
+                self._left_dragged = True
+        super().mouseMoveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -84,10 +110,14 @@ class MapGraphicsView(QGraphicsView):
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
         if event.button() == Qt.MouseButton.LeftButton:
+            dragged = self._left_dragged
+            self._left_press_position = None
+            self._left_dragged = False
             if self._suppress_next_left_release:
                 self._suppress_next_left_release = False
                 return
-            self.parent_tab._set_map_center_from_view()
+            if dragged:
+                self.parent_tab._set_map_center_from_view()
 
 
 class GPSMapTab(QWidget):
@@ -119,6 +149,7 @@ class GPSMapTab(QWidget):
     KALAMAZOO_LAT = 42.291707
     KALAMAZOO_LON = -85.587229
     asc_route_changed = pyqtSignal()
+    race_mode_changed = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -333,6 +364,12 @@ class GPSMapTab(QWidget):
         route_row.addWidget(reset_laps_button)
         self.follow_vehicle_checkbox = QCheckBox("Follow vehicle")
         self.follow_vehicle_checkbox.setChecked(True)
+        self.follow_vehicle_checkbox.setToolTip(
+            "Keep the vehicle centered. Drag or wheel-zoom the map to browse manually."
+        )
+        self.follow_vehicle_checkbox.toggled.connect(
+            self._follow_vehicle_changed
+        )
         route_row.addWidget(self.follow_vehicle_checkbox)
         route_row.addStretch()
 
@@ -564,6 +601,10 @@ class GPSMapTab(QWidget):
             "font-size: 22px; font-weight: bold; }"
             "QPushButton:hover { background: #e8e8e8; }"
             "QPushButton:disabled { color: #aaaaaa; }"
+            "QPushButton#mapFollowButton { font-size: 11px; "
+            "font-weight: bold; padding: 2px; }"
+            "QPushButton#mapFollowButton:checked { background: #2563eb; "
+            "color: white; }"
         )
         zoom_layout = QVBoxLayout(self.zoom_controls)
         zoom_layout.setContentsMargins(2, 2, 2, 2)
@@ -578,8 +619,28 @@ class GPSMapTab(QWidget):
         self.zoom_out_button.setAccessibleName("Zoom map out")
         self.zoom_in_button.clicked.connect(lambda: self._set_zoom(self.zoom + 1))
         self.zoom_out_button.clicked.connect(lambda: self._set_zoom(self.zoom - 1))
+        self.follow_vehicle_button = QPushButton("Follow")
+        self.follow_vehicle_button.setObjectName("mapFollowButton")
+        self.follow_vehicle_button.setCheckable(True)
+        self.follow_vehicle_button.setChecked(
+            self.follow_vehicle_checkbox.isChecked()
+        )
+        self.follow_vehicle_button.setFixedSize(58, 34)
+        self.follow_vehicle_button.setToolTip(
+            "Keep the live vehicle centered on the map"
+        )
+        self.follow_vehicle_button.setAccessibleName(
+            "Follow vehicle on map"
+        )
+        self.follow_vehicle_button.toggled.connect(
+            self.follow_vehicle_checkbox.setChecked
+        )
+        self.follow_vehicle_checkbox.toggled.connect(
+            self.follow_vehicle_button.setChecked
+        )
         zoom_layout.addWidget(self.zoom_in_button)
         zoom_layout.addWidget(self.zoom_out_button)
+        zoom_layout.addWidget(self.follow_vehicle_button)
         map_layout.addWidget(
             self.zoom_controls,
             0,
@@ -695,10 +756,82 @@ class GPSMapTab(QWidget):
         )
 
     def _set_zoom(self, zoom):
-        self.zoom = max(2, min(19, zoom))
+        new_zoom = max(2, min(19, int(zoom)))
+        if new_zoom == self.zoom:
+            self._update_zoom_controls()
+            return
+        self.zoom = new_zoom
+        if (
+            self.follow_vehicle_checkbox.isChecked()
+            and self.vehicle_lat is not None
+            and self.vehicle_lon is not None
+        ):
+            self.center_lat = self.vehicle_lat
+            self.center_lon = self.vehicle_lon
         self._update_zoom_controls()
         if self.center_lat is not None and self.center_lon is not None:
             self._render_map()
+
+    def _zoom_at_view_position(self, zoom, view_position):
+        """Wheel-zoom around the geographic point beneath the cursor."""
+        new_zoom = max(2, min(19, int(zoom)))
+        if (
+            new_zoom == self.zoom
+            or self.center_lat is None
+            or self.center_lon is None
+        ):
+            self._update_zoom_controls()
+            return
+
+        anchor_scene = self.view.mapToScene(view_position)
+        view_center_scene = self.view.mapToScene(
+            self.view.viewport().rect().center()
+        )
+        anchor_lat, anchor_lon = self._scene_point_to_latlon(
+            anchor_scene.x(),
+            anchor_scene.y(),
+        )
+        offset_x = anchor_scene.x() - view_center_scene.x()
+        offset_y = anchor_scene.y() - view_center_scene.y()
+
+        anchor_tile_x, anchor_tile_y = self._latlon_to_tile_fraction(
+            anchor_lat,
+            anchor_lon,
+            new_zoom,
+        )
+        center_tile_x = anchor_tile_x - (offset_x / self.TILE_SIZE)
+        center_tile_y = anchor_tile_y - (offset_y / self.TILE_SIZE)
+        center_lat, center_lon = self._tile_fraction_to_latlon(
+            center_tile_x,
+            center_tile_y,
+            new_zoom,
+        )
+
+        # Wheel zoom is an explicit browse action. Re-enable Follow to snap
+        # back to the latest vehicle position while retaining this zoom level.
+        self.follow_vehicle_checkbox.setChecked(False)
+        self.zoom = new_zoom
+        self.center_lat = center_lat
+        self.center_lon = center_lon
+        self._update_zoom_controls()
+        self.status_label.setText(
+            f"Map browse | zoom {self.zoom}; enable Follow to recenter"
+        )
+        self._render_map()
+
+    def _follow_vehicle_changed(self, enabled):
+        """Immediately recenter when the operator enables vehicle following."""
+        if not enabled:
+            return
+        if self.vehicle_lat is None or self.vehicle_lon is None:
+            self.status_label.setText(
+                "Follow enabled | waiting for a valid vehicle location"
+            )
+            return
+        self.center_lat = self.vehicle_lat
+        self.center_lon = self.vehicle_lon
+        self.status_label.setText("Following vehicle")
+        self._render_map()
 
     def _update_zoom_controls(self):
         """Reflect the OSM zoom limits in the on-map buttons."""
@@ -725,6 +858,11 @@ class GPSMapTab(QWidget):
         recenter=True,
         render=True,
     ):
+        previous_location = (
+            (self.vehicle_lat, self.vehicle_lon)
+            if self.vehicle_lat is not None and self.vehicle_lon is not None
+            else None
+        )
         self.vehicle_lat = lat
         self.vehicle_lon = lon
         if recenter or self.center_lat is None or self.center_lon is None:
@@ -736,7 +874,12 @@ class GPSMapTab(QWidget):
         if reset_trail or not self.trail or self._distance_px(self.trail[-1], (lat, lon)) >= 2:
             self.trail.append((lat, lon))
             self.trail = self.trail[-250:]
-        if render:
+        moved_enough_to_redraw = (
+            previous_location is None
+            or reset_trail
+            or self._distance_px(previous_location, (lat, lon)) >= 0.5
+        )
+        if render and moved_enough_to_redraw:
             self._render_map()
 
     def _set_map_center(self, lat, lon, status="Map browse"):
@@ -840,6 +983,18 @@ class GPSMapTab(QWidget):
         self._refresh_distance_labels()
         if mode == self.RACE_MODE_ASC and self.route_segments:
             self.asc_route_changed.emit()
+        if mode != previous_mode:
+            self.race_mode_changed.emit(mode)
+
+    def set_race_mode(self, mode):
+        """Set the shared Dashboard/Map race mode through the normal UI path."""
+        if mode not in {self.RACE_MODE_FSGP, self.RACE_MODE_ASC}:
+            return False
+        if self.race_mode_combo.currentText() != mode:
+            self.race_mode_combo.setCurrentText(mode)
+        elif self.race_mode != mode:
+            self._race_mode_changed(mode)
+        return True
 
     def _track_length_changed(self, miles):
         self.track_lap_length_miles = max(0.0, float(miles))
@@ -1368,7 +1523,11 @@ class GPSMapTab(QWidget):
         view_center = self.view.mapToScene(self.view.viewport().rect().center())
         lat, lon = self._scene_point_to_latlon(view_center.x(), view_center.y())
         self.follow_vehicle_checkbox.setChecked(False)
-        self._set_map_center(lat, lon)
+        self._set_map_center(
+            lat,
+            lon,
+            status="Map browse | drag to pan; enable Follow to recenter",
+        )
 
     def _render_empty_state(self, lat=None, lon=None):
         self.scene.clear()
@@ -1388,6 +1547,7 @@ class GPSMapTab(QWidget):
         # Render the map from scratch so stale tiles, trails, and route paths do
         # not survive zoom/pan changes. Tile requests are async; placeholders
         # are replaced in _on_tile_reply as network replies arrive.
+        self.view.resetTransform()
         self.scene.clear()
         self.tile_items = {}
         self.visible_tile_keys = set()

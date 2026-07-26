@@ -24,6 +24,8 @@ class BufferData:
     )
     MIN_BREAK_EVEN_SPEED_MPH = 5.0
     BREAK_EVEN_MAX_ABS_FORWARD_G = 0.03
+    BATTERY_TRAINING_MIN_VOLTAGE = 100.0
+    BATTERY_TRAINING_MAX_REMAINING_HOURS = 24.0
     ARRAY_SOURCE_FIELDS = (
         'MC1BUS_Voltage',
         'MC1BUS_Current',
@@ -462,14 +464,45 @@ class BufferData:
         pvs_ma_s = self.safe_float(self.combined_data.get('BP_PVS_milliamp*s', None), default=None)
         pvs_ah   = self.safe_float(self.combined_data.get('BP_PVS_Ah', None), default=None)
         pvs_v    = self.safe_float(self.combined_data.get('BP_PVS_Voltage', None), default=None)
+        def optional_training_float(key):
+            value = self.combined_data.get(key)
+            if value in (None, "", "N/A"):
+                return None
+            return self.safe_float(value, default=None)
+
+        shunt_current = optional_training_float('BP_ISH_Amps')
+        shunt_soc = optional_training_float('BP_ISH_SOC')
+        shunt_remaining_ah = optional_training_float(
+            'Shunt_Remaining_Ah'
+        )
 
         used_time = self.safe_float(self.combined_data.get('Used_Ah_Remaining_Time', None), default=None)
         # Battery-life rows do not require a break-even label. The speed model
         # learns road load only while moving with near-zero longitudinal
         # acceleration, excluding launch and braking power.
-        if None in (pvs_ma_s, pvs_ah, pvs_v, used_time):
-            self.logger.debug("Skipping training row—incomplete data.")
-            return {"row_written": False, "break_even_label_written": False}
+        battery_values = (pvs_ma_s, pvs_ah, pvs_v, used_time)
+        battery_eligible = (
+            None not in battery_values
+            and all(math.isfinite(value) for value in (
+                pvs_ma_s,
+                pvs_ah,
+                pvs_v,
+                used_time,
+            ))
+            and pvs_v >= self.BATTERY_TRAINING_MIN_VOLTAGE
+            and used_time > 0.0
+            and used_time <= self.BATTERY_TRAINING_MAX_REMAINING_HOURS
+        )
+        if not battery_eligible:
+            # Near-zero current while stopped can create remaining-time labels
+            # of hundreds of hours (or larger). Preserve them in the primary
+            # telemetry CSV, but do not teach them to the battery model. Keep
+            # checking the independent break-even gate so a useful road-load
+            # label is not lost just because a battery field is unavailable.
+            self.logger.debug(
+                "Battery training values are incomplete or outside stable "
+                "voltage/time bounds."
+            )
 
         speed = self.safe_float(self.combined_data.get('MC1VEL_Speed'), default=None)
         array_power = self.safe_float(
@@ -500,20 +533,44 @@ class BufferData:
             and imu_valid == 1
             and array_power is not None
             and math.isfinite(array_power)
+            and pvs_v is not None
+            and math.isfinite(pvs_v)
+            and pvs_v >= self.BATTERY_TRAINING_MIN_VOLTAGE
             and array_status.startswith('Estimated: five-second window')
         )
+        if not battery_eligible and not break_even_eligible:
+            return {
+                "row_written": False,
+                "battery_row_written": False,
+                "break_even_label_written": False,
+            }
 
         training_data_path = self.csv_handler.get_training_data_csv_path()
         if not training_data_path:
             self.logger.error("Training data CSV path is not set. Cannot save training data.")
-            return {"row_written": False, "break_even_label_written": False}
+            return {
+                "row_written": False,
+                "battery_row_written": False,
+                "break_even_label_written": False,
+            }
         training_entry = {
             # battery-life inputs
-            'BP_PVS_milliamp*s': pvs_ma_s,
-            'BP_PVS_Ah'        : pvs_ah,
-            'BP_PVS_Voltage'   : pvs_v,
+            'BP_PVS_milliamp*s': pvs_ma_s if pvs_ma_s is not None else 'N/A',
+            'BP_PVS_Ah'        : pvs_ah if pvs_ah is not None else 'N/A',
+            'BP_PVS_Voltage'   : pvs_v if pvs_v is not None else 'N/A',
+            # Enhanced battery-model inputs. Legacy rows remain usable until
+            # enough complete race rows exist to upgrade the model schema.
+            'BP_ISH_Amps'      : shunt_current if shunt_current is not None else 'N/A',
+            'BP_ISH_SOC'       : shunt_soc if shunt_soc is not None else 'N/A',
+            'Shunt_Remaining_Ah': (
+                shunt_remaining_ah
+                if shunt_remaining_ah is not None
+                else 'N/A'
+            ),
             # battery-life target
-            'Used_Ah_Remaining_Time': used_time,
+            'Used_Ah_Remaining_Time': (
+                used_time if battery_eligible else 'N/A'
+            ),
             # Break-even learns from synchronized array power and only receives
             # a motor-power/speed label during steady-state driving. At runtime,
             # current net array power is queried against this learned road load.
@@ -553,6 +610,7 @@ class BufferData:
         self.logger.info(f"Training data saved to {training_data_path}")
         return {
             "row_written": True,
+            "battery_row_written": battery_eligible,
             "break_even_label_written": break_even_eligible,
         }
 

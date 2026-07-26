@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -68,6 +69,7 @@ class ConfigDialog(QDialog):
         self.updater.update_available.connect(self.on_update_available)
         self.updater.update_progress.connect(self.on_update_progress)
         self.updater.update_error.connect(self.on_update_error)
+        self._update_check_in_progress = False
 
         self.init_ui()
 
@@ -215,11 +217,24 @@ class ConfigDialog(QDialog):
             pass
 
     def _check_for_updates_safely(self):
-        # Only checks in packaged builds; dev runs silently skip
-        try:
-            self.updater.check_for_updates()
-        except Exception as e:
-            self.logger.debug(f"Update check skipped/failed: {e}")
+        """Check packaged updates without blocking the startup dialog."""
+        if self._update_check_in_progress:
+            return
+        self._update_check_in_progress = True
+
+        def check():
+            try:
+                self.updater.check_for_updates()
+            except Exception as e:
+                self.logger.debug(f"Update check skipped/failed: {e}")
+            finally:
+                self._update_check_in_progress = False
+
+        threading.Thread(
+            target=check,
+            name="startup-update-check",
+            daemon=True,
+        ).start()
 
      # --- Updater slots ---
     def on_update_available(self, latest_version: str):

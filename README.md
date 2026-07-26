@@ -40,7 +40,11 @@ where `/dev/pts/5` is the peer printed by `socat` and `/dev/pts/4` is the port s
 ### Windows virtual serial ports
 For Windows bench testing, create a paired virtual COM/null-modem connection with a tool such as com0com, Null-modem emulator, or a similar virtual serial-port application. Configure a pair such as `COM10` and `COM11`, select one side in the telemetry app, and send generated telemetry lines to the other side from your simulator or terminal tool.
 
-If the virtual COM port does not appear immediately, reopen the configuration dialog or use **Settings > Connection > Refresh Ports**. The port field is editable, so you can also type the COM name manually.
+If the saved virtual or physical COM port is missing, the running application
+waits and reconnects automatically when it appears. If Windows assigns a new
+number and only one serial device is detected, the application adopts and
+saves it. With multiple detected ports, use **Settings > Connection > Refresh
+Ports** and choose the intended one so the application does not guess.
 
 ---
 

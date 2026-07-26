@@ -75,8 +75,12 @@ class MetricCard(QFrame):
 class DashboardTab(QWidget):
     # This tab is the race-day cockpit: it surfaces the values and warnings
     # operators should not have to hunt for across the detailed graph/table tabs.
+    race_mode_change_requested = pyqtSignal(str)
+
     SPEED_SOURCE_NAV = "nav"
     SPEED_SOURCE_MOTOR_AVG = "motor_avg"
+    RACE_MODE_FSGP = "FSGP Track"
+    RACE_MODE_ASC = "ASC Route"
 
     def __init__(self, units_map):
         super().__init__()
@@ -88,6 +92,7 @@ class DashboardTab(QWidget):
         self.mode = "Live"
         self.connection = "Starting"
         self.speed_source = self.SPEED_SOURCE_NAV
+        self.race_mode = self.RACE_MODE_FSGP
         self._init_ui()
 
     def _init_ui(self):
@@ -105,6 +110,24 @@ class DashboardTab(QWidget):
         layout = QVBoxLayout(self.content)
 
         status_row = QHBoxLayout()
+        self.race_mode_selector = QComboBox()
+        self.race_mode_selector.addItem(
+            self.RACE_MODE_FSGP,
+            self.RACE_MODE_FSGP,
+        )
+        self.race_mode_selector.addItem(
+            self.RACE_MODE_ASC,
+            self.RACE_MODE_ASC,
+        )
+        self.race_mode_selector.setToolTip(
+            "Switch the complete race cockpit and Map planning mode between "
+            "FSGP circuit metrics and ASC route/checkpoint metrics."
+        )
+        self.race_mode_selector.currentIndexChanged.connect(
+            self._on_race_mode_selector_changed
+        )
+        status_row.addWidget(QLabel("Race View:"))
+        status_row.addWidget(self.race_mode_selector)
         self.speed_source_selector = QComboBox()
         self.speed_source_selector.addItem("Nav", self.SPEED_SOURCE_NAV)
         self.speed_source_selector.addItem("Motor Avg", self.SPEED_SOURCE_MOTOR_AVG)
@@ -113,6 +136,11 @@ class DashboardTab(QWidget):
         status_row.addWidget(self.speed_source_selector)
         status_row.addStretch()
         layout.addLayout(status_row)
+
+        self.race_mode_summary = QLabel()
+        self.race_mode_summary.setObjectName("StatusPill")
+        self.race_mode_summary.setWordWrap(True)
+        layout.addWidget(self.race_mode_summary)
 
         self.cards = {}
         card_specs = [
@@ -173,6 +201,7 @@ class DashboardTab(QWidget):
         self._card_columns = 0
         self._reflow_cards(4)
         layout.addLayout(self.card_grid)
+        self._refresh_race_mode_summary()
 
         self.alerts = QListWidget()
         self.alerts.setObjectName("AlertList")
@@ -229,15 +258,8 @@ class DashboardTab(QWidget):
         race_mode = str(
             telemetry_data.get(TelemetryKey.NAV_RACE_MODE.value[0], "")
         ).strip()
-        desired_mode = "asc" if race_mode == "ASC Route" else "fsgp"
-        if desired_mode != self._active_race_mode:
-            self._active_race_mode = desired_mode
-            for key, card in self.cards.items():
-                mode = self.card_modes.get(key, "always")
-                card.setHidden(mode not in ("always", desired_mode))
-            columns = self._card_columns or 4
-            self._card_columns = 0
-            self._reflow_cards(columns)
+        if race_mode in {self.RACE_MODE_FSGP, self.RACE_MODE_ASC}:
+            self.set_race_mode(race_mode)
         for key, card in self.cards.items():
             if key == TelemetryKey.NAV_VEHICLE_MPH.value[0]:
                 display, target, state = self._speed_card_display(telemetry_data, card.unit)
@@ -256,6 +278,57 @@ class DashboardTab(QWidget):
                 self._state_for_value(key, raw),
             )
         self._update_alerts(telemetry_data)
+
+    def set_race_mode(self, race_mode):
+        """Synchronize the dashboard view without re-emitting a user request."""
+        if race_mode not in {self.RACE_MODE_FSGP, self.RACE_MODE_ASC}:
+            return False
+        self.race_mode = race_mode
+        selector_index = self.race_mode_selector.findData(race_mode)
+        if (
+            selector_index >= 0
+            and selector_index != self.race_mode_selector.currentIndex()
+        ):
+            self.race_mode_selector.blockSignals(True)
+            self.race_mode_selector.setCurrentIndex(selector_index)
+            self.race_mode_selector.blockSignals(False)
+
+        desired_mode = (
+            "asc" if race_mode == self.RACE_MODE_ASC else "fsgp"
+        )
+        if desired_mode != self._active_race_mode:
+            self._active_race_mode = desired_mode
+            for key, card in self.cards.items():
+                mode = self.card_modes.get(key, "always")
+                card.setHidden(mode not in ("always", desired_mode))
+            columns = self._card_columns or 4
+            self._card_columns = 0
+            self._reflow_cards(columns)
+        self._refresh_race_mode_summary()
+        return True
+
+    def _on_race_mode_selector_changed(self):
+        race_mode = self.race_mode_selector.currentData()
+        if not self.set_race_mode(race_mode):
+            return
+        if self.last_telemetry_data:
+            alert_data = dict(self.last_telemetry_data)
+            alert_data[TelemetryKey.NAV_RACE_MODE.value[0]] = race_mode
+            self._update_alerts(alert_data)
+        self.race_mode_change_requested.emit(race_mode)
+
+    def _refresh_race_mode_summary(self):
+        if self.race_mode == self.RACE_MODE_ASC:
+            text = (
+                "<b>ASC Route cockpit</b> — checkpoint deadlines, "
+                "battery-safe pace, solar/energy forecast, and arrival SOC."
+            )
+        else:
+            text = (
+                "<b>FSGP Track cockpit</b> — lap timing, official distance, "
+                "race clock, and possible-lap projection."
+            )
+        self.race_mode_summary.setText(text)
 
     @staticmethod
     def _cell_card_unit(key, unit, telemetry_data):
@@ -441,10 +514,7 @@ class DashboardTab(QWidget):
         if quality and quality.lower() not in ("0", "none", "ok", "n/a"):
             alerts.append(f"Prediction quality: {quality}")
 
-        if (
-            telemetry_data.get(TelemetryKey.NAV_RACE_MODE.value[0])
-            == "ASC Route"
-        ):
+        if self.race_mode == self.RACE_MODE_ASC:
             confidence = str(
                 telemetry_data.get(
                     TelemetryKey.NAV_ASC_FORECAST_CONFIDENCE.value[0], ""

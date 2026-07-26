@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
 )
-from PyQt6.QtCore import QEvent, QSettings, Qt
+from PyQt6.QtCore import QEvent, QSettings, Qt, QTimer
 import pyqtgraph as pg
 
 from gui_files.custom_plot_widget import CustomPlotWidget
@@ -45,6 +45,8 @@ class BaseGraphTab(QWidget):
         self.graph_widgets = {}
         self._hover_proxies = {}
         self.current_zoom_plot = None
+        self._graph_build_index = 0
+        self._graph_build_in_progress = False
 
         self._init_ui()
 
@@ -84,10 +86,12 @@ class BaseGraphTab(QWidget):
         scroll.setWidget(container)
         vbox = QVBoxLayout(container)
 
-        for key in self.keys:
-            color = self.color_mapping.get(key, "gray")
-            self._add_graph(vbox, key, color)
-
+        self._graph_layout = vbox
+        self._graph_loading_label = QLabel(
+            "Graphs will load in small batches when this tab is opened."
+        )
+        self._graph_loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        vbox.addWidget(self._graph_loading_label)
         vbox.addStretch()
         container.installEventFilter(self)
 
@@ -115,7 +119,50 @@ class BaseGraphTab(QWidget):
         pw.double_clicked.connect(lambda ev, pw=pw, key=key: self._on_dblclick(ev, pw, key))
 
         self.graph_widgets[key] = pw
-        layout.addWidget(pw)
+        layout.insertWidget(max(0, layout.count() - 1), pw)
+
+    def showEvent(self, event):
+        """Lazily construct expensive plot canvases after startup."""
+        super().showEvent(event)
+        self._ensure_graph_widgets()
+
+    def _ensure_graph_widgets(self):
+        if (
+            self._graph_build_in_progress
+            or self._graph_build_index >= len(self.keys)
+        ):
+            return
+        self._graph_build_in_progress = True
+        self._graph_loading_label.setText("Loading graphs...")
+        QTimer.singleShot(0, self._build_next_graph_batch)
+
+    def _build_next_graph_batch(self):
+        """Build a few plots, then yield so the window remains interactive."""
+        if not self.isVisible():
+            self._graph_build_in_progress = False
+            self._graph_loading_label.setText(
+                "Graph loading paused; reopen this tab to continue."
+            )
+            return
+
+        batch_end = min(self._graph_build_index + 3, len(self.keys))
+        while self._graph_build_index < batch_end:
+            key = self.keys[self._graph_build_index]
+            color = self.color_mapping.get(key, "gray")
+            self._add_graph(self._graph_layout, key, color)
+            pw = self.graph_widgets[key]
+            self._redraw_plot(key, pw)
+            self._graph_build_index += 1
+
+        if self._graph_build_index < len(self.keys):
+            self._graph_loading_label.setText(
+                f"Loading graphs... {self._graph_build_index}/{len(self.keys)}"
+            )
+            QTimer.singleShot(0, self._build_next_graph_batch)
+            return
+
+        self._graph_build_in_progress = False
+        self._graph_loading_label.hide()
 
     def _display_unit(self, key):
         return self.unit_overrides.get(key) or self.units_map.get(key) or KEY_UNITS.get(key, "")
@@ -221,7 +268,7 @@ class BaseGraphTab(QWidget):
         if self.paused and not force:
             return
 
-        for key, pw in self.graph_widgets.items():
+        for key in self.keys:
             if key not in telemetry_data:
                 continue
             raw = telemetry_data[key]
@@ -234,7 +281,8 @@ class BaseGraphTab(QWidget):
             buf = self.data_buffers[key]
             buf.append(disp)
 
-            if redraw:
+            pw = self.graph_widgets.get(key)
+            if redraw and pw is not None:
                 self._redraw_plot(key, pw)
             self.logger.debug("[%s] %s: %s -> %s %s", self.title, key, raw, disp, target)
 

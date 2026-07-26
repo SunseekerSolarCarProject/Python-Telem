@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 try:
-    from PyQt6.QtCore import QDateTime, Qt
+    from PyQt6.QtCore import QDateTime, QPoint, Qt
     from PyQt6.QtTest import QTest
     from PyQt6.QtWidgets import (
         QApplication,
@@ -48,6 +48,21 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
     def _scene_center(self):
         center = self.tab.scene.sceneRect().center()
         return center.x(), center.y()
+
+    def test_public_race_mode_switch_updates_map_and_emits(self):
+        changed_modes = []
+        self.tab.race_mode_changed.connect(changed_modes.append)
+
+        self.assertTrue(self.tab.set_race_mode(self.tab.RACE_MODE_ASC))
+
+        self.assertEqual(self.tab.race_mode, self.tab.RACE_MODE_ASC)
+        self.assertEqual(
+            self.tab.race_mode_combo.currentText(),
+            self.tab.RACE_MODE_ASC,
+        )
+        self.assertEqual(changed_modes, [self.tab.RACE_MODE_ASC])
+        self.assertFalse(self.tab.track_length_input.isEnabled())
+        self.assertTrue(self.tab.asc_plan_speed_input.isEnabled())
 
     def test_start_and_end_are_placed_from_scene_coordinates(self):
         center_x, center_y = self._scene_center()
@@ -94,6 +109,53 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
         self.tab._set_zoom(2)
         self.assertTrue(self.tab.zoom_in_button.isEnabled())
         self.assertFalse(self.tab.zoom_out_button.isEnabled())
+
+    def test_visible_follow_button_recenters_on_latest_vehicle(self):
+        self.assertTrue(self.tab.follow_vehicle_button.isChecked())
+        self.tab.follow_vehicle_checkbox.setChecked(False)
+        self.tab.center_lat = 40.0
+        self.tab.center_lon = -80.0
+        self.tab.vehicle_lat = 42.2918
+        self.tab.vehicle_lon = -85.5871
+
+        with patch.object(self.tab, "_render_map") as render_map:
+            self.tab.follow_vehicle_button.click()
+
+        self.assertTrue(self.tab.follow_vehicle_checkbox.isChecked())
+        self.assertTrue(self.tab.follow_vehicle_button.isChecked())
+        self.assertEqual(self.tab.center_lat, 42.2918)
+        self.assertEqual(self.tab.center_lon, -85.5871)
+        render_map.assert_called_once_with()
+
+    def test_wheel_zoom_keeps_cursor_location_and_releases_follow(self):
+        self.tab.resize(900, 700)
+        self.tab.show()
+        self.app.processEvents()
+        viewport = self.tab.view.viewport()
+        cursor_point = QPoint(
+            int(viewport.width() * 0.72),
+            int(viewport.height() * 0.38),
+        )
+        before_scene = self.tab.view.mapToScene(cursor_point)
+        before_lat, before_lon = self.tab._scene_point_to_latlon(
+            before_scene.x(),
+            before_scene.y(),
+        )
+        initial_zoom = self.tab.zoom
+
+        with patch.object(self.tab, "_request_tile"):
+            self.tab._zoom_at_view_position(initial_zoom + 1, cursor_point)
+        self.app.processEvents()
+
+        after_scene = self.tab.view.mapToScene(cursor_point)
+        after_lat, after_lon = self.tab._scene_point_to_latlon(
+            after_scene.x(),
+            after_scene.y(),
+        )
+        self.assertEqual(self.tab.zoom, initial_zoom + 1)
+        self.assertFalse(self.tab.follow_vehicle_checkbox.isChecked())
+        self.assertAlmostEqual(after_lat, before_lat, places=4)
+        self.assertAlmostEqual(after_lon, before_lon, places=4)
 
     def test_setup_and_race_details_are_collapsed_by_default(self):
         self.assertTrue(self.tab.setup_panel.isHidden())

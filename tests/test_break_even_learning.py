@@ -186,6 +186,9 @@ class BreakEvenLearningTests(unittest.TestCase):
             "BP_PVS_milliamp*s": 1000.0,
             "BP_PVS_Ah": 0.5,
             "BP_PVS_Voltage": 135.0,
+            "BP_ISH_Amps": 8.0,
+            "BP_ISH_SOC": 82.0,
+            "Shunt_Remaining_Ah": 31.0,
             "Used_Ah_Remaining_Time": 4.0,
             "Array_Estimated_Power_W": 750.0,
             "Array_Estimate_Status": "Estimated: five-second window (5/5 usable frames)",
@@ -208,16 +211,76 @@ class BreakEvenLearningTests(unittest.TestCase):
         second = buffer.save_training_data()
 
         self.assertTrue(first["break_even_label_written"])
+        self.assertTrue(first["battery_row_written"])
         self.assertFalse(second["break_even_label_written"])
         self.assertEqual(csv_handler.rows[0]["BreakEven_Power_W"], 800.0)
         self.assertEqual(csv_handler.rows[0]["BreakEvenSpeed"], 30.0)
         self.assertEqual(csv_handler.rows[0]["BreakEven_Label_Weight"], 1.0)
+        self.assertEqual(csv_handler.rows[0]["BP_ISH_Amps"], 8.0)
+        self.assertEqual(csv_handler.rows[0]["BP_ISH_SOC"], 82.0)
+        self.assertEqual(csv_handler.rows[0]["Shunt_Remaining_Ah"], 31.0)
         self.assertEqual(csv_handler.rows[0]["Array_Estimate_Sample_1_W"], 700.0)
         self.assertEqual(csv_handler.rows[0]["Array_Estimate_Sample_5_W"], 800.0)
         self.assertEqual(csv_handler.rows[0]["Array_Estimate_Window_StdDev_W"], 35.36)
         self.assertEqual(csv_handler.rows[0]["Array_Estimate_Frame_Usable_Pct"], 92.0)
         self.assertEqual(csv_handler.rows[1]["BreakEvenSpeed"], "N/A")
         self.assertEqual(csv_handler.rows[1]["BreakEven_Label_Weight"], "N/A")
+
+    def test_live_training_rejects_near_zero_current_time_explosion(self):
+        csv_handler = MemoryCSVHandler()
+        buffer = BufferData(
+            csv_handler,
+            [],
+            [],
+            buffer_size=20,
+            buffer_timeout=2.0,
+        )
+        buffer.combined_data.update({
+            "BP_PVS_milliamp*s": 1000.0,
+            "BP_PVS_Ah": 0.5,
+            "BP_PVS_Voltage": 135.0,
+            "Used_Ah_Remaining_Time": 192.0,
+        })
+
+        result = buffer.save_training_data()
+
+        self.assertFalse(result["row_written"])
+        self.assertFalse(result["battery_row_written"])
+        self.assertEqual(csv_handler.rows, [])
+
+    def test_break_even_label_survives_missing_battery_target(self):
+        csv_handler = MemoryCSVHandler()
+        buffer = BufferData(
+            csv_handler,
+            [],
+            [],
+            buffer_size=20,
+            buffer_timeout=2.0,
+        )
+        buffer.combined_data.update({
+            "BP_PVS_milliamp*s": 1000.0,
+            "BP_PVS_Ah": 0.5,
+            "BP_PVS_Voltage": 135.0,
+            "Array_Estimated_Power_W": 750.0,
+            "Array_Estimate_Status": (
+                "Estimated: five-second window (5/5 usable frames)"
+            ),
+            "Motors_Total_Bus_Power_W": 800.0,
+            "IMU_FORWARD_G": 0.01,
+            "IMU_G_VALID": 1,
+            "MC1VEL_Speed": 30.0,
+        })
+        buffer._array_estimate_generation = 1
+
+        result = buffer.save_training_data()
+
+        self.assertTrue(result["row_written"])
+        self.assertFalse(result["battery_row_written"])
+        self.assertTrue(result["break_even_label_written"])
+        self.assertEqual(
+            csv_handler.rows[0]["Used_Ah_Remaining_Time"],
+            "N/A",
+        )
 
 
 if __name__ == "__main__":

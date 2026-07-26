@@ -11,6 +11,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class SerialReaderThread(QThread):
     data_received     = pyqtSignal(str)
     raw_data_received = pyqtSignal(str)
+    line_received     = pyqtSignal(str)
     connection_opened = pyqtSignal(str, int)
     connection_error  = pyqtSignal(str, str)
 
@@ -78,6 +79,7 @@ class SerialReaderThread(QThread):
                         # Emit both streams: one is parsed into fields, the other is
                         # archived verbatim so bad parser assumptions can be audited.
                         self.logger.debug(f"Raw data: {raw_line}")
+                        self.line_received.emit(raw_line)
                         self.data_received.emit(raw_line)
                         self.raw_data_received.emit(raw_line)
         except serial.SerialException as e:
