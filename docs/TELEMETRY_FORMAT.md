@@ -166,13 +166,24 @@ The GPS map tab may add route fields after a GPX route is loaded:
 
 ```text
 NAV_Route_Name
+NAV_Route_GPX_Status
+NAV_Route_Start_Point
+NAV_Route_End_Point
 NAV_Checkpoint_Name
 NAV_Route_Distance_Remaining
 NAV_Route_Distance_Traveled
+NAV_Route_Estimated_Drive_Time
+NAV_Route_Estimated_Total_Time
+NAV_Route_Estimated_Arrival
 NAV_Checkpoint_Distance_Remaining
 NAV_Checkpoint_ETA
 NAV_ASC_Plan_Speed
 NAV_ASC_Checkpoint_Stop
+NAV_ASC_Minimum_Arrival_SOC
+NAV_ASC_Deadline_Required_Speed
+NAV_ASC_Recommended_Speed
+NAV_ASC_Speed_Feasibility_Status
+NAV_ASC_Speed_Options
 NAV_ASC_Current_Leg_Solar
 NAV_ASC_Current_Stop_Solar
 NAV_ASC_Current_Leg_Drive_Energy
@@ -197,12 +208,27 @@ NAV_ASC_Leg_Forecast_Summary
 ```
 
 The map has separate **FSGP Track** and **ASC Route** modes. ASC mode treats
-multiple selected GPX files as ordered checkpoint/day segments, maintains
-monotonic point-to-point progress, and pauses circuit lap timing. The route
-search normally checks a window around the prior GPX match so long ASC files
-remain responsive, with a full-route fallback if the vehicle is off that
-window. Changing race modes preserves completed laps but clears the partial lap
-in progress so time spent in ASC mode cannot inflate a later FSGP lap.
+multiple selected GPX files as ordered checkpoint/day segments and preserves
+each `<trkseg>` or `<rte>` boundary. Track/route points take priority over
+unrelated GPX waypoints. **Race details** and **Stops & Closing Times** show each
+segment's first coordinate, last coordinate, and mileage. The map marks the
+overall start and segment ends and warns when consecutive endpoints are more
+than 0.25 mile apart; disconnected gaps are not silently included in the time
+estimate.
+
+`NAV_Route_Estimated_Drive_Time` is remaining GPX mileage divided by **ASC plan
+speed**. `NAV_Route_Estimated_Total_Time` adds remaining intermediate checkpoint
+stops, and `NAV_Route_Estimated_Arrival` is the resulting final-endpoint arrival
+time. These are planning estimates and remain available while stopped.
+`NAV_Checkpoint_ETA` is separate: it uses live vehicle speed for the current
+segment endpoint.
+
+ASC mode maintains monotonic point-to-point progress and pauses circuit lap
+timing. The route search normally checks a window around the prior GPX match so
+long ASC files remain responsive, with a full-route fallback if the vehicle is
+off that window. Changing race modes preserves completed laps but clears the
+partial lap in progress so time spent in ASC mode cannot inflate a later FSGP
+lap.
 
 ASC energy fields integrate cached Solcast irradiance over the remaining GPX
 legs at the entered planning speed. The planner learns effective array output

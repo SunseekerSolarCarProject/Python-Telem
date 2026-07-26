@@ -80,9 +80,9 @@ class CSVManagementTab(QWidget):
         layout.addWidget(paths_group)
 
         actions_group = QGroupBox("Actions")
-        buttons_layout = QGridLayout(actions_group)
-        buttons_layout.setSpacing(8)
-        buttons_layout.setContentsMargins(8, 8, 8, 8)
+        self.buttons_layout = QGridLayout(actions_group)
+        self.buttons_layout.setSpacing(8)
+        self.buttons_layout.setContentsMargins(8, 8, 8, 8)
 
         def _btn(text, slot):
             btn = QPushButton(text)
@@ -97,14 +97,37 @@ class CSVManagementTab(QWidget):
             ("Export Telemetry Bundle...", self.request_bundle_export),
             ("Import Telemetry Bundle...", self.request_bundle_import),
         ]
-        for index, (text, slot) in enumerate(actions):
-            buttons_layout.addWidget(_btn(text, slot), index // 3, index % 3)
-        for column in range(3):
-            buttons_layout.setColumnStretch(column, 1)
+        self.action_buttons = [_btn(text, slot) for text, slot in actions]
+        self._action_columns = 0
+        self._reflow_action_buttons(2)
         layout.addWidget(actions_group)
         layout.addStretch(1)
 
         self._refresh_labels()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = event.size().width()
+        columns = 3 if width >= 1050 else 2 if width >= 620 else 1
+        self._reflow_action_buttons(columns)
+
+    def _reflow_action_buttons(self, columns):
+        if columns == self._action_columns:
+            return
+        self._action_columns = columns
+        for button in self.action_buttons:
+            self.buttons_layout.removeWidget(button)
+        for index, button in enumerate(self.action_buttons):
+            self.buttons_layout.addWidget(
+                button,
+                index // columns,
+                index % columns,
+            )
+        for column in range(3):
+            self.buttons_layout.setColumnStretch(
+                column,
+                1 if column < columns else 0,
+            )
 
     def _create_path_edit(self):
         path_edit = QLineEdit()

@@ -42,6 +42,13 @@ class MetricCard(QFrame):
         self.value_label.setObjectName("MetricValue")
         self.unit_label = QLabel(unit)
         self.unit_label.setObjectName("MetricUnit")
+        for label in (self.title_label, self.value_label, self.unit_label):
+            label.setMinimumWidth(0)
+            label.setWordWrap(True)
+            label.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
         layout.addWidget(self.title_label)
         layout.addWidget(self.value_label)
         layout.addWidget(self.unit_label)
@@ -112,6 +119,7 @@ class DashboardTab(QWidget):
             ("Vehicle Speed", TelemetryKey.NAV_VEHICLE_MPH.value[0], "always"),
             ("Battery SOC", TelemetryKey.BP_ISH_SOC.value[0], "always"),
             ("Pack Voltage", TelemetryKey.BP_PVS_VOLTAGE.value[0], "always"),
+            ("Maximum Cell", TelemetryKey.BP_VMX_VOLTAGE.value[0], "always"),
             ("Minimum Cell", TelemetryKey.BP_VMN_VOLTAGE.value[0], "always"),
             ("Pack Current", TelemetryKey.BP_ISH_AMPS.value[0], "always"),
             ("Pack Power", TelemetryKey.BATTERY_PACK_POWER_KW.value[0], "always"),
@@ -135,8 +143,12 @@ class DashboardTab(QWidget):
             ("Checkpoint", TelemetryKey.NAV_CHECKPOINT_NAME.value[0], "asc"),
             ("Checkpoint Remaining", TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0], "asc"),
             ("Checkpoint ETA", TelemetryKey.NAV_CHECKPOINT_ETA.value[0], "asc"),
+            ("Route Time Remaining", TelemetryKey.NAV_ROUTE_ESTIMATED_TOTAL_TIME.value[0], "asc"),
+            ("Route Arrival", TelemetryKey.NAV_ROUTE_ESTIMATED_ARRIVAL.value[0], "asc"),
             ("Planned Arrival", TelemetryKey.NAV_ASC_CURRENT_LEG_ARRIVAL_TIME.value[0], "asc"),
             ("Checkpoint Close Margin", TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_MARGIN_MIN.value[0], "asc"),
+            ("Deadline Required Speed", TelemetryKey.NAV_ASC_DEADLINE_REQUIRED_SPEED_MPH.value[0], "asc"),
+            ("Battery-Safe Speed", TelemetryKey.NAV_ASC_RECOMMENDED_SPEED_MPH.value[0], "asc"),
             ("Leg Solar Forecast", TelemetryKey.NAV_ASC_CURRENT_LEG_SOLAR_WH.value[0], "asc"),
             ("Checkpoint Stop Solar", TelemetryKey.NAV_ASC_CURRENT_STOP_SOLAR_WH.value[0], "asc"),
             ("Leg Net Energy", TelemetryKey.NAV_ASC_CURRENT_LEG_NET_WH.value[0], "asc"),
@@ -238,8 +250,32 @@ class DashboardTab(QWidget):
                 display = convert_value(key, raw, target)
             except Exception:
                 display = raw
-            card.set_value(display, target, self._state_for_value(key, raw))
+            card.set_value(
+                display,
+                self._cell_card_unit(key, target, telemetry_data),
+                self._state_for_value(key, raw),
+            )
         self._update_alerts(telemetry_data)
+
+    @staticmethod
+    def _cell_card_unit(key, unit, telemetry_data):
+        cell_id_keys = {
+            TelemetryKey.BP_VMX_VOLTAGE.value[0]: TelemetryKey.BP_VMX_ID.value[0],
+            TelemetryKey.BP_VMN_VOLTAGE.value[0]: TelemetryKey.BP_VMN_ID.value[0],
+        }
+        cell_id_key = cell_id_keys.get(key)
+        if cell_id_key is None:
+            return unit
+
+        cell_id = telemetry_data.get(cell_id_key)
+        if cell_id is None or str(cell_id).strip().lower() in ("", "n/a", "none"):
+            return unit
+        try:
+            numeric_id = float(cell_id)
+            cell_id = str(int(numeric_id)) if numeric_id.is_integer() else str(numeric_id)
+        except (TypeError, ValueError):
+            cell_id = str(cell_id)
+        return f"{unit} | Cell {cell_id}" if unit else f"Cell {cell_id}"
 
     @staticmethod
     def _flag_is_one(value):

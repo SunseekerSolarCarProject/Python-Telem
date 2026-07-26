@@ -36,6 +36,7 @@ class CustomizableDataTableTab(QWidget):
         self.imperial_map = build_imperial_units_dict()
 
         self._row_key_map = {}
+        self._layout_signature = None
         self._init_ui()
 
         # Add context menu support
@@ -60,50 +61,55 @@ class CustomizableDataTableTab(QWidget):
 
     def update_data(self, telemetry_data):
         self._last_raw = telemetry_data.copy()
-        
-        # Calculate total rows needed (group headers + parameters)
-        total_rows = sum(len(keys) + 1 for keys in self.groups.values())
-        self.table.setRowCount(total_rows)
 
+        total_rows = sum(len(keys) + 1 for keys in self.groups.values())
+        signature = tuple((group_name, tuple(keys)) for group_name, keys in self.groups.items())
+        if self.table.rowCount() != total_rows or signature != self._layout_signature:
+            self._build_static_rows(total_rows, signature)
+
+        for row, (group_name, idx) in self._row_key_map.items():
+            key = self.groups[group_name][idx]
+            raw = telemetry_data.get(key)
+            target = self.unit_overrides.get(key, self.units_map.get(key, ""))
+            disp = convert_value(key, raw, target)
+            self.table.item(row, 1).setText(str(disp))
+            self.table.item(row, 2).setText(target)
+
+    def _build_static_rows(self, total_rows, signature):
+        """Create headers and cells only when the operator changes the layout."""
+        self.table.clearSpans()
+        self.table.setRowCount(total_rows)
         self._row_key_map.clear()
         current_row = 0
-        
+
         for group_name, keys in self.groups.items():
-            # Add group header row
             header_item = QTableWidgetItem(group_name)
             header_item.setBackground(QBrush(QColor("#34312A")))
             header_item.setForeground(QBrush(QColor("#FFD400")))
             header_item.setFont(QFont("Arial", 14, QFont.Weight.Bold))
             self.table.setItem(current_row, 0, header_item)
-            
-            # Span header across all columns
             self.table.setSpan(current_row, 0, 1, 3)
             current_row += 1
 
-            # Add parameters under the group
             for idx, key in enumerate(keys):
                 self._row_key_map[current_row] = (group_name, idx)
-                raw = telemetry_data.get(key)
                 target = self.unit_overrides.get(key, self.units_map.get(key, ""))
-                disp = convert_value(key, raw, target)
 
-                # Parameter cell
                 p = QTableWidgetItem(key)
                 p.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 p.setForeground(QBrush(QColor("#FFF")))
                 self.table.setItem(current_row, 0, p)
 
-                # Value cell
-                v = QTableWidgetItem(str(disp))
+                v = QTableWidgetItem()
                 v.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(current_row, 1, v)
 
-                # Unit cell
                 u = QTableWidgetItem(target)
                 u.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(current_row, 2, u)
-
                 current_row += 1
+
+        self._layout_signature = signature
 
     def set_units_map(self, units_map, units_mode):
         self.units_map = units_map

@@ -42,10 +42,34 @@ class DashboardFocusTests(unittest.TestCase):
         ):
             self.assertNotIn(key.value[0], self.tab.cards)
 
+    def test_maximum_and_minimum_cell_cards_include_cell_ids(self):
+        maximum_key = TelemetryKey.BP_VMX_VOLTAGE.value[0]
+        minimum_key = TelemetryKey.BP_VMN_VOLTAGE.value[0]
+        self.assertIn(maximum_key, self.tab.cards)
+        self.assertIn(minimum_key, self.tab.cards)
+
+        self.tab.update_data(
+            {
+                maximum_key: 4.15,
+                TelemetryKey.BP_VMX_ID.value[0]: 12,
+                minimum_key: 3.92,
+                TelemetryKey.BP_VMN_ID.value[0]: 37,
+            }
+        )
+
+        self.assertEqual(self.tab.cards[maximum_key].value_label.text(), "4.15")
+        self.assertEqual(self.tab.cards[maximum_key].unit_label.text(), "V | Cell 12")
+        self.assertEqual(self.tab.cards[minimum_key].value_label.text(), "3.92")
+        self.assertEqual(self.tab.cards[minimum_key].unit_label.text(), "V | Cell 37")
+
     def test_cards_switch_between_fsgp_and_asc_decisions(self):
         asc_key = TelemetryKey.NAV_ASC_CURRENT_LEG_SOLAR_WH.value[0]
+        route_time_key = TelemetryKey.NAV_ROUTE_ESTIMATED_TOTAL_TIME.value[0]
+        route_arrival_key = TelemetryKey.NAV_ROUTE_ESTIMATED_ARRIVAL.value[0]
         fsgp_key = TelemetryKey.NAV_FSGP_PROJECTED_TOTAL_LAPS.value[0]
         self.assertTrue(self.tab.cards[asc_key].isHidden())
+        self.assertTrue(self.tab.cards[route_time_key].isHidden())
+        self.assertTrue(self.tab.cards[route_arrival_key].isHidden())
         self.assertFalse(self.tab.cards[fsgp_key].isHidden())
 
         self.tab.update_data({
@@ -56,6 +80,8 @@ class DashboardFocusTests(unittest.TestCase):
         })
 
         self.assertFalse(self.tab.cards[asc_key].isHidden())
+        self.assertFalse(self.tab.cards[route_time_key].isHidden())
+        self.assertFalse(self.tab.cards[route_arrival_key].isHidden())
         self.assertTrue(self.tab.cards[fsgp_key].isHidden())
         alert_text = " ".join(
             self.tab.alerts.item(index).text()

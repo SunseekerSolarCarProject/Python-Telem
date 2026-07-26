@@ -164,6 +164,124 @@ class ASCEnergyForecasterTests(unittest.TestCase):
             "Missed by 10 min",
         )
 
+    def test_recommended_speed_meets_close_and_battery_reserve(self):
+        result = self.forecaster.forecast(
+            {
+                "race_mode": "ASC Route",
+                "plan_speed_mph": 20.0,
+                "checkpoint_stop_minutes": 0.0,
+                "minimum_arrival_soc_pct": 20.0,
+                "legs": [{
+                    "name": "Checkpoint",
+                    "remaining_miles": 30.0,
+                    "cache_key": "checkpoint",
+                    "close_iso": (
+                        self.now + timedelta(hours=1)
+                    ).isoformat(),
+                }],
+            },
+            self.telemetry,
+            {
+                "checkpoint": {
+                    "forecasts": self._constant_route_forecasts()
+                }
+            },
+            now=self.now,
+        )
+
+        self.assertEqual(
+            result["NAV_ASC_Deadline_Required_Speed"], 30.0
+        )
+        self.assertEqual(result["NAV_ASC_Recommended_Speed"], 30.0)
+        self.assertIn(
+            "at least 20% projected SOC",
+            result["NAV_ASC_Speed_Feasibility_Status"],
+        )
+        self.assertIn(
+            "20.0 mph: late", result["NAV_ASC_Speed_Options"]
+        )
+        self.assertIn(
+            "30.0 mph: on time", result["NAV_ASC_Speed_Options"]
+        )
+
+    def test_deadline_speed_is_rejected_when_battery_reserve_is_not_safe(self):
+        low_battery = dict(self.telemetry)
+        low_battery[TelemetryKey.BP_ISH_SOC.value[0]] = 15.0
+        result = self.forecaster.forecast(
+            {
+                "race_mode": "ASC Route",
+                "plan_speed_mph": 30.0,
+                "checkpoint_stop_minutes": 0.0,
+                "minimum_arrival_soc_pct": 10.0,
+                "legs": [{
+                    "name": "Checkpoint",
+                    "remaining_miles": 30.0,
+                    "cache_key": "checkpoint",
+                    "close_iso": (
+                        self.now + timedelta(hours=1)
+                    ).isoformat(),
+                }],
+            },
+            low_battery,
+            {
+                "checkpoint": {
+                    "forecasts": self._constant_route_forecasts()
+                }
+            },
+            now=self.now,
+        )
+
+        self.assertEqual(
+            result["NAV_ASC_Deadline_Required_Speed"], 30.0
+        )
+        self.assertEqual(result["NAV_ASC_Recommended_Speed"], "N/A")
+        self.assertIn(
+            "No tested 5-80 mph speed",
+            result["NAV_ASC_Speed_Feasibility_Status"],
+        )
+        self.assertIn(
+            "30.0 mph: on time, min SOC 3.0%",
+            result["NAV_ASC_Speed_Options"],
+        )
+
+    def test_required_speed_accounts_for_prior_checkpoint_stop(self):
+        result = self.forecaster.forecast(
+            {
+                "race_mode": "ASC Route",
+                "plan_speed_mph": 20.0,
+                "checkpoint_stop_minutes": 30.0,
+                "minimum_arrival_soc_pct": 10.0,
+                "legs": [
+                    {
+                        "name": "Checkpoint A",
+                        "remaining_miles": 10.0,
+                        "cache_key": "a",
+                    },
+                    {
+                        "name": "Checkpoint B",
+                        "remaining_miles": 20.0,
+                        "cache_key": "b",
+                        "close_iso": (
+                            self.now + timedelta(hours=1.5)
+                        ).isoformat(),
+                    },
+                ],
+            },
+            self.telemetry,
+            {
+                "a": {"forecasts": self._constant_route_forecasts()},
+                "b": {"forecasts": self._constant_route_forecasts()},
+            },
+            now=self.now,
+        )
+
+        # Thirty miles of driving must fit in the one driving hour left after
+        # the planned 30-minute stop.
+        self.assertEqual(
+            result["NAV_ASC_Deadline_Required_Speed"], 30.0
+        )
+        self.assertEqual(result["NAV_ASC_Recommended_Speed"], 30.0)
+
     def test_array_size_is_learned_without_a_power_cap(self):
         larger_array = dict(self.telemetry)
         larger_array[TelemetryKey.ARRAY_ESTIMATED_POWER_W.value[0]] = 2400.0
@@ -171,6 +289,25 @@ class ASCEnergyForecasterTests(unittest.TestCase):
         forecaster.update_observations(larger_array)
 
         self.assertEqual(forecaster.array_gain_w_per_w_m2, 3.0)
+
+    def test_drive_energy_rate_uses_samples_near_candidate_speed(self):
+        forecaster = ASCEnergyForecaster()
+        slower = dict(self.telemetry)
+        slower[TelemetryKey.NAV_VEHICLE_MPH.value[0]] = 20.0
+        slower[TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0]] = 600.0
+        faster = dict(self.telemetry)
+        faster[TelemetryKey.NAV_VEHICLE_MPH.value[0]] = 40.0
+        faster[TelemetryKey.MOTORS_TOTAL_BUS_POWER_W.value[0]] = 2000.0
+        for _ in range(5):
+            forecaster.update_observations(slower)
+            forecaster.update_observations(faster)
+
+        self.assertEqual(
+            forecaster.drive_wh_per_mile_at_speed(20.0), 30.0
+        )
+        self.assertEqual(
+            forecaster.drive_wh_per_mile_at_speed(40.0), 50.0
+        )
 
     def test_non_asc_mode_is_inactive(self):
         result = self.forecaster.forecast(
@@ -195,6 +332,15 @@ class ASCEnergyForecasterTests(unittest.TestCase):
             self.assertTrue(asc_fields)
             self.assertTrue(
                 set(asc_fields).issubset(handler.primary_headers)
+            )
+            route_fields = [
+                key.value[0]
+                for key in TelemetryKey
+                if key.name.startswith("NAV_ROUTE_")
+            ]
+            self.assertTrue(route_fields)
+            self.assertTrue(
+                set(route_fields).issubset(handler.primary_headers)
             )
 
 

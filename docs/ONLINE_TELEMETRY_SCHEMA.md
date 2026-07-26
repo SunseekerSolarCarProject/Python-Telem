@@ -429,12 +429,23 @@ valid GPS fix is received and whenever GPS following is disabled.
 | `NAV_SATS_USED_VALID` | boolean-ish integer | `1` means the used-satellite count is valid. |
 | `NAV_SATS_USED_AGE_MS` | ms | Age of the used-satellite count. |
 | `NAV_Route_Name` | text | Loaded route name(s). |
+| `NAV_Route_GPX_Status` | text | Confirms ordered/connected GPX segments or identifies excluded gaps. |
+| `NAV_Route_Start_Point` / `NAV_Route_End_Point` | latitude, longitude | First and final coordinates from the ordered GPX route. |
 | `NAV_Checkpoint_Name` | text | Current/next checkpoint segment. |
 | `NAV_Route_Distance_Remaining` | mi | Remaining route distance. |
+| `NAV_Route_Distance_Traveled` | mi | Forward-only progress along the ordered GPX route. |
+| `NAV_Route_Estimated_Drive_Time` | `hh:mm:ss` | Remaining GPX distance divided by ASC plan speed. |
+| `NAV_Route_Estimated_Total_Time` | `hh:mm:ss` | Remaining drive time plus scheduled intermediate checkpoint stops. |
+| `NAV_Route_Estimated_Arrival` | local time | Estimated arrival at the final GPX endpoint. |
 | `NAV_Checkpoint_Distance_Remaining` | mi | Remaining distance to checkpoint. |
-| `NAV_Checkpoint_ETA` | `hh:mm:ss` | ETA to checkpoint. |
+| `NAV_Checkpoint_ETA` | `hh:mm:ss` | Live-speed ETA to the current segment endpoint. |
 | `NAV_ASC_Plan_Speed` | mph | Operator-entered effective leg pace, including expected routine traffic delay. |
 | `NAV_ASC_Checkpoint_Stop` | min | Default solar-charging stop after intermediate checkpoints. |
+| `NAV_ASC_Minimum_Arrival_SOC` | % | Operator-selected battery reserve required at every remaining checkpoint. |
+| `NAV_ASC_Deadline_Required_Speed` | mph | Uniform speed required to meet all enabled remaining checkpoint closes, including prior planned stops. |
+| `NAV_ASC_Recommended_Speed` | mph | Lowest tested speed that meets all enabled closes and the configured projected SOC reserve. |
+| `NAV_ASC_Speed_Feasibility_Status` | text | Explanation of deadline, energy-model readiness, and whether a battery-safe speed exists. |
+| `NAV_ASC_Speed_Options` | text | Selected speed scenarios with on-time/late state and minimum projected SOC. |
 | `NAV_ASC_Current_Leg_Solar` / `Current_Stop_Solar` | Wh | Forecast travel and checkpoint-stop solar energy. |
 | `NAV_ASC_Current_Leg_Drive_Energy` / `Current_Leg_Net_Energy` | Wh | Learned propulsion energy and travel solar minus propulsion energy. |
 | `NAV_ASC_Route_Solar` / `Route_Drive_Energy` / `Route_Net_Energy` | Wh | Remaining-route forecast totals. |
@@ -445,7 +456,7 @@ valid GPS fix is received and whenever GPS following is disabled.
 | `NAV_ASC_Current_Is_Stage_Stop` | Yes/No | Whether the current segment ends at a scheduled stage stop. |
 | `NAV_ASC_Route_Min_Checkpoint_Margin` | min | Smallest predicted close margin among remaining scheduled checkpoints. |
 | `NAV_ASC_Array_Gain_Per_Irradiance` | W per W/m² | Telemetry-learned effective array conversion; not area-capped. |
-| `NAV_ASC_Drive_Energy_Rate` | Wh/mi | Median observed moving motor-bus energy rate. |
+| `NAV_ASC_Drive_Energy_Rate` | Wh/mi | Moving motor-bus energy rate learned from observations nearest the plan speed, falling back to the overall median. |
 | `NAV_ASC_Forecast_Status` / `Forecast_Confidence` | text | Readiness, source/fallback, and confidence. |
 | `NAV_ASC_Forecast_Updated` | UTC timestamp | Time the leg-energy calculation was refreshed. |
 | `NAV_ASC_Leg_Forecast_Summary` | text | Ordered human-readable remaining-leg forecast. |

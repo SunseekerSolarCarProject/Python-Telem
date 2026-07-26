@@ -1,3 +1,9 @@
+from collections import deque
+import json
+import logging
+import math
+import re
+
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -11,10 +17,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 from PyQt6.QtCore import QEvent, QSettings, Qt
-import json
-import logging
-import math
-import re
 import pyqtgraph as pg
 
 from gui_files.custom_plot_widget import CustomPlotWidget
@@ -37,8 +39,8 @@ class BaseGraphTab(QWidget):
         self._last_raw = {}
         self._metric_map = build_metric_units_dict()
         self._imperial_map = build_imperial_units_dict()
-        self.data_buffers = {k: [] for k in keys}
         self.max_points = 361
+        self.data_buffers = {k: deque(maxlen=self.max_points) for k in keys}
         self.paused = False
         self.graph_widgets = {}
         self._hover_proxies = {}
@@ -121,8 +123,9 @@ class BaseGraphTab(QWidget):
     def _on_window_changed(self):
         self.max_points = int(self.window_combo.currentData() or 361)
         for key, buf in self.data_buffers.items():
-            if len(buf) > self.max_points:
-                self.data_buffers[key] = buf[-self.max_points:]
+            # Rebuilding the bounded deque applies both larger and smaller
+            # window selections without leaving an oversized backing list.
+            self.data_buffers[key] = deque(buf, maxlen=self.max_points)
         self._redraw_buffers()
 
     def _set_paused(self, paused):
@@ -211,8 +214,10 @@ class BaseGraphTab(QWidget):
         else:
             self._toggle_zoom(pw)
 
-    def update_graphs(self, telemetry_data, force=False):
-        self._last_raw = telemetry_data.copy()
+    def update_graphs(self, telemetry_data, force=False, redraw=True):
+        # Each graph tab only needs its own fields for unit refreshes. Keeping a
+        # full telemetry dictionary in every tab duplicates the same snapshot.
+        self._last_raw = {key: telemetry_data[key] for key in self.keys if key in telemetry_data}
         if self.paused and not force:
             return
 
@@ -228,12 +233,9 @@ class BaseGraphTab(QWidget):
 
             buf = self.data_buffers[key]
             buf.append(disp)
-            if len(buf) > self.max_points:
-                # Trim in place so long-running sessions do not grow memory
-                # usage while the selected time window stays responsive.
-                buf[:] = buf[-self.max_points:]
 
-            self._redraw_plot(key, pw)
+            if redraw:
+                self._redraw_plot(key, pw)
             self.logger.debug("[%s] %s: %s -> %s %s", self.title, key, raw, disp, target)
 
     def _redraw_buffers(self):

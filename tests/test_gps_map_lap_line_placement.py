@@ -1,6 +1,8 @@
 import os
 import sys
+import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,7 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 try:
     from PyQt6.QtCore import QDateTime, Qt
     from PyQt6.QtTest import QTest
-    from PyQt6.QtWidgets import QApplication, QCheckBox, QDateTimeEdit, QDialog
+    from PyQt6.QtWidgets import (
+        QApplication,
+        QCheckBox,
+        QDateTimeEdit,
+        QDialog,
+        QDoubleSpinBox,
+    )
     from gui_files.gui_gps_map_tab import GPSMapTab
 except ModuleNotFoundError:
     QApplication = None
@@ -117,6 +125,38 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
             self.tab.details_toggle_button.arrowType(), Qt.ArrowType.DownArrow
         )
 
+    def test_small_map_window_does_not_grow_when_drawers_open(self):
+        self.tab.resize(480, 480)
+        self.tab.show()
+        self.app.processEvents()
+        initial_size = self.tab.size()
+
+        self.tab.setup_toggle_button.click()
+        self.tab.details_toggle_button.click()
+        self.app.processEvents()
+
+        self.assertEqual(self.tab.size(), initial_size)
+        self.assertLessEqual(self.tab.minimumSizeHint().width(), 480)
+        self.assertLessEqual(self.tab.minimumSizeHint().height(), 480)
+        self.assertGreaterEqual(self.tab.view.height(), 100)
+        self.assertEqual(
+            self.tab.setup_scroll.verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
+        self.assertFalse(self.tab.load_gpx_button.isHidden())
+        self.assertIs(
+            self.tab.load_gpx_button.parentWidget(),
+            self.tab.setup_toggle_button.parentWidget(),
+        )
+        self.assertFalse(self.tab.asc_schedule_button.isHidden())
+        self.assertEqual(
+            self.tab.asc_schedule_button.text(), "Stops & Closing Times"
+        )
+        self.assertIs(
+            self.tab.asc_schedule_button.parentWidget(),
+            self.tab.setup_toggle_button.parentWidget(),
+        )
+
     def test_compact_summary_switches_between_fsgp_and_asc(self):
         self.tab._refresh_compact_summary()
         self.assertIn("FSGP", self.tab.compact_summary_label.text())
@@ -141,12 +181,14 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
         self.tab.route_progress_miles = first["length_miles"] / 2.0
         self.tab.asc_plan_speed_mph = 32.0
         self.tab.asc_checkpoint_stop_minutes = 15.0
+        self.tab.asc_minimum_arrival_soc_pct = 12.0
 
         context = self.tab.get_asc_energy_plan_context()
 
         self.assertEqual(context["race_mode"], self.tab.RACE_MODE_ASC)
         self.assertEqual(context["plan_speed_mph"], 32.0)
         self.assertEqual(context["checkpoint_stop_minutes"], 15.0)
+        self.assertEqual(context["minimum_arrival_soc_pct"], 12.0)
         self.assertEqual([leg["name"] for leg in context["legs"]], [
             "First",
             "Second",
@@ -163,6 +205,142 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
         self.assertEqual(
             later_context["legs"][0]["cache_key"],
             first_cache_key,
+        )
+
+    def test_gpx_segments_keep_endpoints_and_report_connection_gaps(self):
+        first = self.tab._build_route_segment(
+            "First.gpx", [(42.0, -85.0), (42.01, -85.0)]
+        )
+        connected = self.tab._build_route_segment(
+            "Second.gpx", [(42.01, -85.0), (42.02, -85.0)]
+        )
+        self.assertEqual(first["start_point"], (42.0, -85.0))
+        self.assertEqual(first["end_point"], (42.01, -85.0))
+        self.assertIn(
+            "Ready",
+            self.tab._validate_route_segments([first, connected]),
+        )
+
+        disconnected = self.tab._build_route_segment(
+            "Wrong order.gpx", [(43.0, -86.0), (43.01, -86.0)]
+        )
+        status = self.tab._validate_route_segments([first, disconnected])
+        self.assertIn("Warning: disconnected", status)
+        self.assertGreater(
+            disconnected["gap_from_previous_miles"],
+            self.tab.MAX_CONNECTED_SEGMENT_GAP_MILES,
+        )
+
+    def test_route_estimate_uses_gpx_distance_plan_speed_and_checkpoint_stops(self):
+        first = self.tab._build_route_segment(
+            "First.gpx", [(0.0, 0.0), (0.0, 0.1)]
+        )
+        second = self.tab._build_route_segment(
+            "Second.gpx", [(0.0, 0.1), (0.0, 0.2)]
+        )
+        first["schedule"] = {
+            "enabled": True,
+            "stop_minutes": 20.0,
+        }
+        self.tab.route_segments = [first, second]
+        self.tab.route_validation_status = self.tab._validate_route_segments(
+            self.tab.route_segments
+        )
+        self.tab.race_mode = self.tab.RACE_MODE_ASC
+        self.tab.asc_plan_speed_mph = 30.0
+        route_miles = first["length_miles"] + second["length_miles"]
+        now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+
+        estimate = self.tab._route_plan_estimate(
+            route_miles,
+            active_segment_index=0,
+            now=now,
+        )
+
+        self.assertAlmostEqual(
+            estimate["drive_seconds"],
+            route_miles / 30.0 * 3600.0,
+        )
+        self.assertEqual(estimate["stop_minutes"], 20.0)
+        self.assertAlmostEqual(
+            estimate["total_seconds"],
+            estimate["drive_seconds"] + 1200.0,
+        )
+        self.assertAlmostEqual(
+            (estimate["arrival"] - now).total_seconds(),
+            estimate["total_seconds"],
+            places=5,
+        )
+
+        metrics = self.tab._build_route_metrics(
+            speed_mph=0.0,
+            lat=0.0,
+            lon=0.0,
+        )
+        self.assertNotEqual(
+            metrics["NAV_Route_Estimated_Total_Time"], "N/A"
+        )
+        self.assertEqual(
+            metrics["NAV_Route_Start_Point"], "0.00000, 0.00000"
+        )
+        self.assertEqual(
+            metrics["NAV_Route_End_Point"], "0.00000, 0.20000"
+        )
+
+    def test_gpx_parser_preserves_track_segments_and_ignores_waypoints(self):
+        gpx = """<?xml version="1.0"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <wpt lat="50.0" lon="-100.0" />
+  <trk><name>ASC</name>
+    <trkseg>
+      <trkpt lat="42.0" lon="-85.0" />
+      <trkpt lat="42.1" lon="-85.0" />
+    </trkseg>
+    <trkseg>
+      <trkpt lat="42.1" lon="-85.0" />
+      <trkpt lat="42.2" lon="-85.0" />
+    </trkseg>
+  </trk>
+</gpx>"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "route.gpx"
+            file_path.write_text(gpx, encoding="utf-8")
+            segments = self.tab._parse_gpx_segments(file_path)
+
+        self.assertEqual(len(segments), 2)
+        self.assertEqual(segments[0][0], (42.0, -85.0))
+        self.assertEqual(segments[1][-1], (42.2, -85.0))
+        self.assertNotIn((50.0, -100.0), segments[0] + segments[1])
+
+    def test_load_gpx_button_accepts_loose_track_point_exports(self):
+        gpx = """<?xml version="1.0"?>
+<gpx version="1.1">
+  <trk>
+    <trkpt lat="42.0" lon="-85.0" />
+    <trkpt lat="42.1" lon="-85.0" />
+  </trk>
+</gpx>"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "loose-export.gpx"
+            file_path.write_text(gpx, encoding="utf-8")
+            with (
+                patch(
+                    "gui_files.gui_gps_map_tab.QFileDialog.getOpenFileNames",
+                    return_value=([str(file_path)], "GPX Files (*.gpx)"),
+                ),
+                patch.object(self.tab, "_request_tile"),
+            ):
+                self.tab.load_gpx_button.click()
+
+        self.assertEqual(len(self.tab.route_segments), 1)
+        self.assertEqual(
+            self.tab.route_segments[0]["start_point"], (42.0, -85.0)
+        )
+        self.assertEqual(
+            self.tab.route_segments[0]["end_point"], (42.1, -85.0)
+        )
+        self.assertTrue(
+            self.tab.route_validation_status.startswith("Ready:")
         )
 
     def test_asc_plan_includes_per_segment_schedule(self):
@@ -208,12 +386,21 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
             close_input = dialog.findChild(
                 QDateTimeEdit, "ascCloseDateTime1"
             )
+            base_stop_input = dialog.findChild(
+                QDoubleSpinBox, "ascBaseStopMinutes"
+            )
             self.assertIsNotNone(schedule_enabled)
             self.assertIsNotNone(stage)
             self.assertIsNotNone(stop_override)
             self.assertIsNotNone(has_close)
             self.assertIsNotNone(close_input)
+            self.assertIsNotNone(base_stop_input)
             self.assertTrue(close_input.isEnabled())
+            self.assertTrue(base_stop_input.isEnabled())
+            self.assertEqual(
+                base_stop_input.value(),
+                self.tab.asc_checkpoint_stop_minutes,
+            )
 
             for checkbox in (
                 schedule_enabled,

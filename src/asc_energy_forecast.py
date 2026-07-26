@@ -115,7 +115,9 @@ class ASCEnergyForecaster:
             # W / (mi/h) is Wh/mi. Acceleration and urban operation remain in
             # this route-planning statistic so ASC stop-and-go cost is not
             # mislabeled as steady-state break-even behavior.
-            self._drive_wh_per_mile_samples.append(motor_power / speed)
+            self._drive_wh_per_mile_samples.append(
+                (speed, motor_power / speed)
+            )
 
     @property
     def array_gain_w_per_w_m2(self):
@@ -127,7 +129,30 @@ class ASCEnergyForecaster:
     def drive_wh_per_mile(self):
         if not self._drive_wh_per_mile_samples:
             return None
-        return float(median(self._drive_wh_per_mile_samples))
+        return float(
+            median(
+                sample[1] for sample in self._drive_wh_per_mile_samples
+            )
+        )
+
+    def drive_wh_per_mile_at_speed(self, speed_mph):
+        """Estimate Wh/mi from observations nearest the requested speed."""
+        if not self._drive_wh_per_mile_samples:
+            return None
+        target = self._number(speed_mph)
+        if target is None or len(self._drive_wh_per_mile_samples) < 5:
+            return self.drive_wh_per_mile
+        ordered = sorted(
+            self._drive_wh_per_mile_samples,
+            key=lambda sample: abs(sample[0] - target),
+        )
+        neighbor_count = min(
+            30,
+            max(5, int(math.ceil(len(ordered) * 0.35))),
+        )
+        return float(
+            median(sample[1] for sample in ordered[:neighbor_count])
+        )
 
     @staticmethod
     def _empty_metrics(status):
@@ -147,6 +172,11 @@ class ASCEnergyForecaster:
             TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_STATUS,
             TelemetryKey.NAV_ASC_CURRENT_IS_STAGE_STOP,
             TelemetryKey.NAV_ASC_ROUTE_MIN_CHECKPOINT_MARGIN_MIN,
+            TelemetryKey.NAV_ASC_MINIMUM_ARRIVAL_SOC_PCT,
+            TelemetryKey.NAV_ASC_DEADLINE_REQUIRED_SPEED_MPH,
+            TelemetryKey.NAV_ASC_RECOMMENDED_SPEED_MPH,
+            TelemetryKey.NAV_ASC_SPEED_FEASIBILITY_STATUS,
+            TelemetryKey.NAV_ASC_SPEED_OPTIONS,
             TelemetryKey.NAV_ASC_ARRAY_GAIN_W_PER_W_M2,
             TelemetryKey.NAV_ASC_DRIVE_WH_PER_MILE,
         )
@@ -195,10 +225,28 @@ class ASCEnergyForecaster:
     def _nearest_ghi(series, target):
         if not series:
             return None
-        return min(
-            series,
-            key=lambda item: abs((item["time"] - target).total_seconds()),
-        )["ghi"]
+        # Forecast series are normalized into time order. A binary search
+        # avoids rescanning every forecast point for every ten-minute sample
+        # across every candidate speed.
+        low = 0
+        high = len(series)
+        while low < high:
+            middle = (low + high) // 2
+            if series[middle]["time"] < target:
+                low = middle + 1
+            else:
+                high = middle
+        if low <= 0:
+            return series[0]["ghi"]
+        if low >= len(series):
+            return series[-1]["ghi"]
+        before = series[low - 1]
+        after = series[low]
+        if abs((before["time"] - target).total_seconds()) <= abs(
+            (after["time"] - target).total_seconds()
+        ):
+            return before["ghi"]
+        return after["ghi"]
 
     def _average_ghi(self, series, start, duration_hours):
         if not series or duration_hours <= 0:
@@ -315,6 +363,292 @@ class ASCEnergyForecaster:
             TelemetryKey.NAV_ASC_ROUTE_MIN_CHECKPOINT_MARGIN_MIN.value[0]
         ] = "N/A" if not margins else round(min(margins), 1)
 
+    def _deadline_required_speed(
+        self, legs, default_stop_minutes, now
+    ):
+        """Return the uniform speed needed to meet every configured close."""
+        cumulative_miles = 0.0
+        prior_stop_hours = 0.0
+        required_speed = None
+        impossible = False
+        for index, leg in enumerate(legs):
+            cumulative_miles += max(
+                0.0, self._number(leg.get("remaining_miles")) or 0.0
+            )
+            close_time = self._parse_datetime(leg.get("close_iso"))
+            if close_time is not None:
+                available_hours = (
+                    (close_time - now).total_seconds() / 3600.0
+                    - prior_stop_hours
+                )
+                if available_hours <= 0.0:
+                    impossible = True
+                else:
+                    leg_required = cumulative_miles / available_hours
+                    required_speed = max(
+                        required_speed or 0.0, leg_required
+                    )
+
+            explicit_stop = self._number(
+                leg.get("scheduled_stop_minutes")
+            )
+            if explicit_stop is not None:
+                stop_minutes = max(0.0, explicit_stop)
+            elif index < len(legs) - 1:
+                stop_minutes = default_stop_minutes
+            else:
+                stop_minutes = 0.0
+            prior_stop_hours += stop_minutes / 60.0
+        return required_speed, impossible
+
+    def _evaluate_speed_candidate(
+        self,
+        *,
+        speed_mph,
+        legs,
+        default_stop_minutes,
+        now,
+        route_forecast_cache,
+        fallback_series,
+        array_gain,
+        drive_wh_per_mile,
+        current_soc,
+        capacity_wh,
+    ):
+        """Project close-time compliance and minimum SOC for one speed."""
+        timings = self._schedule_projection(
+            legs, speed_mph, default_stop_minutes, now
+        )
+        deadline_ok = all(
+            timing["close_margin_minutes"] is None
+            or timing["close_margin_minutes"] >= -0.01
+            for timing in timings
+        )
+        if (
+            current_soc is None
+            or capacity_wh is None
+            or array_gain is None
+            or drive_wh_per_mile is None
+        ):
+            return {
+                "speed_mph": speed_mph,
+                "deadline_ok": deadline_ok,
+                "energy_ready": False,
+                "minimum_soc": None,
+            }
+
+        energy_wh = current_soc / 100.0 * capacity_wh
+        minimum_soc = 100.0
+        candidate_drive_wh_per_mile = (
+            self.drive_wh_per_mile_at_speed(speed_mph)
+        )
+        if candidate_drive_wh_per_mile is None:
+            candidate_drive_wh_per_mile = drive_wh_per_mile
+        cursor = now
+        for index, leg in enumerate(legs):
+            miles = max(
+                0.0, self._number(leg.get("remaining_miles")) or 0.0
+            )
+            travel_hours = miles / speed_mph
+            cache_entry = route_forecast_cache.get(
+                leg.get("cache_key"), {}
+            )
+            series = self._normalize_series(cache_entry.get("forecasts"))
+            if not series:
+                series = fallback_series
+            travel_ghi = self._average_ghi(
+                series, cursor, travel_hours
+            )
+            if travel_ghi is None:
+                return {
+                    "speed_mph": speed_mph,
+                    "deadline_ok": deadline_ok,
+                    "energy_ready": False,
+                    "minimum_soc": None,
+                }
+            travel_solar_wh = (
+                array_gain * travel_ghi * travel_hours
+            )
+            energy_wh = max(
+                0.0,
+                min(
+                    capacity_wh,
+                    energy_wh
+                    + travel_solar_wh
+                    - candidate_drive_wh_per_mile * miles,
+                ),
+            )
+            arrival_soc = energy_wh / capacity_wh * 100.0
+            minimum_soc = min(minimum_soc, arrival_soc)
+
+            stop_hours = timings[index]["stop_minutes"] / 60.0
+            if stop_hours > 0.0:
+                stop_ghi = self._average_ghi(
+                    series, timings[index]["arrival_time"], stop_hours
+                )
+                if stop_ghi is None:
+                    return {
+                        "speed_mph": speed_mph,
+                        "deadline_ok": deadline_ok,
+                        "energy_ready": False,
+                        "minimum_soc": None,
+                    }
+                energy_wh = min(
+                    capacity_wh,
+                    energy_wh + array_gain * stop_ghi * stop_hours,
+                )
+            cursor = timings[index]["arrival_time"] + timedelta(
+                hours=stop_hours
+            )
+
+        return {
+            "speed_mph": speed_mph,
+            "deadline_ok": deadline_ok,
+            "energy_ready": True,
+            "minimum_soc": minimum_soc,
+        }
+
+    def _speed_recommendation(
+        self,
+        *,
+        legs,
+        plan_speed,
+        default_stop_minutes,
+        minimum_arrival_soc,
+        now,
+        route_forecast_cache,
+        fallback_series,
+        array_gain,
+        drive_wh_per_mile,
+        current_soc,
+        capacity_wh,
+    ):
+        """Compare practical speed levels against close times and SOC."""
+        required_speed, deadline_impossible = (
+            self._deadline_required_speed(
+                legs, default_stop_minutes, now
+            )
+        )
+        candidate_speeds = {
+            float(speed) for speed in range(5, 81, 5)
+        }
+        candidate_speeds.add(round(plan_speed, 1))
+        if required_speed is not None and math.isfinite(required_speed):
+            rounded_required = math.ceil(required_speed * 2.0) / 2.0
+            for offset in (0.0, 2.5, 5.0):
+                speed = rounded_required + offset
+                if 5.0 <= speed <= 80.0:
+                    candidate_speeds.add(speed)
+
+        scenarios = [
+            self._evaluate_speed_candidate(
+                speed_mph=speed,
+                legs=legs,
+                default_stop_minutes=default_stop_minutes,
+                now=now,
+                route_forecast_cache=route_forecast_cache,
+                fallback_series=fallback_series,
+                array_gain=array_gain,
+                drive_wh_per_mile=drive_wh_per_mile,
+                current_soc=current_soc,
+                capacity_wh=capacity_wh,
+            )
+            for speed in sorted(candidate_speeds)
+        ]
+        energy_ready = any(
+            scenario["energy_ready"] for scenario in scenarios
+        )
+        feasible = [
+            scenario
+            for scenario in scenarios
+            if (
+                scenario["deadline_ok"]
+                and scenario["energy_ready"]
+                and scenario["minimum_soc"] >= minimum_arrival_soc
+            )
+        ]
+        if required_speed is None:
+            plan_scenario = min(
+                scenarios,
+                key=lambda scenario: abs(
+                    scenario["speed_mph"] - plan_speed
+                ),
+            )
+            recommended = (
+                plan_scenario["speed_mph"]
+                if plan_scenario in feasible
+                else None
+            )
+        else:
+            recommended = feasible[0]["speed_mph"] if feasible else None
+
+        interesting_speeds = {round(plan_speed, 1)}
+        if required_speed is not None and math.isfinite(required_speed):
+            interesting_speeds.add(
+                min(80.0, math.ceil(required_speed * 2.0) / 2.0)
+            )
+        if recommended is not None:
+            interesting_speeds.add(recommended)
+            interesting_speeds.add(min(80.0, recommended + 5.0))
+        selected = [
+            scenario
+            for scenario in scenarios
+            if scenario["speed_mph"] in interesting_speeds
+        ]
+        option_parts = []
+        for scenario in selected:
+            timing = "on time" if scenario["deadline_ok"] else "late"
+            soc_text = (
+                "SOC learning"
+                if scenario["minimum_soc"] is None
+                else f"min SOC {scenario['minimum_soc']:.1f}%"
+            )
+            option_parts.append(
+                f"{scenario['speed_mph']:.1f} mph: {timing}, {soc_text}"
+            )
+
+        if deadline_impossible:
+            status = "A configured checkpoint closing time has already passed"
+        elif required_speed is not None and required_speed > 80.0:
+            status = (
+                f"Deadline requires {required_speed:.1f} mph, above the "
+                "80 mph planning range"
+            )
+        elif not energy_ready:
+            deadline_text = (
+                "No checkpoint closing time is enabled"
+                if required_speed is None
+                else f"Deadline requires at least {required_speed:.1f} mph"
+            )
+            status = f"{deadline_text}; battery/solar recommendation is learning"
+        elif recommended is None and required_speed is None:
+            status = (
+                f"Plan speed {plan_speed:.1f} mph falls below the "
+                f"{minimum_arrival_soc:.0f}% projected SOC reserve; "
+                "no close is enabled"
+            )
+        elif recommended is None:
+            status = (
+                "No tested 5-80 mph speed meets every closing time and "
+                f"the {minimum_arrival_soc:.0f}% SOC reserve"
+            )
+        elif required_speed is None:
+            status = (
+                f"Plan speed {recommended:.1f} mph keeps at least "
+                f"{minimum_arrival_soc:.0f}% projected SOC; no close is enabled"
+            )
+        else:
+            status = (
+                f"Recommend {recommended:.1f} mph to meet all closes with "
+                f"at least {minimum_arrival_soc:.0f}% projected SOC"
+            )
+        return {
+            "required_speed": required_speed,
+            "recommended_speed": recommended,
+            "status": status,
+            "options": "; ".join(option_parts) or "N/A",
+        }
+
     def forecast(self, plan, telemetry_data, route_forecast_cache=None, now=None):
         """Build current-leg and remaining-route metrics for one live snapshot."""
         if not plan or plan.get("race_mode") != "ASC Route":
@@ -335,10 +669,21 @@ class ASCEnergyForecaster:
         stop_minutes = max(
             0.0, self._number(plan.get("checkpoint_stop_minutes")) or 0.0
         )
+        minimum_arrival_soc = self._number(
+            plan.get("minimum_arrival_soc_pct")
+        )
+        if minimum_arrival_soc is None:
+            minimum_arrival_soc = 10.0
+        minimum_arrival_soc = max(
+            0.0, min(100.0, minimum_arrival_soc)
+        )
 
         array_gain = self.array_gain_w_per_w_m2
-        drive_wh_per_mile = self.drive_wh_per_mile
+        drive_wh_per_mile = self.drive_wh_per_mile_at_speed(speed)
         metrics = self._empty_metrics("Learning from telemetry")
+        metrics[
+            TelemetryKey.NAV_ASC_MINIMUM_ARRIVAL_SOC_PCT.value[0]
+        ] = round(minimum_arrival_soc, 1)
         metrics[TelemetryKey.NAV_ASC_ARRAY_GAIN_W_PER_W_M2.value[0]] = (
             "N/A" if array_gain is None else round(array_gain, 4)
         )
@@ -349,6 +694,44 @@ class ASCEnergyForecaster:
             legs, speed, stop_minutes, now
         )
         self._apply_schedule_metrics(metrics, schedule_results)
+        route_forecast_cache = route_forecast_cache or {}
+        fallback_series = self._fallback_forecast_series(
+            telemetry_data, now
+        )
+        current_soc, capacity_wh = self._battery_soc(telemetry_data)
+        speed_decision = self._speed_recommendation(
+            legs=legs,
+            plan_speed=speed,
+            default_stop_minutes=stop_minutes,
+            minimum_arrival_soc=minimum_arrival_soc,
+            now=now,
+            route_forecast_cache=route_forecast_cache,
+            fallback_series=fallback_series,
+            array_gain=array_gain,
+            drive_wh_per_mile=drive_wh_per_mile,
+            current_soc=current_soc,
+            capacity_wh=capacity_wh,
+        )
+        metrics[
+            TelemetryKey.NAV_ASC_DEADLINE_REQUIRED_SPEED_MPH.value[0]
+        ] = (
+            "N/A"
+            if speed_decision["required_speed"] is None
+            else round(speed_decision["required_speed"], 1)
+        )
+        metrics[
+            TelemetryKey.NAV_ASC_RECOMMENDED_SPEED_MPH.value[0]
+        ] = (
+            "N/A"
+            if speed_decision["recommended_speed"] is None
+            else round(speed_decision["recommended_speed"], 1)
+        )
+        metrics[
+            TelemetryKey.NAV_ASC_SPEED_FEASIBILITY_STATUS.value[0]
+        ] = speed_decision["status"]
+        metrics[
+            TelemetryKey.NAV_ASC_SPEED_OPTIONS.value[0]
+        ] = speed_decision["options"]
         if array_gain is None or drive_wh_per_mile is None:
             needed = []
             if array_gain is None:
@@ -370,10 +753,7 @@ class ASCEnergyForecaster:
             )
             return metrics
 
-        route_forecast_cache = route_forecast_cache or {}
-        fallback_series = self._fallback_forecast_series(telemetry_data, now)
         cursor = now
-        current_soc, capacity_wh = self._battery_soc(telemetry_data)
         cumulative_net_wh = 0.0
         total_solar_wh = 0.0
         total_drive_wh = 0.0

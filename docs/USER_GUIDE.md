@@ -202,6 +202,11 @@ The main tabs are:
 
 The application remembers window geometry and the last selected tabs.
 
+On smaller screens, the main window stays within the size selected by the
+operator. Dashboard cards reflow into fewer columns, less important header
+items hide automatically, and wide feature controls scroll inside their own
+tab instead of making the application wider.
+
 ## Dashboard
 
 The Dashboard is the primary race-day cockpit. It collects the values an
@@ -222,7 +227,8 @@ when diagnosing GPS loss, wheel-speed disagreement, or drivetrain telemetry.
 The cards cover:
 
 - vehicle speed;
-- battery SOC, pack voltage/current/power, minimum cell voltage, and temperature;
+- battery SOC, pack voltage/current/power, maximum and minimum cell voltage
+  with their cell IDs, and temperature;
 - estimated array power;
 - motor temperatures;
 - remaining-time and break-even-speed predictions;
@@ -331,6 +337,9 @@ progress, lap timing, distance, and race-day averages.
 - Expand **Map setup** for controls.
 - Expand **Race details** for full lap, distance, route, and tile status.
 - The compact race summary remains visible while both drawers are collapsed.
+- On a narrow screen, swipe or use the horizontal scrollbar inside a long
+  **Map setup** row. Race details and setup options scroll vertically within
+  their drawers. Opening either drawer does not enlarge the application window.
 
 Map tiles use OpenStreetMap and require internet access when the needed tiles
 are not cached. GPS calculations can continue even when the background tiles
@@ -403,12 +412,15 @@ Use **ASC Route** for continuous point-to-point route progress.
    routine traffic-light delay rather than entering only open-road cruise speed.
 6. Set **Checkpoint stop** to the planned charging time after intermediate
    checkpoints that do not have an individual override.
-7. Press **Checkpoint Schedule** after loading the route. For each GPX segment,
+7. Press **Stops & Closing Times** beside **Load GPX**. The window includes the
+   base stop applied after intermediate checkpoints. For each GPX segment,
    click **Use this checkpoint** until it displays `[X]`. You can then mark it
    as a stage stop, enable **Use custom stop** to enter its own planned stop
-   duration, and enable an official local closing date/time. A `[ ]` setting
-   is not applied by the route forecast.
-8. Press **Reset Day** at the official start.
+   duration, and enable **Use closing time** to enter the official local close
+   date/time. A `[ ]` setting is not applied by the route forecast.
+8. Set **Minimum arrival SOC** to the battery reserve that must remain at every
+   checkpoint. The default is 10%.
+9. Press **Reset Day** at the official start.
 
 The application reports:
 
@@ -422,14 +434,20 @@ The application reports:
 - projected battery SOC on arrival and after the planned checkpoint stop;
 - predicted local arrival time, official close time, and minutes before or
   after closing;
+- the uniform speed required to meet all enabled remaining closing times,
+  including planned stops before later checkpoints;
+- a battery-safe recommended speed and alternative speed outcomes showing
+  whether each is on time and its minimum projected SOC;
 - **At risk** warnings at 30 minutes or less and **Missed** warnings for a
   predicted arrival after closing;
 - a per-leg summary and forecast-confidence status.
 
-The route-energy planner learns two values from live telemetry: effective array
-watts per W/m² of Solcast irradiance and propulsion Wh/mi while moving. Medians
-update throughout the drive, so a future 6 m² array or a different vehicle
-configuration is learned without a fixed array-size or power cap.
+The route-energy planner learns effective array watts per W/m² of Solcast
+irradiance and propulsion Wh/mi while moving. Candidate speeds use the learned
+Wh/mi observations nearest that speed when enough samples exist, with the
+overall median as the early-data fallback. The observations update throughout
+the drive, so a future 6 m² array or a different vehicle configuration is
+learned without a fixed array-size or power cap.
 
 Solcast forecasts are requested and cached for a representative midpoint of
 each remaining GPX leg. Until those route-location forecasts arrive, the
@@ -451,7 +469,11 @@ Forecast limitations remain important. Motor-bus energy does not include every
 unmeasured auxiliary, and the forecast cannot know future shading, traffic,
 detours, wind gusts, or road-grade changes perfectly. Treat **Low** confidence
 or an **Approximate/Partial** status as planning guidance rather than a command
-to increase speed.
+to increase speed. A speed is only shown as recommended when it meets every
+enabled closing time and stays at or above the configured SOC reserve in the
+current model. If battery capacity/SOC or sufficient energy telemetry is
+missing, the deadline-required speed is still calculated but the battery
+recommendation is labeled as learning.
 
 ASC progress does not move backward when GPS jitters or the route doubles back.
 Circuit lap timing is paused in ASC mode.
@@ -904,6 +926,18 @@ Do not rely on only one copy of race-day data.
 - Confirm each GPX contains at least two track, route, or waypoint points.
 - Press Reset Trip or Reset Day before a new route attempt.
 - Confirm valid GPS coordinates are close to the intended route.
+
+### ASC checkpoint speed recommendation is unavailable
+
+- Select **ASC Route** and load the GPX segments in travel order.
+- Open **Stops & Closing Times**, check **Use this checkpoint** and **Use closing
+  time**, then enter the official local closing date/time.
+- Confirm battery SOC and total pack capacity are available.
+- Allow the planner to gather usable array/irradiance and moving motor-power
+  samples.
+- Review **ASC Speed Feasibility Status** and **ASC Speed Options** in the Data
+  tab. A deadline-only speed can appear while the energy model is still
+  learning.
 
 ### Array estimate is unavailable
 

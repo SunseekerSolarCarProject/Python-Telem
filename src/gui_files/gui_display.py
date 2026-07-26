@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QApplication,
     QWidget,
     QVBoxLayout,
@@ -257,6 +258,13 @@ class TelemetryGUI(QWidget):
         self.resize(initial_width, initial_height)
 
         self.main_layout = QVBoxLayout(self)
+        # Child tabs such as CSV management can have wide size hints. They must
+        # not turn those hints into a larger top-level window on small screens;
+        # each feature area owns its internal scrolling instead.
+        self.main_layout.setSizeConstraint(
+            QLayout.SizeConstraint.SetNoConstraint
+        )
+        self.setMinimumSize(480, 360)
         self.main_layout.setContentsMargins(12, 12, 12, 12)
         self.main_layout.setSpacing(10)
         self.main_layout.addWidget(self._build_brand_header())
@@ -496,9 +504,15 @@ class TelemetryGUI(QWidget):
                 TelemetryKey.NAV_SATS_USED_VALID.value[0],
                 TelemetryKey.NAV_SATS_USED_AGE_MS.value[0],
                 TelemetryKey.NAV_ROUTE_NAME.value[0],
+                TelemetryKey.NAV_ROUTE_GPX_STATUS.value[0],
+                TelemetryKey.NAV_ROUTE_START_POINT.value[0],
+                TelemetryKey.NAV_ROUTE_END_POINT.value[0],
                 TelemetryKey.NAV_CHECKPOINT_NAME.value[0],
                 TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0],
                 TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0],
+                TelemetryKey.NAV_ROUTE_ESTIMATED_DRIVE_TIME.value[0],
+                TelemetryKey.NAV_ROUTE_ESTIMATED_TOTAL_TIME.value[0],
+                TelemetryKey.NAV_ROUTE_ESTIMATED_ARRIVAL.value[0],
                 TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0],
                 TelemetryKey.NAV_CHECKPOINT_ETA.value[0],
                 TelemetryKey.NAV_RACE_MODE.value[0],
@@ -618,6 +632,9 @@ class TelemetryGUI(QWidget):
 
         self.restore_gui_state()
         self._ensure_window_on_screen()
+        self.tabs.currentChanged.connect(self._refresh_active_view)
+        self.graph_tabs.currentChanged.connect(self._refresh_active_view)
+        self.data_tabs.currentChanged.connect(self._refresh_active_view)
 
     @staticmethod
     def _configure_tab_widget(tab_widget):
@@ -796,24 +813,39 @@ class TelemetryGUI(QWidget):
             route_metrics = self.gps_map_tab.update_data(
                 enriched_data,
                 update_laps=not lap_already_computed,
+                render=self.tabs.currentWidget() is self.gps_map_tab,
             ) or {}
             enriched_data.update(route_metrics)
 
             self.last_telemetry_data = enriched_data.copy()
             graph_data = {k: v for k, v in enriched_data.items() if k not in ['Errors', 'Limits']}
 
-            # Fan the same enriched snapshot into every view so Dashboard, Map,
-            # tables, and graphs stay consistent for a given telemetry tick.
-            self.dashboard_tab.update_data(enriched_data)
-            self.mc1_tab.update_graphs(graph_data)
-            self.mc2_tab.update_graphs(graph_data)
-            self.pack1_tab.update_graphs(graph_data)
-            self.pack2_tab.update_graphs(graph_data)
-            self.remaining_tab.update_graphs(graph_data)
-            self.insights_tab.update_graphs(graph_data)
-            self.data_table_tab.update_data(enriched_data)
-            self.data_display_tab.update_display(enriched_data)
-            self.custom_data_table_tab.update_data(enriched_data)
+            # Keep every graph's bounded history, but only repaint the graph
+            # currently on screen. Qt table/text layouts are also refreshed
+            # only while visible and catch up from last_telemetry_data when the
+            # operator changes tabs.
+            top_tab = self.tabs.currentWidget()
+            active_graph = self.graph_tabs.currentWidget() if top_tab is self.graph_tabs else None
+            for graph_tab in (
+                self.mc1_tab,
+                self.mc2_tab,
+                self.pack1_tab,
+                self.pack2_tab,
+                self.remaining_tab,
+                self.insights_tab,
+            ):
+                graph_tab.update_graphs(graph_data, redraw=graph_tab is active_graph)
+
+            if top_tab is self.dashboard_tab:
+                self.dashboard_tab.update_data(enriched_data)
+            elif top_tab is self.data_tabs:
+                active_data_tab = self.data_tabs.currentWidget()
+                if active_data_tab is self.data_table_tab:
+                    self.data_table_tab.update_data(enriched_data)
+                elif active_data_tab is self.data_display_tab:
+                    self.data_display_tab.update_display(enriched_data)
+                elif active_data_tab is self.custom_data_table_tab:
+                    self.custom_data_table_tab.update_data(enriched_data)
 
             # Feed battery temperature probe updates into the Battery Image tab
             try:
@@ -830,6 +862,30 @@ class TelemetryGUI(QWidget):
                 self.logger.error(f"Image tab update error: {e}")
         except Exception as e:
             self.logger.error(f"Error updating all tabs: {e}")
+
+    def _refresh_active_view(self, *_args):
+        """Refresh a newly selected tab without adding a duplicate graph sample."""
+        if not self.last_telemetry_data:
+            return
+
+        top_tab = self.tabs.currentWidget()
+        if top_tab is self.dashboard_tab:
+            self.dashboard_tab.update_data(self.last_telemetry_data)
+        elif top_tab is self.graph_tabs:
+            active_graph = self.graph_tabs.currentWidget()
+            if active_graph is not None and hasattr(active_graph, "_redraw_buffers"):
+                active_graph._redraw_buffers()
+        elif top_tab is self.data_tabs:
+            active_data_tab = self.data_tabs.currentWidget()
+            if active_data_tab is self.data_table_tab:
+                self.data_table_tab.update_data(self.last_telemetry_data)
+            elif active_data_tab is self.data_display_tab:
+                self.data_display_tab.update_display(self.last_telemetry_data)
+            elif active_data_tab is self.custom_data_table_tab:
+                self.custom_data_table_tab.update_data(self.last_telemetry_data)
+        elif top_tab is self.gps_map_tab:
+            if self.gps_map_tab.center_lat is not None and self.gps_map_tab.center_lon is not None:
+                self.gps_map_tab._render_map()
 
     def update_color_mapping(self, key: str, color: str):
         """

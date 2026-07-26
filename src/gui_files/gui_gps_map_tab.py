@@ -4,7 +4,7 @@ import os
 import time
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QDateTime, QSettings, QStandardPaths, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPixmapCache
@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -100,7 +101,10 @@ class GPSMapTab(QWidget):
 
     TILE_SIZE = 256
     TILE_RADIUS = 3
-    MAX_MEMORY_TILES = 384
+    # 128 decoded 256px tiles are roughly 32 MiB before Qt object overhead.
+    # The disk cache retains older tiles for fast browsing without keeping
+    # hundreds of decoded pixmaps resident in RAM.
+    MAX_MEMORY_TILES = 128
     MAX_DRAW_ROUTE_POINTS_PER_SEGMENT = 1800
     LAP_CROSSING_COOLDOWN_SECONDS = 8.0
     MINIMUM_LAP_SECONDS = 30.0
@@ -111,6 +115,7 @@ class GPSMapTab(QWidget):
     GPS_SEGMENT_BASE_TOLERANCE_MILES = 0.002
     GPS_SEGMENT_SPEED_FACTOR = 2.5
     MAX_MOVING_TIME_SAMPLE_GAP_SECONDS = 5.0
+    MAX_CONNECTED_SEGMENT_GAP_MILES = 0.25
     KALAMAZOO_LAT = 42.291707
     KALAMAZOO_LON = -85.587229
     asc_route_changed = pyqtSignal()
@@ -128,6 +133,7 @@ class GPSMapTab(QWidget):
         self.route_flat_positions = []
         self.route_last_flat_index = None
         self.route_progress_miles = 0.0
+        self.route_validation_status = "No GPX route loaded"
         self.lap_start_point = None
         self.lap_end_point = None
         self.previous_lap_point = None
@@ -149,6 +155,7 @@ class GPSMapTab(QWidget):
             self.fsgp_day_duration_hours,
             self.asc_plan_speed_mph,
             self.asc_checkpoint_stop_minutes,
+            self.asc_minimum_arrival_soc_pct,
         ) = self._load_race_settings()
         if self.race_mode == self.RACE_MODE_ASC:
             self.lap_status = "ASC route mode"
@@ -191,10 +198,18 @@ class GPSMapTab(QWidget):
         self.coord_label = QLabel("Lat: --  Lon: --")
         self.speed_label = QLabel("Speed: -- mph")
         self.elevation_label = QLabel("Elevation: --")
-        self.status_label.setMinimumWidth(150)
-        self.coord_label.setMinimumWidth(180)
-        self.speed_label.setMinimumWidth(100)
-        self.elevation_label.setMinimumWidth(110)
+        for status_widget in (
+            self.status_label,
+            self.coord_label,
+            self.speed_label,
+            self.elevation_label,
+        ):
+            status_widget.setMinimumWidth(0)
+            status_widget.setWordWrap(True)
+            status_widget.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
         status_layout.addWidget(self.status_label, 2)
         status_layout.addWidget(self.coord_label, 2)
         status_layout.addWidget(self.speed_label, 1)
@@ -202,8 +217,14 @@ class GPSMapTab(QWidget):
         layout.addWidget(status_bar)
 
         drawer_bar = QFrame(self)
+        drawer_bar.setMinimumWidth(0)
+        drawer_bar.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         drawer_layout = QHBoxLayout(drawer_bar)
         drawer_layout.setContentsMargins(0, 0, 0, 0)
+        drawer_layout.setSpacing(4)
         self.setup_toggle_button = QToolButton(drawer_bar)
         self.setup_toggle_button.setText("Map setup")
         self.setup_toggle_button.setCheckable(True)
@@ -220,15 +241,51 @@ class GPSMapTab(QWidget):
         )
         drawer_layout.addWidget(self.setup_toggle_button)
         drawer_layout.addWidget(self.details_toggle_button)
+        self.load_gpx_button = QPushButton("Load GPX", drawer_bar)
+        self.load_gpx_button.setObjectName("loadGpxButton")
+        self.load_gpx_button.setToolTip(
+            "Load one or more GPX files in route order."
+        )
+        self.load_gpx_button.clicked.connect(self._load_gpx_route)
+        drawer_layout.addWidget(self.load_gpx_button)
+        self.asc_schedule_button = QPushButton(
+            "Stops & Closing Times", drawer_bar
+        )
+        self.asc_schedule_button.setObjectName("ascScheduleButton")
+        self.asc_schedule_button.setToolTip(
+            "Set the base checkpoint stop, custom checkpoint stops, stage "
+            "stops, and official closing date/times."
+        )
+        self.asc_schedule_button.setEnabled(
+            self.race_mode == self.RACE_MODE_ASC
+            and bool(self.route_segments)
+        )
+        self.asc_schedule_button.clicked.connect(
+            self._edit_asc_checkpoint_schedule
+        )
+        drawer_layout.addWidget(self.asc_schedule_button)
         drawer_layout.addStretch()
         layout.addWidget(drawer_bar)
 
         self.setup_panel = QFrame(self)
         self.setup_panel.setObjectName("mapSetupPanel")
+        self.setup_panel.setMaximumHeight(170)
         self.setup_panel.setStyleSheet(
             "QFrame#mapSetupPanel { border: 1px solid #777; border-radius: 4px; padding: 3px; }"
         )
-        manual_layout = QGridLayout(self.setup_panel)
+        setup_panel_layout = QVBoxLayout(self.setup_panel)
+        setup_panel_layout.setContentsMargins(0, 0, 0, 0)
+        self.setup_scroll = QScrollArea(self.setup_panel)
+        self.setup_scroll.setWidgetResizable(True)
+        self.setup_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.setup_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.setup_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.setup_content = QWidget(self.setup_scroll)
+        manual_layout = QGridLayout(self.setup_content)
         manual_layout.setContentsMargins(0, 0, 0, 0)
 
         location_row = QHBoxLayout()
@@ -263,20 +320,6 @@ class GPSMapTab(QWidget):
         saved_row.addWidget(delete_location_button)
 
         route_row = QHBoxLayout()
-        load_gpx_button = QPushButton("Load GPX")
-        load_gpx_button.clicked.connect(self._load_gpx_route)
-        route_row.addWidget(load_gpx_button)
-        self.asc_schedule_button = QPushButton("Checkpoint Schedule")
-        self.asc_schedule_button.setToolTip(
-            "Set stage stops, per-checkpoint stop durations, and local closing date/times."
-        )
-        self.asc_schedule_button.setEnabled(
-            self.race_mode == self.RACE_MODE_ASC and bool(self.route_segments)
-        )
-        self.asc_schedule_button.clicked.connect(
-            self._edit_asc_checkpoint_schedule
-        )
-        route_row.addWidget(self.asc_schedule_button)
         self.set_lap_start_button = QPushButton("Set Start")
         self.set_lap_start_button.setToolTip("Click, then double-click the first end of the timing line on the map.")
         self.set_lap_start_button.clicked.connect(self._set_lap_start)
@@ -359,7 +402,7 @@ class GPSMapTab(QWidget):
         )
         self.asc_checkpoint_stop_input.setToolTip(
             "Default solar-charging time after intermediate ASC checkpoints. "
-            "Checkpoint Schedule can override individual segments."
+            "Stops & Closing Times can override individual segments."
         )
         self.asc_checkpoint_stop_input.setEnabled(
             self.race_mode == self.RACE_MODE_ASC
@@ -368,6 +411,27 @@ class GPSMapTab(QWidget):
             self._asc_checkpoint_stop_changed
         )
         race_row.addWidget(self.asc_checkpoint_stop_input)
+        race_row.addWidget(QLabel("Minimum arrival SOC:"))
+        self.asc_minimum_soc_input = QDoubleSpinBox()
+        self.asc_minimum_soc_input.setDecimals(0)
+        self.asc_minimum_soc_input.setRange(0.0, 100.0)
+        self.asc_minimum_soc_input.setSingleStep(5.0)
+        self.asc_minimum_soc_input.setSuffix(" %")
+        self.asc_minimum_soc_input.setValue(
+            self.asc_minimum_arrival_soc_pct
+        )
+        self.asc_minimum_soc_input.setToolTip(
+            "Battery reserve required at every remaining checkpoint. "
+            "The ASC recommended speed must meet closing times without "
+            "falling below this projected SOC."
+        )
+        self.asc_minimum_soc_input.setEnabled(
+            self.race_mode == self.RACE_MODE_ASC
+        )
+        self.asc_minimum_soc_input.valueChanged.connect(
+            self._asc_minimum_soc_changed
+        )
+        race_row.addWidget(self.asc_minimum_soc_input)
         reset_trip_button = QPushButton("Reset Trip")
         reset_trip_button.setToolTip("Reset GPS trip distance and ASC route progress.")
         reset_trip_button.clicked.connect(self._reset_trip)
@@ -378,11 +442,17 @@ class GPSMapTab(QWidget):
         race_row.addWidget(reset_day_button)
         race_row.addStretch()
 
-        manual_layout.addLayout(location_row, 0, 0)
-        manual_layout.addLayout(saved_row, 1, 0)
-        manual_layout.addLayout(race_row, 2, 0)
-        manual_layout.addLayout(route_row, 3, 0)
+        self.setup_row_scrollers = [
+            self._make_scrollable_setup_row(location_row),
+            self._make_scrollable_setup_row(saved_row),
+            self._make_scrollable_setup_row(race_row),
+            self._make_scrollable_setup_row(route_row),
+        ]
+        for row, row_scroller in enumerate(self.setup_row_scrollers):
+            manual_layout.addWidget(row_scroller, row, 0)
         manual_layout.setColumnStretch(0, 1)
+        self.setup_scroll.setWidget(self.setup_content)
+        setup_panel_layout.addWidget(self.setup_scroll)
         layout.addWidget(self.setup_panel)
         self.setup_panel.setVisible(False)
         self._refresh_saved_locations_dropdown()
@@ -398,11 +468,23 @@ class GPSMapTab(QWidget):
 
         self.stats_details_panel = QFrame(self)
         self.stats_details_panel.setObjectName("mapStatsDetailsPanel")
-        details_layout = QVBoxLayout(self.stats_details_panel)
+        self.stats_details_panel.setMaximumHeight(170)
+        details_panel_layout = QVBoxLayout(self.stats_details_panel)
+        details_panel_layout.setContentsMargins(0, 0, 0, 0)
+        self.stats_details_scroll = QScrollArea(self.stats_details_panel)
+        self.stats_details_scroll.setWidgetResizable(True)
+        self.stats_details_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.stats_details_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.stats_details_content = QWidget(self.stats_details_scroll)
+        details_layout = QVBoxLayout(self.stats_details_content)
         details_layout.setContentsMargins(4, 2, 4, 2)
         details_layout.setSpacing(2)
         self.route_label = QLabel("Route: none")
         details_layout.addWidget(self.route_label)
+        self.route_segments_label = QLabel("GPX segments: none")
+        details_layout.addWidget(self.route_segments_label)
         self.lap_label = QLabel("Laps: set start/end line")
         details_layout.addWidget(self.lap_label)
         self.lap_speed_label = QLabel("Lap speeds: waiting for completed laps")
@@ -422,6 +504,7 @@ class GPSMapTab(QWidget):
         details_layout.addWidget(self.tile_status_label)
         for detail_label in (
             self.route_label,
+            self.route_segments_label,
             self.lap_label,
             self.lap_speed_label,
             self.distance_label,
@@ -431,6 +514,13 @@ class GPSMapTab(QWidget):
             self.tile_status_label,
         ):
             detail_label.setWordWrap(True)
+            detail_label.setMinimumWidth(0)
+            detail_label.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+        self.stats_details_scroll.setWidget(self.stats_details_content)
+        details_panel_layout.addWidget(self.stats_details_scroll)
         layout.addWidget(self.stats_details_panel)
         self.stats_details_panel.setVisible(False)
         self.setup_toggle_button.toggled.connect(
@@ -452,7 +542,11 @@ class GPSMapTab(QWidget):
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
         self.view.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontSavePainterState, True)
-        self.view.setMinimumHeight(180)
+        self.view.setMinimumSize(0, 100)
+        self.view.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
 
         # Keep the zoom controls directly over the map so they remain easy to
         # find even when the telemetry status row is crowded.
@@ -495,13 +589,48 @@ class GPSMapTab(QWidget):
         layout.addWidget(map_container, 1)
         self._update_zoom_controls()
 
-        self.attribution_label = QLabel("Map tiles: OpenStreetMap contributors")
+        self.attribution_label = QLabel("© OpenStreetMap contributors")
         self.attribution_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.attribution_label.setMinimumWidth(0)
+        self.attribution_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         layout.addWidget(self.attribution_label)
         self._refresh_lap_label()
         self._refresh_distance_labels()
 
-    def update_data(self, telemetry_data, update_laps=True):
+    @staticmethod
+    def _make_scrollable_setup_row(row_layout):
+        """Contain a wide control row so it cannot enlarge the application."""
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+        content = QWidget()
+        content.setLayout(row_layout)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("mapSetupRowScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setSizeAdjustPolicy(
+            QScrollArea.SizeAdjustPolicy.AdjustIgnored
+        )
+        scroll.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        scroll.setMinimumWidth(0)
+        scroll.setFixedHeight(48)
+        scroll.setWidget(content)
+        return scroll
+
+    def update_data(self, telemetry_data, update_laps=True, render=True):
         self._update_asc_energy_display(telemetry_data)
         lat = self._as_float(telemetry_data.get(TelemetryKey.NAV_LATITUDE.value[0]))
         lon = self._as_float(telemetry_data.get(TelemetryKey.NAV_LONGITUDE.value[0]))
@@ -530,7 +659,8 @@ class GPSMapTab(QWidget):
         has_location = valid == 1 and fix > 0 and not (abs(lat) < 0.000001 and abs(lon) < 0.000001)
         if not has_location:
             self.status_label.setText(f"GPS invalid | fix {fix} | source {source} | age {age_ms} ms")
-            self._render_empty_state(lat, lon)
+            if render:
+                self._render_empty_state(lat, lon)
             return self._build_navigation_metrics(speed or 0.0, update_laps=False)
 
         self._set_vehicle_location(
@@ -540,6 +670,7 @@ class GPSMapTab(QWidget):
             speed=speed or 0.0,
             reset_trail=False,
             recenter=self.follow_vehicle_checkbox.isChecked(),
+            render=render,
         )
         return self._build_navigation_metrics(speed or 0.0, update_laps=update_laps, lat=lat, lon=lon)
 
@@ -584,7 +715,16 @@ class GPSMapTab(QWidget):
     def _set_location(self, lat, lon, status=None, speed=None, reset_trail=False):
         self._set_vehicle_location(lat, lon, status=status, speed=speed, reset_trail=reset_trail, recenter=True)
 
-    def _set_vehicle_location(self, lat, lon, status=None, speed=None, reset_trail=False, recenter=True):
+    def _set_vehicle_location(
+        self,
+        lat,
+        lon,
+        status=None,
+        speed=None,
+        reset_trail=False,
+        recenter=True,
+        render=True,
+    ):
         self.vehicle_lat = lat
         self.vehicle_lon = lon
         if recenter or self.center_lat is None or self.center_lon is None:
@@ -596,7 +736,8 @@ class GPSMapTab(QWidget):
         if reset_trail or not self.trail or self._distance_px(self.trail[-1], (lat, lon)) >= 2:
             self.trail.append((lat, lon))
             self.trail = self.trail[-250:]
-        self._render_map()
+        if render:
+            self._render_map()
 
     def _set_map_center(self, lat, lon, status="Map browse"):
         self.center_lat = lat
@@ -652,12 +793,21 @@ class GPSMapTab(QWidget):
         )
         if checkpoint_stop is None or not (0.0 <= checkpoint_stop <= 180.0):
             checkpoint_stop = 0.0
+        minimum_arrival_soc = self._as_float(
+            settings.value("map/asc_minimum_arrival_soc_pct", 10.0)
+        )
+        if (
+            minimum_arrival_soc is None
+            or not (0.0 <= minimum_arrival_soc <= 100.0)
+        ):
+            minimum_arrival_soc = 10.0
         return (
             mode,
             track_length,
             day_duration,
             asc_plan_speed,
             checkpoint_stop,
+            minimum_arrival_soc,
         )
 
     def _race_mode_changed(self, mode):
@@ -670,6 +820,7 @@ class GPSMapTab(QWidget):
         self.day_duration_input.setEnabled(mode == self.RACE_MODE_FSGP)
         self.asc_plan_speed_input.setEnabled(mode == self.RACE_MODE_ASC)
         self.asc_checkpoint_stop_input.setEnabled(mode == self.RACE_MODE_ASC)
+        self.asc_minimum_soc_input.setEnabled(mode == self.RACE_MODE_ASC)
         self.asc_schedule_button.setEnabled(
             mode == self.RACE_MODE_ASC and bool(self.route_segments)
         )
@@ -710,6 +861,7 @@ class GPSMapTab(QWidget):
         QSettings("SunseekerSolarCarProject", "Python-Telem").setValue(
             "map/asc_plan_speed_mph", self.asc_plan_speed_mph
         )
+        self._refresh_route_overview()
 
     def _asc_checkpoint_stop_changed(self, minutes):
         self.asc_checkpoint_stop_minutes = max(0.0, float(minutes))
@@ -717,6 +869,17 @@ class GPSMapTab(QWidget):
             "map/asc_checkpoint_stop_minutes",
             self.asc_checkpoint_stop_minutes,
         )
+        self._refresh_route_overview()
+
+    def _asc_minimum_soc_changed(self, soc_pct):
+        self.asc_minimum_arrival_soc_pct = max(
+            0.0, min(100.0, float(soc_pct))
+        )
+        QSettings("SunseekerSolarCarProject", "Python-Telem").setValue(
+            "map/asc_minimum_arrival_soc_pct",
+            self.asc_minimum_arrival_soc_pct,
+        )
+        self._refresh_compact_summary()
 
     def _load_asc_checkpoint_schedules(self):
         settings = QSettings("SunseekerSolarCarProject", "Python-Telem")
@@ -779,16 +942,19 @@ class GPSMapTab(QWidget):
                 segment["schedule"] = dict(schedule)
         self._save_asc_checkpoint_schedules()
         self.asc_route_changed.emit()
+        self._refresh_route_overview()
 
     def _edit_asc_checkpoint_schedule(self):
         if not self.route_segments:
             QMessageBox.information(
-                self, "ASC Checkpoint Schedule", "Load the ASC GPX route first."
+                self,
+                "ASC Stops and Closing Times",
+                "Load the ASC GPX route first.",
             )
             return
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("ASC Checkpoint and Stage Schedule")
+        dialog.setWindowTitle("ASC Stops and Closing Times")
         dialog.resize(1180, min(650, 180 + len(self.route_segments) * 54))
         dialog.setStyleSheet(
             "QCheckBox { spacing: 8px; padding: 6px; min-height: 24px; "
@@ -801,12 +967,31 @@ class GPSMapTab(QWidget):
         )
         outer = QVBoxLayout(dialog)
         help_label = QLabel(
-            "Click Use this checkpoint until it shows [X]. Closing times use "
-            "this computer's local time. Settings in rows showing [ ] are "
-            "saved but ignored by the route forecast."
+            "Set the base stop below, then enable any checkpoint row that "
+            "needs a stage stop, custom stop, or official closing time. "
+            "Closing times use this computer's local time. Settings in rows "
+            "showing [ ] are saved but ignored by the route forecast."
         )
         help_label.setWordWrap(True)
         outer.addWidget(help_label)
+        base_stop_row = QHBoxLayout()
+        base_stop_row.addWidget(
+            QLabel("Base stop after intermediate checkpoints:")
+        )
+        base_stop_input = QDoubleSpinBox(dialog)
+        base_stop_input.setObjectName("ascBaseStopMinutes")
+        base_stop_input.setRange(0.0, 180.0)
+        base_stop_input.setDecimals(0)
+        base_stop_input.setSingleStep(5.0)
+        base_stop_input.setSuffix(" min")
+        base_stop_input.setValue(self.asc_checkpoint_stop_minutes)
+        base_stop_input.setToolTip(
+            "Default stop used after intermediate checkpoints unless a "
+            "checkpoint row has Use custom stop checked."
+        )
+        base_stop_row.addWidget(base_stop_input)
+        base_stop_row.addStretch()
+        outer.addLayout(base_stop_row)
         scroll = QScrollArea(dialog)
         scroll.setWidgetResizable(True)
         editor = QWidget(scroll)
@@ -830,7 +1015,15 @@ class GPSMapTab(QWidget):
         for row, segment in enumerate(self.route_segments, start=1):
             schedule = segment.get("schedule") or {}
             name = str(segment.get("name") or f"Segment {row}")
-            name_label = QLabel(name)
+            name_label = QLabel(
+                f"<b>{name}</b><br>"
+                f"{self._format_route_point(segment.get('start_point'))} to "
+                f"{self._format_route_point(segment.get('end_point'))}<br>"
+                f"{segment.get('length_miles', 0.0):.1f} mi"
+            )
+            name_label.setToolTip(
+                "The first and last coordinates in this GPX segment."
+            )
             schedule_enabled = VisibleCheckBox("Use this checkpoint")
             schedule_enabled.setObjectName(f"ascScheduleEnabled{row}")
             schedule_enabled.setChecked(
@@ -917,6 +1110,7 @@ class GPSMapTab(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
+        self._asc_checkpoint_stop_changed(base_stop_input.value())
         for (
             name,
             schedule_enabled,
@@ -950,6 +1144,7 @@ class GPSMapTab(QWidget):
                 self.asc_checkpoint_schedules.get(segment["name"], {})
             )
         self.asc_route_changed.emit()
+        self._refresh_route_overview()
 
     def _reset_trip(self):
         self.trip_distance_miles = 0.0
@@ -961,6 +1156,7 @@ class GPSMapTab(QWidget):
         self.route_progress_miles = 0.0
         self.route_last_flat_index = None
         self._refresh_distance_labels()
+        self._refresh_route_overview()
 
     def _reset_day(self):
         self._reset_trip()
@@ -1237,7 +1433,9 @@ class GPSMapTab(QWidget):
     def _tile_radius_for_view(self):
         viewport = self.view.viewport().size()
         widest = max(viewport.width(), viewport.height(), self.TILE_SIZE)
-        return max(3, int(math.ceil(widest / self.TILE_SIZE / 2.0)) + 3)
+        # One off-screen tile ring is enough for smooth panning. The previous
+        # three-ring margin more than doubled the decoded tile count.
+        return max(2, int(math.ceil(widest / self.TILE_SIZE / 2.0)) + 1)
 
     def _create_tile_disk_cache(self):
         # Qt owns the persistent disk cache. The OrderedDict tile_cache above is
@@ -1294,7 +1492,7 @@ class GPSMapTab(QWidget):
         if not self.route_segments:
             return
 
-        for segment in self.route_segments:
+        for segment_index, segment in enumerate(self.route_segments):
             path = QPainterPath()
             started = False
             for lat, lon in self._sample_points_for_drawing(segment["points"]):
@@ -1316,6 +1514,33 @@ class GPSMapTab(QWidget):
             route = QGraphicsPathItem(path)
             route.setPen(QPen(QColor("#f59e0b"), 4))
             self.scene.addItem(route)
+
+            if segment_index == 0 or segment.get("gap_from_previous_miles", 0.0) > self.MAX_CONNECTED_SEGMENT_GAP_MILES:
+                self._draw_route_endpoint(
+                    segment["start_point"],
+                    f"{segment_index + 1} start",
+                    QColor("#22c55e"),
+                )
+            self._draw_route_endpoint(
+                segment["end_point"],
+                f"{segment_index + 1} end",
+                QColor("#ef4444"),
+            )
+
+    def _draw_route_endpoint(self, point, label_text, color):
+        x, y = self._latlon_to_scene_point(*point)
+        if x is None or y is None:
+            return
+        marker = QGraphicsEllipseItem(x - 6, y - 6, 12, 12)
+        marker.setPen(QPen(QColor("#ffffff"), 2))
+        marker.setBrush(QBrush(color))
+        self.scene.addItem(marker)
+
+        label = QGraphicsTextItem(label_text)
+        label.setDefaultTextColor(QColor("#ffffff"))
+        label.setFont(QFont("", 8, QFont.Weight.Bold))
+        label.setPos(x + 7, y - 18)
+        self.scene.addItem(label)
 
     def _draw_lap_line(self):
         if not self.lap_start_point:
@@ -1454,8 +1679,11 @@ class GPSMapTab(QWidget):
 
     def _trim_tile_cache(self):
         protected = set(self.visible_tile_keys)
+        # Never evict a tile that is still in the scene; otherwise the next
+        # telemetry redraw immediately downloads/decodes it again.
+        cache_limit = max(self.MAX_MEMORY_TILES, len(protected))
         evicted = False
-        while len(self.tile_cache) > self.MAX_MEMORY_TILES:
+        while len(self.tile_cache) > cache_limit:
             old_key, _old_pixmap = next(iter(self.tile_cache.items()))
             if old_key in protected and len(protected) < len(self.tile_cache):
                 self.tile_cache.move_to_end(old_key)
@@ -1492,18 +1720,45 @@ class GPSMapTab(QWidget):
         if not file_paths:
             return
 
-        try:
-            segments = []
-            for file_path in file_paths:
-                points = self._parse_gpx_points(file_path)
-                if len(points) >= 2:
-                    segments.append(self._build_route_segment(file_path, points))
-        except Exception as exc:
-            QMessageBox.warning(self, "GPX Route", f"Could not load GPX file:\n{exc}")
-            return
+        segments = []
+        load_errors = []
+        for file_path in file_paths:
+            try:
+                point_groups = self._parse_gpx_segments(file_path)
+                added_from_file = 0
+                for group_index, points in enumerate(point_groups, start=1):
+                    if len(points) < 2:
+                        continue
+                    segment_name = None
+                    if len(point_groups) > 1:
+                        base_name = os.path.splitext(os.path.basename(file_path))[0]
+                        segment_name = f"{base_name} {group_index}"
+                    segments.append(
+                        self._build_route_segment(
+                            file_path,
+                            points,
+                            name=segment_name,
+                        )
+                    )
+                    added_from_file += 1
+                if added_from_file == 0:
+                    load_errors.append(
+                        f"{os.path.basename(file_path)}: no usable ordered points"
+                    )
+            except Exception as exc:
+                load_errors.append(
+                    f"{os.path.basename(file_path)}: {exc}"
+                )
 
         if not segments:
-            QMessageBox.warning(self, "GPX Route", "The GPX files did not contain enough route or track points.")
+            details = "\n".join(load_errors)
+            message = (
+                "The selected GPX files did not contain at least two usable "
+                "track, route, or waypoint coordinates."
+            )
+            if details:
+                message += f"\n\n{details}"
+            QMessageBox.warning(self, "GPX Route", message)
             return
 
         self.route_segments = segments
@@ -1515,14 +1770,20 @@ class GPSMapTab(QWidget):
         ]
         self.route_last_flat_index = None
         self.route_progress_miles = 0.0
-        total_miles = sum(segment["length_miles"] for segment in segments)
-        self.route_label.setText(
-            f"Route: {len(segments)} segment(s), {len(self.route_points)} points, {total_miles:.1f} mi"
-        )
+        self.route_validation_status = self._validate_route_segments(segments)
+        if load_errors:
+            self.route_validation_status += (
+                " | Skipped: " + "; ".join(load_errors)
+            )
+        self._refresh_route_overview()
         self.asc_schedule_button.setEnabled(
             self.race_mode == self.RACE_MODE_ASC
         )
         self._center_on_route()
+        self.status_label.setText(
+            f"GPX loaded: {len(self.route_segments)} segment(s), "
+            f"{len(self.route_points)} route points"
+        )
         self.asc_route_changed.emit()
 
     def _center_on_route(self):
@@ -1534,22 +1795,163 @@ class GPSMapTab(QWidget):
         self.follow_vehicle_checkbox.setChecked(False)
         self._set_map_center(avg_lat, avg_lon, status="Route preview")
 
-    def _build_route_segment(self, file_path, points):
+    def _build_route_segment(self, file_path, points, name=None):
         cumulative = [0.0]
         for previous, current in zip(points, points[1:]):
             cumulative.append(cumulative[-1] + self._haversine_miles(previous[0], previous[1], current[0], current[1]))
-        name = os.path.basename(file_path)
-        if name.lower().endswith(".gpx"):
-            name = name[:-4]
+        if not name:
+            name = os.path.basename(file_path)
+            if name.lower().endswith(".gpx"):
+                name = name[:-4]
         return {
             "name": name,
             "points": points,
+            "start_point": points[0],
+            "end_point": points[-1],
             "cumulative_miles": cumulative,
             "length_miles": cumulative[-1],
+            "gap_from_previous_miles": 0.0,
             "schedule": dict(
                 self.asc_checkpoint_schedules.get(name, {})
             ),
         }
+
+    def _validate_route_segments(self, segments):
+        """Check that selected GPX segments form one continuous ordered route."""
+        gaps = []
+        for index, segment in enumerate(segments):
+            segment["gap_from_previous_miles"] = 0.0
+            if index == 0:
+                continue
+            previous = segments[index - 1]
+            gap = self._haversine_miles(
+                previous["end_point"][0],
+                previous["end_point"][1],
+                segment["start_point"][0],
+                segment["start_point"][1],
+            )
+            segment["gap_from_previous_miles"] = gap
+            if gap > self.MAX_CONNECTED_SEGMENT_GAP_MILES:
+                gaps.append(
+                    f"{previous['name']} to {segment['name']} ({gap:.1f} mi)"
+                )
+        if not gaps:
+            return f"Ready: {len(segments)} ordered, connected GPX segment(s)"
+        return (
+            "Warning: disconnected GPX segments; estimate excludes gaps: "
+            + "; ".join(gaps)
+        )
+
+    @staticmethod
+    def _format_route_point(point):
+        if not point:
+            return "N/A"
+        return f"{point[0]:.5f}, {point[1]:.5f}"
+
+    def _remaining_route_stop_minutes(self, active_segment_index):
+        """Return stops that occur before arrival at the final GPX endpoint."""
+        remaining = self.route_segments[active_segment_index:]
+        stop_minutes = 0.0
+        for segment in remaining[:-1]:
+            schedule = segment.get("schedule") or {}
+            enabled = bool(schedule.get("enabled", bool(schedule)))
+            explicit = self._as_float(schedule.get("stop_minutes")) if enabled else None
+            stop_minutes += (
+                max(0.0, explicit)
+                if explicit is not None
+                else self.asc_checkpoint_stop_minutes
+            )
+        return stop_minutes
+
+    def _route_plan_estimate(
+        self,
+        route_remaining_miles,
+        active_segment_index=0,
+        now=None,
+    ):
+        speed_mph = max(0.0, float(self.asc_plan_speed_mph))
+        if not self.route_segments or speed_mph <= 0:
+            return None
+        drive_seconds = max(0.0, route_remaining_miles) / speed_mph * 3600.0
+        stop_minutes = self._remaining_route_stop_minutes(active_segment_index)
+        total_seconds = drive_seconds + stop_minutes * 60.0
+        arrival = (now or datetime.now().astimezone()) + timedelta(
+            seconds=total_seconds
+        )
+        return {
+            "speed_mph": speed_mph,
+            "drive_seconds": drive_seconds,
+            "stop_minutes": stop_minutes,
+            "total_seconds": total_seconds,
+            "arrival": arrival,
+        }
+
+    def _segment_summary_text(self):
+        if not self.route_segments:
+            return "GPX segments: none"
+        summaries = []
+        for index, segment in enumerate(self.route_segments[:8], start=1):
+            summaries.append(
+                f"{index}. {segment['name']}: "
+                f"{self._format_route_point(segment['start_point'])} to "
+                f"{self._format_route_point(segment['end_point'])} "
+                f"({segment['length_miles']:.1f} mi)"
+            )
+        if len(self.route_segments) > 8:
+            summaries.append(f"+{len(self.route_segments) - 8} more")
+        return "GPX segments: " + " | ".join(summaries)
+
+    def _refresh_route_overview(
+        self,
+        route_remaining_miles=None,
+        active_segment_index=0,
+        checkpoint_remaining_miles=None,
+        checkpoint_eta=None,
+    ):
+        if not hasattr(self, "route_label"):
+            return
+        if not self.route_segments:
+            self.route_label.setText("Route: none")
+            if hasattr(self, "route_segments_label"):
+                self.route_segments_label.setText("GPX segments: none")
+            return
+
+        total_miles = sum(segment["length_miles"] for segment in self.route_segments)
+        remaining = (
+            max(0.0, total_miles - self.route_progress_miles)
+            if route_remaining_miles is None
+            else max(0.0, route_remaining_miles)
+        )
+        estimate = self._route_plan_estimate(
+            remaining,
+            active_segment_index=active_segment_index,
+        )
+        start = self._format_route_point(self.route_segments[0]["start_point"])
+        end = self._format_route_point(self.route_segments[-1]["end_point"])
+        estimate_text = "plan estimate unavailable"
+        if estimate:
+            estimate_text = (
+                f"plan @{estimate['speed_mph']:.1f} mph: drive "
+                f"{self._format_duration(estimate['drive_seconds'])} + stops "
+                f"{self._format_duration(estimate['stop_minutes'] * 60.0)} = "
+                f"{self._format_duration(estimate['total_seconds'])}, arrival "
+                f"{estimate['arrival'].astimezone().strftime('%Y-%m-%d %H:%M %Z')}"
+            )
+        checkpoint_text = ""
+        if checkpoint_remaining_miles is not None:
+            checkpoint_name = self.route_segments[active_segment_index]["name"]
+            checkpoint_text = (
+                f" | next {checkpoint_name}: {checkpoint_remaining_miles:.1f} mi"
+                f" | live ETA {checkpoint_eta or 'N/A'}"
+            )
+        self.route_label.setText(
+            f"Route: {len(self.route_segments)} segment(s), {total_miles:.1f} mi | "
+            f"start {start} | end {end} | remaining {remaining:.1f} mi | "
+            f"{estimate_text}{checkpoint_text} | {self.route_validation_status}"
+        )
+        if hasattr(self, "route_segments_label"):
+            self.route_segments_label.setText(self._segment_summary_text())
+        self._refresh_compact_summary()
 
     def get_asc_energy_plan_context(self):
         """Return remaining GPX legs and planning settings for the forecaster."""
@@ -1557,6 +1959,8 @@ class GPSMapTab(QWidget):
             "race_mode": self.race_mode,
             "plan_speed_mph": self.asc_plan_speed_mph,
             "checkpoint_stop_minutes": self.asc_checkpoint_stop_minutes,
+            "minimum_arrival_soc_pct":
+                self.asc_minimum_arrival_soc_pct,
             "route_loaded": bool(self.route_segments),
             "legs": [],
         }
@@ -1625,9 +2029,15 @@ class GPSMapTab(QWidget):
         # CSV paths can display them without a GPS-map-specific data channel.
         defaults = {
             TelemetryKey.NAV_ROUTE_NAME.value[0]: "N/A",
+            TelemetryKey.NAV_ROUTE_GPX_STATUS.value[0]: self.route_validation_status,
+            TelemetryKey.NAV_ROUTE_START_POINT.value[0]: "N/A",
+            TelemetryKey.NAV_ROUTE_END_POINT.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_NAME.value[0]: "N/A",
             TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0]: "N/A",
             TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0]: "N/A",
+            TelemetryKey.NAV_ROUTE_ESTIMATED_DRIVE_TIME.value[0]: "N/A",
+            TelemetryKey.NAV_ROUTE_ESTIMATED_TOTAL_TIME.value[0]: "N/A",
+            TelemetryKey.NAV_ROUTE_ESTIMATED_ARRIVAL.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_DISTANCE_REMAINING_MI.value[0]: "N/A",
             TelemetryKey.NAV_CHECKPOINT_ETA.value[0]: "N/A",
             TelemetryKey.NAV_ASC_PLAN_SPEED_MPH.value[0]: round(
@@ -1636,7 +2046,39 @@ class GPSMapTab(QWidget):
             TelemetryKey.NAV_ASC_CHECKPOINT_STOP_MIN.value[0]: round(
                 self.asc_checkpoint_stop_minutes, 1
             ),
+            TelemetryKey.NAV_ASC_MINIMUM_ARRIVAL_SOC_PCT.value[0]: round(
+                self.asc_minimum_arrival_soc_pct, 1
+            ),
         }
+        total_route_miles = sum(
+            item["length_miles"] for item in self.route_segments
+        )
+        route_name = " + ".join(
+            segment["name"] for segment in self.route_segments
+        )
+        if self.route_segments:
+            initial_segment_index = self._route_segment_index_for_progress(
+                self.route_progress_miles
+            )
+            initial_estimate = self._route_plan_estimate(
+                max(0.0, total_route_miles - self.route_progress_miles),
+                active_segment_index=initial_segment_index,
+            )
+            defaults.update({
+                TelemetryKey.NAV_ROUTE_NAME.value[0]: route_name,
+                TelemetryKey.NAV_ROUTE_START_POINT.value[0]:
+                    self._format_route_point(self.route_segments[0]["start_point"]),
+                TelemetryKey.NAV_ROUTE_END_POINT.value[0]:
+                    self._format_route_point(self.route_segments[-1]["end_point"]),
+                TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0]:
+                    round(max(0.0, total_route_miles - self.route_progress_miles), 2),
+                TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0]:
+                    round(self.route_progress_miles, 2),
+            })
+            if initial_estimate:
+                defaults.update(
+                    self._route_estimate_metrics(initial_estimate)
+                )
         route_lat = self.vehicle_lat if lat is None else lat
         route_lon = self.vehicle_lon if lon is None else lon
         if route_lat is None or route_lon is None or not self.route_segments:
@@ -1654,7 +2096,6 @@ class GPSMapTab(QWidget):
             miles_before_nearest
             + self.route_segments[nearest_segment_index]["cumulative_miles"][point_index]
         )
-        total_route_miles = sum(item["length_miles"] for item in self.route_segments)
         if self.race_mode == self.RACE_MODE_ASC:
             # ASC is point-to-point: never move route progress backwards when
             # GPS jitters or a route doubles back near an earlier point.
@@ -1664,30 +2105,37 @@ class GPSMapTab(QWidget):
         else:
             self.route_progress_miles = min(total_route_miles, candidate_progress)
 
-        segment_index = len(self.route_segments) - 1
+        segment_index = self._route_segment_index_for_progress(
+            self.route_progress_miles
+        )
         miles_before_segment = 0.0
-        for index, item in enumerate(self.route_segments):
-            segment_end = miles_before_segment + item["length_miles"]
-            if self.route_progress_miles <= segment_end or index == len(self.route_segments) - 1:
-                segment_index = index
-                break
-            miles_before_segment = segment_end
+        for item in self.route_segments[:segment_index]:
+            miles_before_segment += item["length_miles"]
 
         segment = self.route_segments[segment_index]
         segment_progress = max(0.0, self.route_progress_miles - miles_before_segment)
         checkpoint_remaining = max(0.0, segment["length_miles"] - segment_progress)
         route_remaining = max(0.0, total_route_miles - self.route_progress_miles)
         eta = self._format_eta(checkpoint_remaining, speed_mph)
-        route_name = " + ".join(segment["name"] for segment in self.route_segments)
-
-        self.route_label.setText(
-            f"Route: {route_name} | traveled {self.route_progress_miles:.1f} mi | "
-            f"remaining {route_remaining:.1f} mi | next {segment['name']}: "
-            f"{checkpoint_remaining:.1f} mi | ETA {eta}"
+        route_estimate = self._route_plan_estimate(
+            route_remaining,
+            active_segment_index=segment_index,
+        )
+        self._refresh_route_overview(
+            route_remaining_miles=route_remaining,
+            active_segment_index=segment_index,
+            checkpoint_remaining_miles=checkpoint_remaining,
+            checkpoint_eta=eta,
         )
 
-        return {
+        metrics = {
             TelemetryKey.NAV_ROUTE_NAME.value[0]: route_name,
+            TelemetryKey.NAV_ROUTE_GPX_STATUS.value[0]:
+                self.route_validation_status,
+            TelemetryKey.NAV_ROUTE_START_POINT.value[0]:
+                self._format_route_point(self.route_segments[0]["start_point"]),
+            TelemetryKey.NAV_ROUTE_END_POINT.value[0]:
+                self._format_route_point(self.route_segments[-1]["end_point"]),
             TelemetryKey.NAV_CHECKPOINT_NAME.value[0]: segment["name"],
             TelemetryKey.NAV_ROUTE_DISTANCE_REMAINING_MI.value[0]: round(route_remaining, 2),
             TelemetryKey.NAV_ROUTE_DISTANCE_TRAVELED_MI.value[0]: round(self.route_progress_miles, 2),
@@ -1700,6 +2148,30 @@ class GPSMapTab(QWidget):
                 self.asc_checkpoint_stop_minutes, 1
             ),
         }
+        if route_estimate:
+            metrics.update(self._route_estimate_metrics(route_estimate))
+        return metrics
+
+    def _route_estimate_metrics(self, estimate):
+        return {
+            TelemetryKey.NAV_ROUTE_ESTIMATED_DRIVE_TIME.value[0]:
+                self._format_duration(estimate["drive_seconds"]),
+            TelemetryKey.NAV_ROUTE_ESTIMATED_TOTAL_TIME.value[0]:
+                self._format_duration(estimate["total_seconds"]),
+            TelemetryKey.NAV_ROUTE_ESTIMATED_ARRIVAL.value[0]:
+                estimate["arrival"].astimezone().strftime(
+                    "%Y-%m-%d %H:%M %Z"
+                ),
+        }
+
+    def _route_segment_index_for_progress(self, progress_miles):
+        miles_before = 0.0
+        for index, segment in enumerate(self.route_segments):
+            segment_end = miles_before + segment["length_miles"]
+            if progress_miles <= segment_end:
+                return index
+            miles_before = segment_end
+        return max(0, len(self.route_segments) - 1)
 
     def _build_navigation_metrics(self, speed_mph, update_laps=False, lat=None, lon=None):
         distance_increment = 0.0
@@ -2101,6 +2573,9 @@ class GPSMapTab(QWidget):
             TelemetryKey.NAV_ASC_NEXT_CHECKPOINT_SOC_PCT.value[0],
             TelemetryKey.NAV_ASC_CURRENT_LEG_ARRIVAL_TIME.value[0],
             TelemetryKey.NAV_ASC_CURRENT_CHECKPOINT_STATUS.value[0],
+            TelemetryKey.NAV_ASC_DEADLINE_REQUIRED_SPEED_MPH.value[0],
+            TelemetryKey.NAV_ASC_RECOMMENDED_SPEED_MPH.value[0],
+            TelemetryKey.NAV_ASC_SPEED_FEASIBILITY_STATUS.value[0],
         )
         if not any(key in telemetry_data for key in relevant_keys):
             return
@@ -2140,10 +2615,35 @@ class GPSMapTab(QWidget):
                 "No closing time",
             )
         )
+        required_speed = self._as_float(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_DEADLINE_REQUIRED_SPEED_MPH.value[0]
+            )
+        )
+        recommended_speed = self._as_float(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_RECOMMENDED_SPEED_MPH.value[0]
+            )
+        )
+        speed_status = str(
+            telemetry_data.get(
+                TelemetryKey.NAV_ASC_SPEED_FEASIBILITY_STATUS.value[0],
+                "Speed recommendation unavailable",
+            )
+        )
+        required_text = (
+            "N/A" if required_speed is None else f"{required_speed:.1f} mph"
+        )
+        recommended_text = (
+            "N/A"
+            if recommended_speed is None
+            else f"{recommended_speed:.1f} mph"
+        )
         self.asc_energy_label.setText(
             f"ASC energy: leg solar {solar_text} | leg net {net_text} | "
             f"checkpoint SOC {soc_text} | arrival {arrival_text} | "
-            f"cutoff {cutoff_text} | {status}"
+            f"cutoff {cutoff_text} | required {required_text} | "
+            f"recommended {recommended_text} | {speed_status} | {status}"
         )
 
     def _refresh_compact_summary(self):
@@ -2154,8 +2654,31 @@ class GPSMapTab(QWidget):
             if self.route_segments:
                 route_total = sum(item["length_miles"] for item in self.route_segments)
                 route_progress = f"{self.route_progress_miles:.1f}/{route_total:.1f} mi"
+                route_remaining = max(
+                    0.0, route_total - self.route_progress_miles
+                )
+                route_estimate = self._route_plan_estimate(
+                    route_remaining,
+                    self._route_segment_index_for_progress(
+                        self.route_progress_miles
+                    ),
+                )
+                if route_estimate:
+                    route_time = (
+                        f"{self._format_duration(route_estimate['total_seconds'])} "
+                        f"to end, {route_estimate['arrival'].astimezone().strftime('%H:%M %Z')}"
+                    )
+                else:
+                    route_time = "time unavailable"
+                gpx_state = (
+                    "GPX ready"
+                    if self.route_validation_status.startswith("Ready:")
+                    else "GPX WARNING"
+                )
             else:
                 route_progress = "no GPX"
+                route_time = "time unavailable"
+                gpx_state = "GPX not loaded"
             net = self._as_float(
                 self.last_asc_energy_metrics.get(
                     TelemetryKey.NAV_ASC_CURRENT_LEG_NET_WH.value[0]
@@ -2178,6 +2701,16 @@ class GPSMapTab(QWidget):
                     "No closing time",
                 )
             )
+            recommended_speed = self._as_float(
+                self.last_asc_energy_metrics.get(
+                    TelemetryKey.NAV_ASC_RECOMMENDED_SPEED_MPH.value[0]
+                )
+            )
+            recommendation_text = (
+                "speed learning"
+                if recommended_speed is None
+                else f"recommend {recommended_speed:.1f} mph"
+            )
             energy_text = (
                 "forecast learning"
                 if net is None
@@ -2190,8 +2723,11 @@ class GPSMapTab(QWidget):
             )
             self.compact_summary_label.setText(
                 f"<b>ASC</b> &nbsp; Route {route_progress} &nbsp;|&nbsp; "
+                f"{gpx_state} &nbsp;|&nbsp; "
+                f"{route_time} &nbsp;|&nbsp; "
                 f"GPS trip {self.trip_distance_miles:.1f} mi &nbsp;|&nbsp; "
                 f"{energy_text} &nbsp;|&nbsp; {soc_text} &nbsp;|&nbsp; "
+                f"{recommendation_text} &nbsp;|&nbsp; "
                 f"arrival {arrival_time} &nbsp;|&nbsp; {cutoff_status} &nbsp;|&nbsp; "
                 f"Day average {day_average}"
             )
@@ -2415,18 +2951,74 @@ class GPSMapTab(QWidget):
 
     @staticmethod
     def _parse_gpx_points(file_path):
+        """Compatibility helper returning all ordered route/track points."""
+        return [
+            point
+            for segment in GPSMapTab._parse_gpx_segments(file_path)
+            for point in segment
+        ]
+
+    @staticmethod
+    def _parse_gpx_segments(file_path):
+        """Preserve GPX track/route boundaries and ignore unrelated waypoints."""
         root = ET.parse(file_path).getroot()
-        points = []
+        track_segments = []
+        routes = []
+        waypoints = []
+
+        def points_below(parent, point_tag):
+            points = []
+            for element in parent.iter():
+                tag = element.tag.split("}", 1)[-1].lower()
+                if tag != point_tag:
+                    continue
+                lat = element.attrib.get("lat")
+                lon = element.attrib.get("lon")
+                if lat is None or lon is None:
+                    continue
+                try:
+                    point = (float(lat), float(lon))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    not math.isfinite(point[0])
+                    or not math.isfinite(point[1])
+                    or not (-90.0 <= point[0] <= 90.0)
+                    or not (-180.0 <= point[1] <= 180.0)
+                ):
+                    continue
+                if not points or point != points[-1]:
+                    points.append(point)
+            return points
+
         for element in root.iter():
             tag = element.tag.split("}", 1)[-1].lower()
-            if tag not in {"trkpt", "rtept", "wpt"}:
-                continue
-            lat = element.attrib.get("lat")
-            lon = element.attrib.get("lon")
-            if lat is None or lon is None:
-                continue
-            points.append((float(lat), float(lon)))
-        return points
+            if tag == "trkseg":
+                points = points_below(element, "trkpt")
+                if len(points) >= 2:
+                    track_segments.append(points)
+            elif tag == "rte":
+                points = points_below(element, "rtept")
+                if len(points) >= 2:
+                    routes.append(points)
+            elif tag == "wpt":
+                point = points_below(element, "wpt")
+                if point:
+                    waypoints.extend(point)
+
+        if track_segments:
+            return track_segments
+        if routes:
+            return routes
+        # Some exporters omit the normal trkseg/rte container hierarchy.
+        # Preserve compatibility by accepting their globally ordered points.
+        loose_track = points_below(root, "trkpt")
+        if len(loose_track) >= 2:
+            return [loose_track]
+        loose_route = points_below(root, "rtept")
+        if len(loose_route) >= 2:
+            return [loose_route]
+        return [waypoints] if len(waypoints) >= 2 else []
 
     @staticmethod
     def _latlon_to_tile_fraction(lat, lon, zoom):

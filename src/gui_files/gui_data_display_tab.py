@@ -1,8 +1,7 @@
 # src/gui_files/gui_data_display_tab.py
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTextCursor, QFont
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPlainTextEdit
+from PyQt6.QtGui import QFont
 import logging
 from data_display import DataDisplay  # Import DataDisplay class
 
@@ -20,10 +19,12 @@ class DataDisplayTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Initialize QTextEdit for multi-line, scrollable display
-        self.data_display = QTextEdit()
+        # This view shows the latest telemetry snapshot. Historical telemetry is
+        # already persisted to CSV, so retaining every formatted snapshot in a
+        # QTextDocument only duplicates the data and can consume gigabytes over
+        # a long race.
+        self.data_display = QPlainTextEdit()
         self.data_display.setReadOnly(True)  # Make it read-only
-        self.data_display.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         # Set larger monospaced font
         font = QFont("Courier New", 12)
@@ -46,18 +47,19 @@ class DataDisplayTab(QWidget):
         # Use DataDisplay instance to format data
         display_text = self.data_display_instance.display(telemetry_data)
 
-        # Get scrollbar information before appending new data
+        # Preserve the operator's position while replacing the old snapshot.
         scrollbar = self.data_display.verticalScrollBar()
         at_bottom = scrollbar.value() == scrollbar.maximum()
+        previous_position = scrollbar.value()
 
-        # Append the new data to the QTextEdit
-        self.data_display.append(display_text)
+        self.data_display.setPlainText(display_text)
 
-        # If the scrollbar was at the bottom before appending, scroll to the bottom
         if at_bottom:
-            self.data_display.moveCursor(QTextCursor.MoveOperation.End)
+            scrollbar.setValue(scrollbar.maximum())
+        else:
+            scrollbar.setValue(min(previous_position, scrollbar.maximum()))
 
-        self.logger.info("Data Display updated.")
+        self.logger.debug("Data Display updated.")
 
     def set_units_map(self, units_map, units_mode=None):
         self.units = units_map
