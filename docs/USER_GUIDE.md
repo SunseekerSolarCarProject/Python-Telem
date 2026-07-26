@@ -678,6 +678,24 @@ Press **Refresh** to list available application versions. Select a version and
 press **Install Selected** to download and apply it. Do not interrupt power or
 close the application during the installation step.
 
+The signed TUF download is first extracted into
+`tuf_downloads/staged_bundle`. That folder is only staging; seeing files there
+does not mean installation finished. The updater must close telemetry, copy
+and verify the complete PyInstaller bundle, and then relaunch `telemetry.exe`.
+
+On Windows, the result is recorded in
+`tuf_downloads/apply_update.log` inside the telemetry install folder. A
+successful entry ends with **Update completed and telemetry startup remained
+active**. If the app does not reopen:
+
+- launch `telemetry.exe` manually from the install folder;
+- inspect `tuf_downloads/apply_update.log` for the first **UPDATE FAILED**
+  entry;
+- confirm the complete telemetry folder is in a user-writable location rather
+  than a protected system folder;
+- do not copy only `telemetry.exe`; the matching `_internal` folder and other
+  packaged files must be updated together.
+
 ### Graph Colors
 
 Press **Choose** beside a telemetry field to select its graph color. Color

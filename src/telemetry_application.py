@@ -160,6 +160,13 @@ class TelemetryApplication(QObject):
 
         # Runtime workers and lifecycle flags.
         self.serial_reader_thread = None
+        self._serial_reconnect_suspended = False
+        self._serial_shutdown = False
+        self._serial_retry_delay_seconds = 2.0
+        self._serial_next_retry_monotonic = 0.0
+        self.serial_reconnect_timer = QTimer(self)
+        self.serial_reconnect_timer.setInterval(2000)
+        self.serial_reconnect_timer.timeout.connect(self._check_serial_connection)
         self.signals_connected = False
         self.used_Ah = 0
         self.shunt_integrator = AmpHourIntegrator(
@@ -1421,7 +1428,7 @@ class TelemetryApplication(QObject):
                 self.gui.set_initial_settings(self.config_data_copy)
 
             self.gui.show()
-            self.gui.set_connection_status(f"Connecting to {self.selected_port}")
+            self._start_serial_reconnect_monitor()
             self.start_serial_reader(self.selected_port, self.baudrate)
             return True
         except Exception as e:
@@ -1431,31 +1438,173 @@ class TelemetryApplication(QObject):
     def start_serial_reader(self, port, baudrate):
         if not port:
             raise ValueError("No COM port selected.")
+        if self.serial_reader_thread and self.serial_reader_thread.isRunning():
+            self.logger.debug("Serial reader is already running; ignoring duplicate start request.")
+            return
+
+        self.selected_port = str(port).strip()
+        self.baudrate = int(baudrate)
+        self._serial_reconnect_suspended = False
         # SerialReaderThread owns the blocking serial loop. The application only
         # receives Qt signals, keeping the UI responsive during live telemetry.
-        self.serial_reader_thread = SerialReaderThread(
-            port,
-            baudrate,
+        reader = SerialReaderThread(
+            self.selected_port,
+            self.baudrate,
             process_data_callback=self.process_data,
             process_raw_data_callback=self.process_raw_data
         )
-        self.serial_reader_thread.data_received.connect(self.process_data)
-        self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)
-        self.serial_reader_thread.start()
+        reader.data_received.connect(self.process_data)
+        reader.raw_data_received.connect(self.process_raw_data)
+        reader.connection_opened.connect(self._on_serial_connection_opened)
+        reader.connection_error.connect(self._on_serial_connection_error)
+        reader.finished.connect(
+            lambda active_reader=reader: self._on_serial_reader_finished(active_reader)
+        )
+        self.serial_reader_thread = reader
+        if self.gui:
+            self.gui.set_connection_status(
+                f"Connecting to {self.selected_port} @ {self.baudrate}"
+            )
+            self.gui.set_simulation_status("Live")
+        reader.start()
+        self.logger.info(
+            f"Serial connection attempt started on {self.selected_port} "
+            f"with baudrate {self.baudrate}"
+        )
+
+    def stop_serial_reader(self, suspend_reconnect=True):
+        """Stop live serial input and clear the thread reference."""
+        self._serial_reconnect_suspended = bool(suspend_reconnect)
+        reader = self.serial_reader_thread
+        if reader and reader.isRunning():
+            self.logger.info("Stopping serial reader thread")
+            reader.stop()
+            reader.wait()
+        if self.serial_reader_thread is reader:
+            self.serial_reader_thread = None
+        if self.gui:
+            self.gui.set_connection_status("Serial stopped")
+
+    @staticmethod
+    def _select_serial_reconnect_port(saved_port, available_ports):
+        """Select a safe reconnect target without guessing among devices."""
+        saved = str(saved_port or "").strip()
+        available = [
+            str(port).strip()
+            for port in (available_ports or [])
+            if str(port).strip()
+        ]
+        if saved:
+            saved_key = saved.casefold()
+            for port in available:
+                if port.casefold() == saved_key:
+                    return port
+        if len(available) == 1:
+            return available[0]
+        return None
+
+    def _start_serial_reconnect_monitor(self):
+        """Start lightweight polling used for USB hot-plug reconnection."""
+        self._serial_shutdown = False
+        if not self.serial_reconnect_timer.isActive():
+            self.serial_reconnect_timer.start()
+
+    def _on_serial_connection_opened(self, port, baudrate):
+        """Confirm that the worker actually opened the port."""
+        self._serial_retry_delay_seconds = 2.0
+        self._serial_next_retry_monotonic = 0.0
         if self.gui:
             self.gui.set_connection_status(f"Live on {port} @ {baudrate}")
             self.gui.set_simulation_status("Live")
-        self.logger.info(f"Serial reader started on {port} with baudrate {baudrate}")
+        self.logger.info("Serial connection confirmed on %s @ %s", port, baudrate)
 
-    def stop_serial_reader(self):
-        """Stop live serial input and clear the thread reference."""
-        if self.serial_reader_thread and self.serial_reader_thread.isRunning():
-            self.logger.info("Stopping serial reader thread")
-            self.serial_reader_thread.stop()
-            self.serial_reader_thread.wait()
-        self.serial_reader_thread = None
+    def _on_serial_connection_error(self, port, message):
+        """Schedule a bounded retry after an open failure or USB disconnect."""
+        if self._serial_shutdown or self._serial_reconnect_suspended:
+            return
+        delay = self._serial_retry_delay_seconds
+        self._serial_next_retry_monotonic = time.monotonic() + delay
+        self._serial_retry_delay_seconds = min(delay * 2.0, 30.0)
         if self.gui:
-            self.gui.set_connection_status("Serial stopped")
+            self.gui.set_connection_status(
+                f"Waiting for {port}; retrying in {delay:g}s"
+            )
+        self.logger.warning(
+            "Serial connection lost/failed on %s; retrying in %.0fs: %s",
+            port,
+            delay,
+            message,
+        )
+
+    def _on_serial_reader_finished(self, reader):
+        """Clear a completed worker so the monitor can create a fresh one."""
+        if reader is not self.serial_reader_thread:
+            return
+        self.serial_reader_thread = None
+        if self._serial_shutdown or self._serial_reconnect_suspended or self._simulation_mode:
+            return
+        if self.gui:
+            self.gui.set_connection_status(
+                f"Waiting for {self.selected_port}; automatic reconnect enabled"
+            )
+
+    def _check_serial_connection(self):
+        """Reconnect a saved serial port when it appears after startup/unplug."""
+        if (
+            self._serial_shutdown
+            or self._serial_reconnect_suspended
+            or self._simulation_mode
+            or not self.selected_port
+        ):
+            return
+
+        reader = self.serial_reader_thread
+        if reader and reader.isRunning():
+            return
+        if reader is not None:
+            self.serial_reader_thread = None
+        if time.monotonic() < self._serial_next_retry_monotonic:
+            return
+
+        try:
+            available_ports = SerialReaderThread.get_available_ports()
+        except Exception as exc:
+            self.logger.warning("Unable to scan serial ports: %s", exc)
+            return
+
+        target = self._select_serial_reconnect_port(
+            self.selected_port,
+            available_ports,
+        )
+        if target is None:
+            if self.gui:
+                if available_ports:
+                    status = (
+                        f"Waiting for {self.selected_port}; "
+                        "multiple COM ports detected"
+                    )
+                else:
+                    status = f"Waiting for {self.selected_port} to be connected"
+                self.gui.set_connection_status(status)
+            return
+
+        if target != self.selected_port:
+            previous_port = self.selected_port
+            self.selected_port = target
+            if self.config_data_copy is None:
+                self.config_data_copy = {}
+            self.config_data_copy["selected_port"] = target
+            self._save_app_settings()
+            if self.gui and hasattr(self.gui, "set_serial_port_selection"):
+                self.gui.set_serial_port_selection(target)
+            self.logger.info(
+                "Saved port %s is unavailable; adopted the only detected port %s.",
+                previous_port,
+                target,
+            )
+
+        self._serial_next_retry_monotonic = time.monotonic() + 2.0
+        self.start_serial_reader(target, self.baudrate)
 
     def handle_retrain_model(self):
         """
@@ -1659,9 +1808,10 @@ class TelemetryApplication(QObject):
 
         # Replay uses the exact same process_data path as live serial data. Pause
         # the serial thread first so real packets do not interleave with replay.
-        self._resume_serial_after_sim = bool(self.serial_reader_thread and self.serial_reader_thread.isRunning())
-        if self._resume_serial_after_sim:
-            self.stop_serial_reader()
+        self._resume_serial_after_sim = bool(self.selected_port)
+        self._serial_reconnect_suspended = True
+        if self.serial_reader_thread:
+            self.stop_serial_reader(suspend_reconnect=True)
         self._simulation_mode = f"Replay ({os.path.basename(file_path)})"
         self.simulator.start_replay(file_path, speed)
 
@@ -1680,9 +1830,10 @@ class TelemetryApplication(QObject):
             QMessageBox.warning(self.gui, "Simulation", "Select a scenario to simulate.")
             return
 
-        self._resume_serial_after_sim = bool(self.serial_reader_thread and self.serial_reader_thread.isRunning())
-        if self._resume_serial_after_sim:
-            self.stop_serial_reader()
+        self._resume_serial_after_sim = bool(self.selected_port)
+        self._serial_reconnect_suspended = True
+        if self.serial_reader_thread:
+            self.stop_serial_reader(suspend_reconnect=True)
         self._simulation_mode = f"Scenario ({scenario})"
         self.simulator.start_synthetic(scenario, speed, profile=profile or {})
 
@@ -1719,7 +1870,12 @@ class TelemetryApplication(QObject):
         if hasattr(self.gui, 'simulation_tab'):
             self.gui.simulation_tab.set_running(False)
             self.gui.simulation_tab.set_status(status)
-        if resume and self._resume_serial_after_sim and self.selected_port:
+        should_resume = bool(
+            resume and self._resume_serial_after_sim and self.selected_port
+        )
+        self._simulation_mode = None
+        self._serial_reconnect_suspended = not should_resume
+        if should_resume:
             try:
                 self.start_serial_reader(self.selected_port, self.baudrate)
             except Exception as exc:
@@ -1734,14 +1890,26 @@ class TelemetryApplication(QObject):
         if self.gui:
             self.gui.set_simulation_status("Live")
         self._resume_serial_after_sim = False
-        self._simulation_mode = None
 
     def handle_settings_applied(self, port, baudrate, log_level, endianness):
         """Apply connection/logging/parser settings from the Settings tab."""
         self.logger.info(f"Applying new settings: COM Port={port}, Baud Rate={baudrate}, Log Level={log_level}, Endianness={endianness}")
+        self.selected_port = str(port).strip()
+        self.baudrate = int(baudrate)
+        self.logging_level = str(log_level).upper()
+        self.endianness = endianness
+        if self.config_data_copy is None:
+            self.config_data_copy = {}
+        self.config_data_copy.update({
+            "selected_port": self.selected_port,
+            "baud_rate": self.baudrate,
+            "logging_level": self.logging_level,
+            "endianness": self.endianness,
+        })
+        self._save_app_settings()
         self.update_logging_level(log_level)
         self.data_processor.set_endianness(endianness)
-        self.restart_serial_reader(port, baudrate)
+        self.restart_serial_reader(self.selected_port, self.baudrate)
 
     def update_logging_level(self, level):
         """Update root logger and existing handlers to the selected level."""
@@ -1765,24 +1933,18 @@ class TelemetryApplication(QObject):
     def restart_serial_reader(self, port, baudrate):
         """Reconnect serial using the currently selected port and baud rate."""
         try:
-            if self.serial_reader_thread and self.serial_reader_thread.isRunning():
-                self.serial_reader_thread.stop()
-                self.serial_reader_thread.wait()
+            self._serial_reconnect_suspended = True
+            if self.serial_reader_thread:
+                self.stop_serial_reader(suspend_reconnect=True)
                 self.logger.info("Stopped existing SerialReaderThread.")
-
-            self.serial_reader_thread = SerialReaderThread(
-                port,
-                baudrate,
-                process_data_callback=self.process_data,
-                process_raw_data_callback=self.process_raw_data
+            self._serial_retry_delay_seconds = 2.0
+            self._serial_next_retry_monotonic = 0.0
+            self._serial_reconnect_suspended = False
+            self._start_serial_reconnect_monitor()
+            self.start_serial_reader(port, baudrate)
+            self.logger.info(
+                f"Restarted SerialReaderThread on {port} with baudrate {baudrate}"
             )
-            self.serial_reader_thread.data_received.connect(self.process_data)
-            self.serial_reader_thread.raw_data_received.connect(self.process_raw_data)
-            self.serial_reader_thread.start()
-            if self.gui:
-                self.gui.set_connection_status(f"Live on {port} @ {baudrate}")
-                self.gui.set_simulation_status("Live")
-            self.logger.info(f"Restarted SerialReaderThread on {port} with baudrate {baudrate}")
         except Exception as e:
             self.logger.error(f"Failed to restart SerialReaderThread with COM Port={port}, Baud Rate={baudrate}: {e}")
             if self.gui:
@@ -2002,9 +2164,12 @@ class TelemetryApplication(QObject):
 
     def cleanup(self):
         """Stop background serial work and offer final CSV export on shutdown."""
-        if self.serial_reader_thread and self.serial_reader_thread.isRunning():
-            self.serial_reader_thread.stop()
-            self.serial_reader_thread.wait()
+        self._serial_shutdown = True
+        self._serial_reconnect_suspended = True
+        if self.serial_reconnect_timer.isActive():
+            self.serial_reconnect_timer.stop()
+        if self.serial_reader_thread:
+            self.stop_serial_reader(suspend_reconnect=True)
             self.logger.info("SerialReaderThread stopped.")
         self.finalize_csv()
         self.logger.info("Cleanup completed.")

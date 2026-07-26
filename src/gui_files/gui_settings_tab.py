@@ -324,6 +324,17 @@ class SettingsTab(QWidget):
             self.logger.error(f"Error populating COM ports: {e}")
             QMessageBox.critical(self, "Error", f"Failed to populate COM ports: {e}")
 
+    def set_serial_port(self, port):
+        """Reflect an automatically detected/reassigned port in Settings."""
+        port = str(port or "").strip()
+        if not port:
+            return
+        index = self.com_port_dropdown.findText(port)
+        if index == -1:
+            self.com_port_dropdown.addItem(port)
+            index = self.com_port_dropdown.findText(port)
+        self.com_port_dropdown.setCurrentIndex(index)
+
     def _execution_dir(self) -> str:
         if self._running_from_bundle:
             return os.path.dirname(sys.executable)

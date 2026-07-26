@@ -11,6 +11,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class SerialReaderThread(QThread):
     data_received     = pyqtSignal(str)
     raw_data_received = pyqtSignal(str)
+    connection_opened = pyqtSignal(str, int)
+    connection_error  = pyqtSignal(str, str)
 
     def __init__(self, port: str, baudrate: int,
                  process_data_callback=None,
@@ -66,6 +68,7 @@ class SerialReaderThread(QThread):
         try:
             with serial.Serial(self.port, self.baudrate, timeout=1) as ser:
                 self.logger.info(f"Opened serial port {self.port} at {self.baudrate}")
+                self.connection_opened.emit(self.port, self.baudrate)
                 while self.running:
                     # PTYs created by socat do not always report in_waiting
                     # consistently. readline() already respects timeout=1, so
@@ -79,8 +82,12 @@ class SerialReaderThread(QThread):
                         self.raw_data_received.emit(raw_line)
         except serial.SerialException as e:
             self.logger.error(f"SerialException: {e}")
+            if self.running:
+                self.connection_error.emit(self.port, str(e))
         except Exception as e:
             self.logger.error(f"Unexpected error in SerialReaderThread: {e}")
+            if self.running:
+                self.connection_error.emit(self.port, str(e))
 
     def stop(self):
         """

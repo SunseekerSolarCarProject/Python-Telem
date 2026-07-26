@@ -1026,6 +1026,11 @@ class TelemetryGUI(QWidget):
         except Exception as e:
             self.logger.error(f"Failed to set initial settings in SettingsTab: {e}")
 
+    def set_serial_port_selection(self, port: str):
+        """Keep Settings synchronized when auto-connect adopts a COM port."""
+        if hasattr(self, "settings_tab"):
+            self.settings_tab.set_serial_port(port)
+
     def closeEvent(self, event):
         """
         Override the closeEvent to ensure color mapping is saved before exiting.

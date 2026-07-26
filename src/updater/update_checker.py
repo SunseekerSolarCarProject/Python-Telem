@@ -3,13 +3,12 @@ import os
 import sys
 import shutil
 import subprocess
-import hashlib
 import json
 import textwrap
 import tempfile
 from packaging.version import Version as SemVer
 import requests
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal
 from tuf.ngclient.updater import Updater  # TUF verification
 from updater.progress_fetcher import ProgressFetcher
 from Version import LINUX_VERSION_FILENAME as LINUX_VERSION_MARKER_FILENAME, resolve_running_version
@@ -19,6 +18,7 @@ class UpdateChecker(QObject):
     update_progress  = pyqtSignal(int)   # 0..100
     update_error     = pyqtSignal(str)
     LINUX_VERSION_FILENAME = LINUX_VERSION_MARKER_FILENAME
+    APPLY_LOG_FILENAME = "apply_update.log"
 
     def __init__(self, repo_owner: str, repo_name: str, version: str, app_install_dir: str,
                  target_name: str | None = None):
@@ -152,6 +152,155 @@ class UpdateChecker(QObject):
         # Dev mode: don't try to rewrite python.exe; just no-op
         return ""
 
+    def _install_write_error(self, executable_path: str) -> str | None:
+        """Return an actionable error before downloading into a locked install."""
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=".telemetry_update_write_test_",
+                dir=self.app_install_dir,
+            ):
+                pass
+        except OSError as exc:
+            return (
+                f"The install folder is not writable: "
+                f"{self.app_install_dir}. Move the telemetry folder to a "
+                f"user-writable location or run it with permission to update "
+                f"that folder. ({exc})"
+            )
+        if not os.access(executable_path, os.W_OK):
+            return (
+                f"The telemetry executable cannot be replaced: "
+                f"{executable_path}. Check folder permissions or move the "
+                "complete telemetry folder to a user-writable location."
+            )
+        return None
+
+    @staticmethod
+    def _windows_apply_script() -> str:
+        """Return the logged, verified Windows bundle installer."""
+        return textwrap.dedent(r"""
+        param(
+          [Parameter(Mandatory=$true)][int]$RunningProcessId,
+          [Parameter(Mandatory=$true)][string]$NewDir,
+          [Parameter(Mandatory=$true)][string]$OldExe,
+          [Parameter(Mandatory=$true)][string]$AppDir,
+          [Parameter(Mandatory=$true)][string]$NewVersion,
+          [Parameter(ValueFromRemainingArguments=$true)][string[]]$RelaunchArgs
+        )
+
+        $ErrorActionPreference = "Stop"
+        $DownloadDir = Join-Path $AppDir "tuf_downloads"
+        $Log = Join-Path $DownloadDir "apply_update.log"
+        New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
+
+        function Write-UpdateLog([string]$Message) {
+          Add-Content -LiteralPath $Log -Encoding UTF8 -Value (
+            "$(Get-Date -Format o) $Message"
+          )
+        }
+
+        function Start-Telemetry([string]$Executable) {
+          $start = @{
+            FilePath = $Executable
+            WorkingDirectory = $AppDir
+            PassThru = $true
+          }
+          if ($RelaunchArgs -and $RelaunchArgs.Count -gt 0) {
+            $start.ArgumentList = $RelaunchArgs
+          }
+          return Start-Process @start
+        }
+
+        try {
+          Write-UpdateLog "Applying Windows update to version $NewVersion"
+          Write-UpdateLog "PID=$RunningProcessId NEW_DIR=$NewDir OLD_EXE=$OldExe APP_DIR=$AppDir"
+          $running = Get-Process -Id $RunningProcessId -ErrorAction SilentlyContinue
+          if ($null -ne $running) {
+            Write-UpdateLog "Waiting for running telemetry process to exit"
+            Wait-Process -Id $RunningProcessId
+          }
+
+          if (-not (Test-Path -LiteralPath $NewDir -PathType Container)) {
+            throw "Staged bundle is missing: $NewDir"
+          }
+          $BinaryName = [System.IO.Path]::GetFileName($OldExe)
+          $StagedExe = Join-Path $NewDir $BinaryName
+          if (-not (Test-Path -LiteralPath $StagedExe -PathType Leaf)) {
+            throw "Staged executable is missing: $StagedExe"
+          }
+
+          $BackupExe = "$OldExe.bak"
+          if (Test-Path -LiteralPath $OldExe -PathType Leaf) {
+            Copy-Item -LiteralPath $OldExe -Destination $BackupExe -Force
+            Write-UpdateLog "Backed up existing executable to $BackupExe"
+          }
+
+          Get-ChildItem -LiteralPath $NewDir -Force | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $AppDir -Recurse -Force
+          }
+
+          $StagedFiles = Get-ChildItem -LiteralPath $NewDir -Recurse -Force -File
+          foreach ($SourceFile in $StagedFiles) {
+            $RelativePath = $SourceFile.FullName.Substring($NewDir.Length).TrimStart('\','/')
+            $InstalledFile = Join-Path $AppDir $RelativePath
+            if (-not (Test-Path -LiteralPath $InstalledFile -PathType Leaf)) {
+              throw "Installed bundle is missing file: $RelativePath"
+            }
+            if ((Get-Item -LiteralPath $InstalledFile).Length -ne $SourceFile.Length) {
+              throw "Installed bundle has wrong file size: $RelativePath"
+            }
+          }
+
+          $SourceHash = (Get-FileHash -LiteralPath $StagedExe -Algorithm SHA256).Hash
+          $InstalledHash = (Get-FileHash -LiteralPath $OldExe -Algorithm SHA256).Hash
+          if ($SourceHash -ne $InstalledHash) {
+            throw "Installed executable hash does not match the signed staged executable"
+          }
+
+          Set-Content -LiteralPath (Join-Path $DownloadDir "installed-version.txt") `
+            -Encoding ASCII -Value $NewVersion
+          Write-UpdateLog "Verified $($StagedFiles.Count) installed bundle files"
+          $launched = Start-Telemetry $OldExe
+          Write-UpdateLog "Launched updated telemetry process PID=$($launched.Id)"
+          Start-Sleep -Seconds 3
+          if ($launched.HasExited) {
+            throw "Updated telemetry exited during startup with code $($launched.ExitCode)"
+          }
+          Write-UpdateLog "Update completed and telemetry startup remained active"
+          exit 0
+        }
+        catch {
+          Write-UpdateLog "UPDATE FAILED: $($_.Exception.Message)"
+          $BackupExe = "$OldExe.bak"
+          if (Test-Path -LiteralPath $BackupExe -PathType Leaf) {
+            try {
+              Copy-Item -LiteralPath $BackupExe -Destination $OldExe -Force
+              Write-UpdateLog "Restored previous executable"
+            }
+            catch {
+              Write-UpdateLog "Could not restore previous executable: $($_.Exception.Message)"
+            }
+          }
+          try {
+            $fallback = Start-Telemetry $OldExe
+            Write-UpdateLog "Attempted fallback launch PID=$($fallback.Id)"
+          }
+          catch {
+            Write-UpdateLog "Fallback launch failed: $($_.Exception.Message)"
+          }
+          exit 1
+        }
+        """).lstrip()
+
+    @staticmethod
+    def _request_application_exit() -> None:
+        """Ask Qt to close cleanly after the detached installer is running."""
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.quit()
+            return
+        raise SystemExit(0)
+
     # ---------- public API ----------
     def check_for_updates(self) -> bool:
         """Return True if a newer version is available and staged in TUF."""
@@ -178,7 +327,6 @@ class UpdateChecker(QObject):
         except Exception as e:
             self.update_error.emit(str(e))
             return False
-
     def _version_has_bundle(self, version: str) -> bool:
         try:
             base = f"https://github.com/{self.repo_owner}/{self.repo_name}/releases/download/v{version}"
@@ -267,6 +415,15 @@ class UpdateChecker(QObject):
             return False
 
         try:
+            old_exe = self._running_binary_path()
+            if not old_exe:
+                self.update_error.emit("No runnable binary path detected.")
+                return False
+            write_error = self._install_write_error(old_exe)
+            if write_error:
+                self.update_error.emit(write_error)
+                return False
+
             base = f"https://github.com/{self.repo_owner}/{self.repo_name}/releases/download/v{version}"
             # Create a temporary Updater for this tag
             updater = Updater(
@@ -294,14 +451,17 @@ class UpdateChecker(QObject):
                     except Exception:
                         pass
             self._fetcher.set_callback(_emit2)
-            updater.download_target(ti, filepath=bundle_path)
-            self._fetcher.set_callback(None)
+            try:
+                updater.download_target(ti, filepath=bundle_path)
+            finally:
+                self._fetcher.set_callback(None)
 
             # Extract and swap-in (reuse logic)
             extract_dir = tempfile.mkdtemp(prefix="tuf_bundle_")
             try:
                 self._extract_archive(bundle_path, extract_dir)
             except Exception as e:
+                shutil.rmtree(extract_dir, ignore_errors=True)
                 self.update_error.emit(f"Failed to extract bundle: {e}")
                 return False
 
@@ -315,6 +475,7 @@ class UpdateChecker(QObject):
                 if candidate and bundle_root:
                     break
             if not candidate or not bundle_root:
+                shutil.rmtree(extract_dir, ignore_errors=True)
                 self.update_error.emit(f"Bundle did not contain expected binary '{binary_name}'.")
                 return False
 
@@ -326,6 +487,8 @@ class UpdateChecker(QObject):
             except Exception as e:
                 self.update_error.emit(f"Failed staging new bundle: {e}")
                 return False
+            finally:
+                shutil.rmtree(extract_dir, ignore_errors=True)
 
             new_exe_path = os.path.join(staged_root, binary_name)
             if os.name != "nt":
@@ -335,31 +498,47 @@ class UpdateChecker(QObject):
                     self.update_error.emit(f"Failed to make updated binary executable: {e}")
                     return False
 
-            old_exe = self._running_binary_path()
-            if not old_exe:
-                self.update_error.emit("No runnable binary path detected.")
-                return False
-
             if os.name == "nt":
-                bat_path = os.path.join(self.download_dir, "apply_update.bat")
+                script_path = os.path.join(
+                    self.download_dir, "apply_update.ps1"
+                )
                 app_dir = os.path.dirname(old_exe)
-                script = textwrap.dedent(f"""
-                @echo off
-                set NEW_DIR="{staged_root}"
-                set OLD_EXE="{old_exe}"
-                set APP_DIR="{app_dir}"
-                :wait
-                ping 127.0.0.1 -n 2 >nul
-                tasklist /FI "PID eq {os.getpid()}" | findstr /I "{os.getpid()}" >nul && goto wait
-                robocopy %NEW_DIR% %APP_DIR% /E /COPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS >nul
-                if errorlevel 8 echo Robocopy returned %errorlevel%
-                start "" %OLD_EXE%
-                """)
-                with open(bat_path, "w", encoding="utf-8") as f:
-                    f.write(script)
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(self._windows_apply_script())
                 env = os.environ.copy()
-                subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000, env=env)
-                sys.exit(0)
+                subprocess.Popen(
+                    [
+                        "powershell.exe",
+                        "-NoLogo",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        script_path,
+                        "-RunningProcessId",
+                        str(os.getpid()),
+                        "-NewDir",
+                        staged_root,
+                        "-OldExe",
+                        old_exe,
+                        "-AppDir",
+                        app_dir,
+                        "-NewVersion",
+                        version,
+                    ] + sys.argv[1:],
+                    cwd=app_dir,
+                    creationflags=getattr(
+                        subprocess, "CREATE_NO_WINDOW", 0x08000000
+                    ),
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                )
+                self._request_application_exit()
+                return True
             elif sys.platform.startswith("linux"):
                 script_path = os.path.join(self.download_dir, "apply_update.sh")
                 app_dir = os.path.dirname(old_exe)
@@ -452,7 +631,8 @@ class UpdateChecker(QObject):
                     start_new_session=True,
                     close_fds=True,
                 )
-                sys.exit(0)
+                self._request_application_exit()
+                return True
             else:
                 script_path = os.path.join(self.download_dir, "apply_update.sh")
                 app_dir = os.path.dirname(old_exe)
@@ -517,20 +697,9 @@ class UpdateChecker(QObject):
                     start_new_session=True,
                     close_fds=True,
                 )
-                sys.exit(0)
+                self._request_application_exit()
+                return True
 
         except Exception as e:
             self.update_error.emit(str(e))
             return False
-
-    def _extract_archive(self, archive_path: str, dest_dir: str) -> None:
-        """Extract .tar(.gz/.bz2/.xz) or .zip into dest_dir."""
-        p = archive_path.lower()
-        if p.endswith(".zip"):
-            from zipfile import ZipFile
-            with ZipFile(archive_path) as z:
-                z.extractall(dest_dir)
-        else:
-            import tarfile
-            with tarfile.open(archive_path, "r:*") as tf:
-                tf.extractall(path=dest_dir)

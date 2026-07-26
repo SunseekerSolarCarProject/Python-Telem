@@ -129,6 +129,24 @@ class PackagingManifestTests(unittest.TestCase):
         self.assertNotIn("sep: ';'", workflow)
         self.assertEqual(workflow.count("sep: ':'"), 3)
 
+    def test_release_stamps_tag_version_into_every_platform_build(self):
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "- name: Stamp executable version from release tag",
+            workflow,
+        )
+        self.assertNotIn(
+            "- name: Stamp Linux executable version from release tag",
+            workflow,
+        )
+        stamp_step = workflow.split(
+            "- name: Stamp executable version from release tag", 1
+        )[1].split("- name: Build executable", 1)[0]
+        self.assertNotIn("if: matrix.os", stamp_step)
+        self.assertIn('VERSION = "{release_version}"', stamp_step)
+
     def test_release_can_discover_source_modules_without_copying_source_trees(self):
         workflow = (
             REPO_ROOT / ".github" / "workflows" / "release.yml"
