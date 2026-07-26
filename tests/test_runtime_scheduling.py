@@ -1,5 +1,7 @@
 import logging
+import os
 import sys
+import tempfile
 import threading
 import unittest
 from collections import deque
@@ -121,6 +123,104 @@ class RuntimeSchedulingTests(unittest.TestCase):
 
         self.assertEqual(application._battery_rows_pending, 100)
         application._start_battery_auto_retrain_if_ready.assert_called_once_with()
+
+    def test_break_even_retrain_uses_snapshot_outside_csv_lock(self):
+        class TrackingLock:
+            def __init__(self):
+                self.held = False
+
+            def __enter__(self):
+                self.held = True
+                return self
+
+            def __exit__(self, *_args):
+                self.held = False
+
+        with tempfile.TemporaryDirectory() as directory:
+            training_path = str(Path(directory) / "training.csv")
+            Path(training_path).write_text(
+                "header\nvalue\n",
+                encoding="utf-8",
+            )
+            csv_lock = TrackingLock()
+            captured = {}
+
+            def train(snapshot_path, source_path=None):
+                self.assertFalse(csv_lock.held)
+                self.assertNotEqual(snapshot_path, training_path)
+                self.assertTrue(os.path.exists(snapshot_path))
+                self.assertEqual(source_path, training_path)
+                captured["snapshot_path"] = snapshot_path
+                return True
+
+            application = TelemetryApplication.__new__(TelemetryApplication)
+            application.csv_handler = SimpleNamespace(
+                get_training_data_csv_path=lambda: training_path,
+                lock=csv_lock,
+            )
+            application.ml_model = SimpleNamespace(
+                train_break_even_model=train,
+                be_meta={
+                    "row_count": 100,
+                    "validation": {"mae_mph": 1.0},
+                },
+            )
+            application.logger = logging.getLogger(
+                "break-even-snapshot-test"
+            )
+            application._break_even_auto_retrain_lock = threading.Lock()
+            application._break_even_auto_retrain_in_progress = True
+            application._break_even_labels_pending = 0
+            application._break_even_last_retrain_monotonic = None
+            application._start_break_even_auto_retrain_if_ready = Mock()
+
+            TelemetryApplication._auto_retrain_break_even_model(application)
+
+            self.assertFalse(os.path.exists(captured["snapshot_path"]))
+            self.assertFalse(
+                application._break_even_auto_retrain_in_progress
+            )
+            self.assertIsNotNone(
+                application._break_even_last_retrain_monotonic
+            )
+            application._start_break_even_auto_retrain_if_ready.assert_called_once()
+
+    @patch("telemetry_application.time.monotonic", return_value=1000.0)
+    def test_current_break_even_model_uses_long_session_cadence(
+        self,
+        _monotonic,
+    ):
+        application = TelemetryApplication.__new__(TelemetryApplication)
+        application.ml_model = SimpleNamespace(
+            be_meta={"model_version": 3, "row_count": 100},
+            BREAK_EVEN_MODEL_VERSION=3,
+            MIN_BREAK_EVEN_TRAINING_ROWS=20,
+        )
+        application._break_even_auto_retrain_lock = threading.Lock()
+        application._break_even_auto_retrain_in_progress = False
+        application._break_even_labels_pending = 500
+        application.break_even_initial_training_rows = 20
+        application.break_even_auto_retrain_batch_rows = 500
+        application.break_even_auto_retrain_min_interval_seconds = 900
+        application._break_even_last_retrain_monotonic = 500.0
+
+        with patch("telemetry_application.threading.Thread") as worker:
+            TelemetryApplication._start_break_even_auto_retrain_if_ready(
+                application
+            )
+
+        worker.assert_not_called()
+        self.assertEqual(application._break_even_labels_pending, 500)
+
+        application._break_even_last_retrain_monotonic = 100.0
+        with patch("telemetry_application.threading.Thread") as worker:
+            TelemetryApplication._start_break_even_auto_retrain_if_ready(
+                application
+            )
+
+        worker.assert_called_once()
+        worker.return_value.start.assert_called_once()
+        self.assertEqual(application._break_even_labels_pending, 0)
 
 
 if __name__ == "__main__":

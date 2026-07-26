@@ -179,8 +179,9 @@ break-even labels independently:
 
 - after 100 valid battery rows, the battery forest retrains from a locked CSV
   snapshot in a background thread;
-- after 20 new steady-state examples, the break-even forest retrains in a
-  background thread.
+- the first break-even forest trains after 20 valid steady-state examples;
+- after a current break-even model exists, it refreshes after 500 additional
+  valid labels and no more often than once every 15 minutes.
 
 An older battery `.pkl` without current version/row metadata is also scheduled
 for one background refresh after startup. Battery training remains on the
@@ -190,6 +191,13 @@ records the exact features, schema, model version, scikit-learn version, and
 row counts. This is periodic batch learning because scikit-learn random forests
 do not support incremental `partial_fit`; predictions continue using the prior
 model while its replacement trains.
+
+Automatic model training never fits against the live CSV file. The application
+briefly locks CSV output only while copying a consistent temporary snapshot,
+then releases the lock before pandas cleanup and random-forest fitting. The
+replacement model file is written to a temporary artifact and atomically moved
+into place. Live telemetry collection and CSV appends therefore continue while
+the model is rebuilt during a long race session.
 
 Retraining calls:
 

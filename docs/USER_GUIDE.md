@@ -845,9 +845,12 @@ receives a break-even label only while:
 
 This excludes acceleration and braking samples from the road-load curve.
 
-After 20 new valid steady-state labels, the break-even model retrains in a
-background batch. Predictions continue using the prior model until the
-replacement is ready.
+The first break-even model trains after 20 valid steady-state labels. Once a
+current model exists, it refreshes after 500 additional valid labels and no
+more often than once every 15 minutes. The application briefly locks the
+training CSV only to make a consistent temporary snapshot; fitting happens
+from that snapshot without blocking live CSV appends. Predictions continue
+using the prior model until the replacement is atomically installed.
 
 Historical telemetry without IMU data can provide an immediate baseline when
 imported through **Settings > Models > Add Training Data Files**. A legacy row

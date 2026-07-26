@@ -194,8 +194,8 @@ class TelemetryApplication(QObject):
             initial_used_ah=self.used_Ah,
             max_sample_gap_seconds=5.0,
         )
-        # Break-even learning is refreshed in batches so predictions improve
-        # during a drive without fitting a forest on every telemetry row.
+        # ML learning is refreshed in batches so predictions improve during a
+        # drive without fitting a forest on every telemetry row.
         self._battery_auto_retrain_lock = threading.Lock()
         self._battery_auto_retrain_in_progress = False
         self._battery_rows_pending = 0
@@ -203,7 +203,15 @@ class TelemetryApplication(QObject):
         self._break_even_auto_retrain_lock = threading.Lock()
         self._break_even_auto_retrain_in_progress = False
         self._break_even_labels_pending = 0
-        self.break_even_auto_retrain_batch_rows = 20
+        # Build the first usable road-load model promptly. Once one exists,
+        # larger batches and a time floor avoid repeated full-CSV fits during a
+        # 10–12 hour race session.
+        self.break_even_initial_training_rows = (
+            MachineLearningModel.MIN_BREAK_EVEN_TRAINING_ROWS
+        )
+        self.break_even_auto_retrain_batch_rows = 500
+        self.break_even_auto_retrain_min_interval_seconds = 15 * 60
+        self._break_even_last_retrain_monotonic = None
         self.config_data_copy = None  # Initialize to store config data
         self.storage_folder = storage_folder
         self.log_file_path = log_file_path or (os.path.join(self.storage_folder, "telemetry_application.log") if self.storage_folder else None)
@@ -1870,7 +1878,10 @@ class TelemetryApplication(QObject):
             with self.csv_handler.lock:
                 shutil.copyfile(training_path, snapshot_path)
             succeeded = bool(
-                self.ml_model.train_battery_life_model(snapshot_path)
+                self.ml_model.train_battery_life_model(
+                    snapshot_path,
+                    source_path=training_path,
+                )
             )
             if succeeded:
                 metadata = self.ml_model.batt_meta or {}
@@ -1908,15 +1919,43 @@ class TelemetryApplication(QObject):
             self._break_even_labels_pending += 1
         self._start_break_even_auto_retrain_if_ready()
 
+    def _has_current_break_even_model(self):
+        metadata = self.ml_model.be_meta or {}
+        try:
+            row_count = int(metadata.get("row_count") or 0)
+        except (TypeError, ValueError):
+            row_count = 0
+        return (
+            metadata.get("model_version")
+            == self.ml_model.BREAK_EVEN_MODEL_VERSION
+            and row_count >= self.ml_model.MIN_BREAK_EVEN_TRAINING_ROWS
+        )
+
     def _start_break_even_auto_retrain_if_ready(self):
+        model_is_current = self._has_current_break_even_model()
+        required_rows = (
+            self.break_even_auto_retrain_batch_rows
+            if model_is_current
+            else self.break_even_initial_training_rows
+        )
         with self._break_even_auto_retrain_lock:
             if (
                 self._break_even_auto_retrain_in_progress
-                or self._break_even_labels_pending < self.break_even_auto_retrain_batch_rows
+                or self._break_even_labels_pending < required_rows
+            ):
+                return
+            if (
+                model_is_current
+                and self._break_even_last_retrain_monotonic is not None
+                and (
+                    time.monotonic()
+                    - self._break_even_last_retrain_monotonic
+                )
+                < self.break_even_auto_retrain_min_interval_seconds
             ):
                 return
             self._break_even_auto_retrain_in_progress = True
-            self._break_even_labels_pending -= self.break_even_auto_retrain_batch_rows
+            self._break_even_labels_pending -= required_rows
 
         worker = threading.Thread(
             target=self._auto_retrain_break_even_model,
@@ -1926,13 +1965,30 @@ class TelemetryApplication(QObject):
         worker.start()
 
     def _auto_retrain_break_even_model(self):
-        """Fit and atomically replace the break-even model off the GUI thread."""
+        """Fit from a consistent snapshot without blocking live CSV appends."""
         training_path = self.csv_handler.get_training_data_csv_path()
+        snapshot_path = None
         succeeded = False
         try:
-            # Avoid reading a half-written CSV row while telemetry continues.
+            if not training_path or not os.path.exists(training_path):
+                raise FileNotFoundError(
+                    "Active break-even training CSV does not exist."
+                )
+            handle, snapshot_path = tempfile.mkstemp(
+                prefix="break-even-training-",
+                suffix=".csv",
+            )
+            os.close(handle)
+            # Hold the shared CSV lock only for the file copy. The potentially
+            # expensive pandas cleanup and forest fit happen after releasing it.
             with self.csv_handler.lock:
-                succeeded = bool(self.ml_model.train_break_even_model(training_path))
+                shutil.copyfile(training_path, snapshot_path)
+            succeeded = bool(
+                self.ml_model.train_break_even_model(
+                    snapshot_path,
+                    source_path=training_path,
+                )
+            )
             if succeeded:
                 metadata = self.ml_model.be_meta or {}
                 validation = metadata.get("validation") or {}
@@ -1948,11 +2004,20 @@ class TelemetryApplication(QObject):
         except Exception as exc:
             self.logger.error(f"Break-even auto-retrain failed: {exc}")
         finally:
+            if snapshot_path:
+                try:
+                    os.remove(snapshot_path)
+                except OSError:
+                    pass
             with self._break_even_auto_retrain_lock:
-                if not succeeded:
-                    # Preserve the batch count so the next valid label retries.
-                    self._break_even_labels_pending += self.break_even_auto_retrain_batch_rows
+                if succeeded:
+                    self._break_even_last_retrain_monotonic = (
+                        time.monotonic()
+                    )
                 self._break_even_auto_retrain_in_progress = False
+            # A failed batch stays consumed because all of its rows remain in
+            # training_data.csv. Waiting for another complete batch prevents a
+            # bad or insufficient file from launching a fit on every new row.
             if succeeded:
                 self._start_break_even_auto_retrain_if_ready()
 

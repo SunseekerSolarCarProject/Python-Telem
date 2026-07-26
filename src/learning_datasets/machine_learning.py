@@ -363,12 +363,23 @@ class MachineLearningModel:
         }
 
 
-    def train_battery_life_model(self, csv_path: str):
+    def train_battery_life_model(
+        self,
+        csv_path: str,
+        source_path: str | None = None,
+    ):
         """Serialize manual and automatic battery model training runs."""
         with self._training_lock:
-            return self._train_battery_life_model_unlocked(csv_path)
+            return self._train_battery_life_model_unlocked(
+                csv_path,
+                source_path=source_path,
+            )
 
-    def _train_battery_life_model_unlocked(self, csv_path: str):
+    def _train_battery_life_model_unlocked(
+        self,
+        csv_path: str,
+        source_path: str | None = None,
+    ):
         """
         Train a legacy-compatible three-input model, then automatically upgrade
         to current/SOC/capacity inputs once enough complete race rows exist.
@@ -455,7 +466,7 @@ class MachineLearningModel:
             "row_count": int(len(training_rows)),
             "base_valid_row_count": int(len(base_rows)),
             "enhanced_valid_row_count": int(len(enhanced_rows)),
-            "source": os.path.abspath(csv_path),
+            "source": os.path.abspath(source_path or csv_path),
             "model_version": self.BATTERY_MODEL_VERSION,
             "sklearn_version": sklearn_version,
             "features": list(feats),
@@ -618,12 +629,23 @@ class MachineLearningModel:
         ])
 
 
-    def train_break_even_model(self, csv_path: str):
+    def train_break_even_model(
+        self,
+        csv_path: str,
+        source_path: str | None = None,
+    ):
         """Serialize manual and automatic break-even training runs."""
         with self._training_lock:
-            return self._train_break_even_model_unlocked(csv_path)
+            return self._train_break_even_model_unlocked(
+                csv_path,
+                source_path=source_path,
+            )
 
-    def _train_break_even_model_unlocked(self, csv_path: str):
+    def _train_break_even_model_unlocked(
+        self,
+        csv_path: str,
+        source_path: str | None = None,
+    ):
         """
         Train break-even model:
           features = [ 'BreakEven_Power_W', 'BP_PVS_Voltage' ]
@@ -725,10 +747,12 @@ class MachineLearningModel:
                 "legacy_half_weight_rows": legacy_rows,
                 "legacy_weight": self.LEGACY_LABEL_WEIGHT,
             },
-            "source": os.path.abspath(csv_path),
+            "source": os.path.abspath(source_path or csv_path),
             "validation": validation,
         }
-        joblib.dump({"pipeline": candidate_pipe, "meta": meta}, self.be_path)
+        temp_path = f"{self.be_path}.tmp"
+        joblib.dump({"pipeline": candidate_pipe, "meta": meta}, temp_path)
+        os.replace(temp_path, self.be_path)
         with self._model_lock:
             self.be_pipe = candidate_pipe
             self.be_meta.clear()
