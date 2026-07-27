@@ -130,10 +130,29 @@ class DataProcessor:
                 timestamp = timestamp[:-1] + "+00:00"
             parsed = datetime.fromisoformat(timestamp)
             if parsed.tzinfo is None:
-                parsed = parsed.astimezone()
-            local_text = parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-            utc_text = parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            normalized = f"{local_text} / {utc_text}"
+                # A full TL_TIM datetime is the board RTC, whose contract is
+                # UTC. Treating a missing suffix as laptop-local time would
+                # shift the instant whenever the computer changes time zones.
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            utc_time = parsed.astimezone(timezone.utc)
+            iso_timespec = (
+                "microseconds" if utc_time.microsecond else "seconds"
+            )
+            board_text = utc_time.isoformat(
+                timespec=iso_timespec
+            ).replace("+00:00", "Z")
+            local_time = utc_time.astimezone()
+            local_text = local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+            offset = local_time.strftime("%z")
+            offset_text = (
+                f"UTC{offset[:3]}:{offset[3:]}"
+                if offset
+                else "UTC"
+            )
+            normalized = (
+                f"Board RTC: {board_text} | "
+                f"Application: {local_text} ({offset_text})"
+            )
             return f"{normalized} ({status})" if status else normalized
         except ValueError:
             return f"{text} ({status})" if status else text

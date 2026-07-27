@@ -304,8 +304,19 @@ from being recorded as a completed lap.
 device_timestamp = 12:34:56 uptime
 ```
 
-If firmware sends an ISO datetime instead, the app displays it as local time
-plus UTC so the timezone is explicit.
+If firmware sends an ISO datetime instead, `device_timestamp` preserves the
+board RTC as canonical UTC and displays the equivalent application-local time:
+
+```text
+TL_TIM,2026-07-22T16:43:29Z
+device_timestamp = Board RTC: 2026-07-22T16:43:29Z | Application: 2026-07-22 12:43:29 EDT (UTC-04:00)
+```
+
+`Z` means UTC. The local timezone name and offset come from the operating
+system, so daylight-saving changes use EDT/EST (or the corresponding configured
+local zone) instead of a fixed offset. A full board RTC datetime without `Z` or
+another explicit offset is also treated as UTC. The legacy time-only form
+remains uptime rather than a wall-clock timestamp.
 
 New firmware may append the board's millisecond uptime counter and send a
 separate human-readable uptime line:

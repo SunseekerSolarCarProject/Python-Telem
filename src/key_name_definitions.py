@@ -125,7 +125,7 @@ class TelemetryKey(Enum):
     TOTAL_CAPACITY_WH = ("Total_Capacity_Wh", "Wh")
     TOTAL_VOLTAGE = ("Total_Voltage", "V")
     DRIVER = ("Driver", "")
-    DEVICE_TIMESTAMP = ("device_timestamp", "uptime / local time")
+    DEVICE_TIMESTAMP = ("device_timestamp", "board UTC / application local")
     BOARD_UPTIME = ("board_uptime", "d:hh:mm:ss.sss")
     BOARD_UPTIME_MS = ("board_uptime_ms", "ms")
     TIMESTAMP = ("timestamp", "year-Month-day hh:mm:ss")

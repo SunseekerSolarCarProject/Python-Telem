@@ -183,7 +183,7 @@ Values can be numeric, string, empty string, `N/A`, or `null` after JSON sanitiz
 | Field | Unit | Meaning |
 | --- | --- | --- |
 | `timestamp` | local datetime string | App-side timestamp in the combined telemetry fields. |
-| `device_timestamp` | uptime / local time | `TL_TIM` value reported by the telemetry device. Uptime-only values display as `hh:mm:ss uptime`; ISO datetime values display as local time plus UTC. |
+| `device_timestamp` | board UTC / application local | `TL_TIM` value reported by the telemetry device. Uptime-only values display as `hh:mm:ss uptime`; ISO datetimes preserve canonical board UTC and show the OS-timezone local equivalent with its UTC offset. |
 | `board_uptime` | `d:hh:mm:ss.sss` | Human-readable board uptime reported by `TL_UPT` or derived from `TL_TIM`'s `UPTIME_MS`. |
 | `board_uptime_ms` | ms | Raw board uptime counter appended to `TL_TIM` by newer firmware. |
 | `Telemetry_Status` | status | `OK` or `BAD_PACKET`. |

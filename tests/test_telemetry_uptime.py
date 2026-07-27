@@ -17,9 +17,28 @@ class TelemetryUptimeTests(unittest.TestCase):
             "TL_TIM,2026-07-12T12:34:56,UPTIME_MS=123456"
         )
 
-        self.assertIn("2026-07-12", result["device_timestamp"])
+        self.assertIn(
+            "Board RTC: 2026-07-12T12:34:56Z",
+            result["device_timestamp"],
+        )
+        self.assertIn("Application:", result["device_timestamp"])
+        self.assertRegex(
+            result["device_timestamp"],
+            r"\(UTC[+-]\d{2}:\d{2}\)$|\(UTC\)$",
+        )
         self.assertEqual(result["board_uptime_ms"], 123456)
         self.assertEqual(result["board_uptime"], "0:00:02:03.456 uptime")
+
+    def test_explicit_z_device_timestamp_is_preserved_as_utc(self):
+        result = self.processor.parse_data(
+            "TL_TIM,2026-07-22T16:43:29Z"
+        )
+
+        self.assertTrue(
+            result["device_timestamp"].startswith(
+                "Board RTC: 2026-07-22T16:43:29Z | Application: "
+            )
+        )
 
     def test_tl_upt_parses_firmware_day_format(self):
         result = self.processor.parse_data("TL_UPT,12:03:04:05.006")
