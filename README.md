@@ -141,9 +141,11 @@ python src/main_app.py
 - `docs/WEBSITE_INTEGRATION.md` – backend/API handoff contract for website telemetry.
 - `docs/ONLINE_TELEMETRY_SCHEMA.md` – online payload shapes and field dictionary.
 - `docs/TELEMETRY_DB_SETUP.sql` – database table, optional generated columns, and query view.
+- `dev/testing/tests/` – maintained automated tests for application behavior and regressions.
+- `dev/testing/run_tests.py` – test-suite entry point; run it whenever behavior is changed or added.
 
 ### Building & Releases
-1. Run unit/system smoke tests locally (e.g., simulation replay, bundle export/import).  
+1. Run `python dev/testing/run_tests.py`, then complete relevant system smoke tests (e.g., simulation replay, bundle export/import).
 2. Update `Version.py` and changelog.  
 3. Tag the release (`git tag vX.Y.Z`) and push; the GitHub Actions workflow builds Windows/macOS/Linux artifacts via PyInstaller, runs `scripts/build_tuf_repo.py`, and publishes signed assets plus TUF metadata.  
 4. Verify telemetry bundles and updater metadata before announcing.

@@ -1,6 +1,13 @@
 # Website Integration
 
-The telemetry app sends vehicle data to a website through an HTTP API endpoint. It does not upload a `.json` file.
+The telemetry app includes an option intended to supply live vehicle data for
+`sunseekerwmu.org` through the team's own database. This integration is planned
+for the near future; it is not currently configured or in production.
+
+An earlier interim solution sent telemetry through an HTTP API hosted at
+`cagedmotion.com`. References to that domain in this document describe the
+former solution and should not be interpreted as the current production
+configuration for `sunseekerwmu.org`.
 
 ## Required Backend
 
@@ -19,57 +26,54 @@ For the full field dictionary and webpage-facing payload shapes, see
 
 ## Database Options
 
-There are two valid ways to gather and store telemetry data. This website is
-currently using Option 1.
+There are two supported ways to gather and store telemetry data. The
+Sunseeker-owned database path is the planned near-future method for showing live
+information on `sunseekerwmu.org`; it still requires deployment and
+configuration.
 
-### Option 1: IONOS Website Database
+### Option 1: Sunseeker-Owned Database (Planned)
 
-Use this when the telemetry app should send data to `cagedmotion.com` and let
-the website's hosted backend store it.
-
-```text
-Telemetry app
-  -> HTTPS POST to cagedmotion.com ingest API
-  -> IONOS Python CGI backend
-  -> IONOS MariaDB telemetry_events table
-  -> Website/phone app reads public latest endpoint
-```
-
-This is the recommended setup for the current site because IONOS allows code
-running on the hosted webspace to talk to the IONOS MariaDB database. It also
-keeps database credentials off laptops, browsers, and phone apps.
-
-Use these production URLs:
-
-```text
-POST https://cagedmotion.com/ingest-api/run_wsgi.py/telemetry
-GET  https://cagedmotion.com/ingest-api/run_wsgi.py/api/telemetry/latest
-```
-
-Database credentials live only in:
-
-```text
-~/htdocs/ingest-api/.env
-```
-
-The telemetry app only needs the ingest URL and `API_AUTH_TOKEN`. Browser pages
-and phone apps only need the public latest read URL.
-
-### Option 2: Self-Managed Database/API
-
-Use this when you want telemetry data stored somewhere other than IONOS, such
-as a VPS, Raspberry Pi server, cloud VM, Supabase, Railway, Fly.io, AWS, or a
-team-owned backend.
+Use direct database storage when the planned Sunseeker website integration is
+deployed.
 
 ```text
 Telemetry app
-  -> HTTPS POST to your own ingest API
-  -> Your backend
-  -> Your database
-  -> Website/phone app reads your public read endpoint
+  -> Team-owned telemetry database
+  -> Sunseeker website backend reads and prepares the latest data
+  -> sunseekerwmu.org will display live vehicle information
 ```
 
-In this option, the endpoint paths can stay conceptually the same:
+After the database and website backend are available, select the `db` storage
+mode, or `both` during a controlled migration, and configure the
+`TELEMETRY_DB_*` environment variables described in
+`docs/ONLINE_TELEMETRY_SCHEMA.md`. Do not enable this production path until the
+team provides the database connection details. Database credentials must remain
+on the telemetry computer and website backend. They must never be included in
+browser JavaScript.
+
+The public website is:
+
+```text
+https://sunseekerwmu.org
+```
+
+The public website URL is not an ingest or database URL. As part of the planned
+deployment, the website backend should query the team database and publish a
+safe read-only DTO for the live page.
+
+### Option 2: HTTP Ingest API
+
+Use this for development, a future API-based deployment, or another backend
+that accepts telemetry over HTTPS.
+
+```text
+Telemetry app
+  -> HTTPS POST to a configured ingest API
+  -> Backend stores the event
+  -> Website backend reads a public/latest endpoint
+```
+
+Example endpoint shapes are:
 
 ```text
 POST https://your-api.example.com/api/telemetry/ingest
@@ -84,48 +88,56 @@ Your backend should still follow the same contract:
 - Expose a public read endpoint that returns the webpage DTO.
 - Keep database credentials and ingest tokens out of browser JavaScript.
 
-This option is better if you need higher ingest rates, long-term history,
-background workers, analytics, websockets, or more control than IONOS shared
-hosting gives you.
+### Former Interim Solution: cagedmotion.com
 
-## Recommended Flow
+Before the team-owned database method was produced, `cagedmotion.com` hosted an
+IONOS Python CGI/MariaDB solution. Its endpoints were:
+
+```text
+POST https://cagedmotion.com/ingest-api/run_wsgi.py/telemetry
+GET  https://cagedmotion.com/ingest-api/run_wsgi.py/api/telemetry/latest
+```
+
+These URLs are retained only to document the former solution and assist with
+historical troubleshooting. They are not a currently configured source of live
+information for `sunseekerwmu.org`.
+
+## Planned Production Flow
 
 ```text
 Telemetry app
-  POSTs JSON telemetry with an API key
+  writes JSON telemetry to the team-owned database
 
-Backend/API endpoint
-  validates and stores the latest telemetry
+Sunseeker website backend
+  will read the latest telemetry and create a public-safe response
 
-Website JavaScript
-  GETs the latest stored telemetry and updates the map
+sunseekerwmu.org
+  will display the latest vehicle information
 ```
 
-## Recommended Endpoints
+## HTTP Endpoint Pattern (When HTTP Mode Is Used)
 
 ```text
-POST /ingest-api/run_wsgi.py/telemetry
-GET  /ingest-api/run_wsgi.py/api/telemetry/latest
+POST /api/telemetry/ingest
+GET  /api/telemetry/latest
 ```
 
-IONOS runs the backend through Python CGI, so `run_wsgi.py` is part of the
-production URL. Do not point the telemetry app at the website root or a React
-page route.
+The exact paths depend on the selected backend. Do not point the telemetry app
+at the website root or a frontend page route.
 
 Telemetry app settings:
 
 ```text
 Storage mode: http
-Ingest URL: https://cagedmotion.com/ingest-api/run_wsgi.py/telemetry
+Ingest URL: https://your-api.example.com/api/telemetry/ingest
 Payload format: legacy or dual
 Auth mode: auto or X-API-Token
-API token: same value as API_AUTH_TOKEN in ingest-api/.env on the server
+API token: same value as the ingest token on the server
 Require JSON response: enabled
 ```
 
-The API also accepts `/api/telemetry/ingest` and `/ingest` as aliases when
-called through the same CGI base path, but `/telemetry` is the recommended
-production route.
+This is an optional HTTP configuration. The planned direct-database path for
+`sunseekerwmu.org` is not currently configured.
 
 The secret ingest API key should only exist in the Python telemetry app and on the backend. Do not put it in browser JavaScript.
 
@@ -141,9 +153,9 @@ X-API-Token: YOUR_API_KEY
 
 The `auto` auth mode sends all common headers for compatibility.
 
-On IONOS, `Authorization` may not always be forwarded to CGI scripts, so
-`X-API-Token` is the safest single header. The telemetry app's `auto` auth mode
-is preferred because it sends the compatibility headers together.
+The telemetry app's `auto` auth mode sends the compatibility headers together.
+The former IONOS CGI deployment used `X-API-Token` because it did not always
+forward `Authorization`.
 
 ## Legacy Payload
 
@@ -208,7 +220,8 @@ If the app receives HTML, the configured URL probably points to the website fron
 
 ## Database Storage
 
-The website API stores telemetry app uploads in the `telemetry_events` table:
+The planned team-owned database can store telemetry snapshots in the
+`telemetry_events` table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS telemetry_events (
@@ -226,10 +239,11 @@ The full telemetry JSON is saved in `payload`. The scalar columns are copied
 from `payload.timestamp`, `payload.measurement`, `payload.tags.device`, and
 `payload.tags.vehicle_year` for easier filtering.
 
-The browser should read from the public latest endpoint:
+The browser should read through a safe endpoint supplied by the website
+backend, for example:
 
 ```text
-GET https://cagedmotion.com/ingest-api/run_wsgi.py/api/telemetry/latest
+GET /api/telemetry/latest
 ```
 
 That endpoint returns a smaller webpage-friendly object with `position`,
@@ -237,21 +251,22 @@ That endpoint returns a smaller webpage-friendly object with `position`,
 
 ## Reading Telemetry Data
 
-The ingest endpoint is protected, but the latest read endpoint is public:
+The database must remain private. When the planned public latest read endpoint
+is provided by the Sunseeker website backend, its conceptual path is:
 
 ```text
-GET https://cagedmotion.com/ingest-api/run_wsgi.py/api/telemetry/latest
+GET /api/telemetry/latest
 ```
 
-Use this endpoint for:
+The endpoint can then be used for:
 
-- Pages on `cagedmotion.com`
+- Live pages on `sunseekerwmu.org`
 - Other websites/domains that need to display the car position
 - Mobile/phone applications
 - Small dashboards or map displays
 
-No API token is required for reads. Only upload/ingest requests use
-`API_AUTH_TOKEN`.
+Under the planned contract, no API token is required for public reads. Only
+upload/ingest requests use `API_AUTH_TOKEN`.
 
 ### Latest Response Shape
 
@@ -303,9 +318,7 @@ No API token is required for reads. Only upload/ingest requests use
 
 ```js
 async function fetchLatestTelemetry() {
-  const response = await fetch(
-    'https://cagedmotion.com/ingest-api/run_wsgi.py/api/telemetry/latest'
-  );
+  const response = await fetch('/api/telemetry/latest');
 
   if (!response.ok) {
     throw new Error(`Telemetry read failed: ${response.status}`);
@@ -332,23 +345,24 @@ if (latest?.position?.gps_valid && Number.isFinite(lat) && Number.isFinite(lon))
 
 Other domains can call the same public read endpoint with normal HTTPS `GET`
 requests. If a browser on another domain is blocked by CORS, add that domain to
-`ALLOWED_ORIGINS` in `~/htdocs/ingest-api/.env`, or use `ALLOWED_ORIGINS=*` for
-a public read dashboard.
+the website backend's `ALLOWED_ORIGINS` setting. Use `ALLOWED_ORIGINS=*` only
+when the team intentionally wants unrestricted public browser access.
 
 Example:
 
 ```env
-ALLOWED_ORIGINS=https://cagedmotion.com,https://dashboard.example.com
+ALLOWED_ORIGINS=https://sunseekerwmu.org,https://dashboard.example.com
 ```
 
-After changing `.env`, the next CGI request loads the new value.
+Apply the change using the deployment procedure chosen for the future website
+backend.
 
 ### Phone App Example
 
 Phone apps can poll the public read endpoint without the ingest token:
 
 ```text
-GET https://cagedmotion.com/ingest-api/run_wsgi.py/api/telemetry/latest
+GET https://your-api.example.com/api/telemetry/latest
 Accept: application/json
 ```
 
@@ -359,8 +373,8 @@ Map/live UI: every 5-10 seconds
 Background refresh: every 15-30 seconds
 ```
 
-Avoid polling every second from many devices. The site runs on IONOS shared
-hosting, and the endpoint is a Python CGI request.
+Avoid polling every second from many devices. Use a refresh interval appropriate
+for the capacity of the website backend and database.
 
 ### Map Coordinate Rules
 
@@ -386,10 +400,10 @@ If data is stale:
 - Do not jump the marker to `null`, `0,0`, or invalid coordinates.
 - Show `latest.telemetry.error` when `latest.telemetry.status !== 'OK'`.
 
-### Future Read Endpoints
+### Additional Future Read Endpoints
 
-The current read endpoint returns only the latest DTO. Add separate public
-endpoints later if the website or phone app needs:
+The initial planned read endpoint returns only the latest DTO. Add separate
+public endpoints later if the website or phone app needs:
 
 - Last 50 map points
 - Battery history
@@ -398,12 +412,11 @@ endpoints later if the website or phone app needs:
 
 ## Smoke Test
 
-After deployment, test the same path used by the telemetry app:
+For an HTTP-mode deployment, test the same path used by the telemetry app:
 
 ```bash
-cd ~/htdocs/ingest-api
 python3 event_smoke_test.py \
-  --url https://cagedmotion.com/ingest-api/run_wsgi.py \
+  --url https://your-api.example.com \
   --token '<API_AUTH_TOKEN>'
 ```
 

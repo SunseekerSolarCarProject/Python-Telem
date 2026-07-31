@@ -43,6 +43,9 @@ measurement with calibrated equipment.
 - Array power is estimated from the high-voltage DC-bus balance; it is not a
   direct MPPT measurement.
 - GPS distance, lap timing, and route progress depend on a valid GPS fix.
+- Solcast forecasts, telemetry website uploads, uncached map tiles, and update
+  downloads require a working internet connection. Local telemetry display
+  and CSV recording continue without them.
 - Confirm the battery configuration before driving. An incorrect cell count,
   series count, or capacity makes remaining-energy calculations incorrect.
 - Simulated telemetry is visibly marked and is not written into the real CSV
@@ -153,6 +156,8 @@ To create a configuration from the application:
 - Choose **Add New** to add another vehicle year.
 - Solcast API key, latitude, and longitude are optional, but the three fields
   must either all be supplied or all be blank.
+- Solcast also requires an active internet connection. Supplying an API key
+  does not make forecasts available while the computer is offline.
 
 Press **OK** only after the battery preset and serial port are correct.
 
@@ -168,15 +173,17 @@ Use this sequence at the start of an official session:
 6. Wait for **Data age** to remain near zero.
 7. Check the Dashboard for plausible pack voltage, current, SOC, temperatures,
    speed, GPS fix, and telemetry status.
-8. Open **Map > Map setup**.
-9. Select **FSGP Track** or **ASC Route**.
-10. For FSGP, enter official lap length and race-day duration, set the timing
+8. If Solcast, website upload, or live map tiles will be used, confirm that the
+   telemetry computer has working internet access.
+9. Open **Map > Map setup**.
+10. Select **FSGP Track** or **ASC Route**.
+11. For FSGP, enter official lap length and race-day duration, set the timing
     line, then press **Reset Day** immediately before the official session.
-11. For ASC, load the ordered GPX route files and press **Reset Day** at the
+12. For ASC, load the ordered GPX route files and press **Reset Day** at the
     start of the day.
-12. Confirm the current Primary, Raw, and Training CSV locations under
+13. Confirm the current Primary, Raw, and Training CSV locations under
     **Tools > CSV Management**.
-13. Record race notes during the day so they can be included in the final
+14. Record race notes during the day so they can be included in the final
     telemetry bundle.
 
 ## Main Window and Status Header
@@ -206,6 +213,40 @@ On smaller screens, the main window stays within the size selected by the
 operator. Dashboard cards reflow into fewer columns, less important header
 items hide automatically, and wide feature controls scroll inside their own
 tab instead of making the application wider.
+
+### How buttons and controls behave
+
+- A gray button is disabled because a required selection or input is missing.
+  It becomes available when its prerequisite is satisfied.
+- A button ending in `...` or opening a separate window does not apply changes
+  until that window is accepted.
+- A selected toggle remains active until it is pressed again or another mode
+  replaces it. Examples include **Follow**, **Pause**, and timing-line
+  placement.
+- Settings fields do not take effect until **Apply Settings** is pressed.
+- Reset and delete actions affect different scopes. Read the button reference
+  below before using them during an official session.
+- After pressing a button, check the status header, message box, compact race
+  summary, or log for confirmation. If nothing changes, first check whether the
+  button is disabled or whether a required dialog is still open.
+- Start and End buttons when clicked should be across from each other when wanting to do a timing with gps signal.
+
+| Button | What it does | When it is available or important |
+|---|---|---|
+| **Map setup** | Opens or closes race mode, timing-line, location, and reset controls. | Always available on the Map tab. |
+| **Race details** | Opens or closes the full route, lap, distance, projection, and tile status. | Always available on the Map tab. |
+| **Load GPX** | Loads one or more local GPX files in travel order. | Always available; GPX loading itself does not require internet. |
+| **Stops & Closing Times** | Opens ASC checkpoint selection, planned stops, and official closing times. | Enabled only in **ASC Route** after a GPX route is loaded. |
+| **Set Start** | Arms placement of the first timing-line endpoint. Double-click the map to place it; pressing the button again cancels placement. | Shown for **FSGP Track**. |
+| **Set End** | Arms placement of the second timing-line endpoint. Double-click the map to place it. | Shown for **FSGP Track**; use it after placing the start point. |
+| **Reset Laps** | Clears completed and current lap results but keeps the timing line. | Use before a new FSGP session when trip/day values should remain. |
+| **Reset Trip** | Clears GPS trip distance, day speed statistics, and ASC route progress; it does not clear completed laps. | Shown for **ASC Route**. |
+| **Reset Day** | Clears trip/day statistics, route progress, and lap results while keeping the timing line. | Use immediately before an official daily start. |
+| **Follow** | Re-centers the map on the latest valid vehicle GPS position and keeps following it. | Requires a valid GPS position, but not internet. |
+| **Refresh Ports** | Rescans serial and virtual serial ports. | Use after connecting or moving the telemetry device. |
+| **Apply Settings** | Validates, saves, and activates connection, display, API, and Solcast changes. | Required after editing Settings. |
+| **Refresh** under Updates | Requests the available application-version list. | Requires internet access. |
+| **Install Selected** | Downloads and installs the selected signed release. | Requires internet access and a selected version. |
 
 ## Dashboard
 
@@ -271,11 +312,18 @@ The alert list summarizes active:
 - invalid GPS;
 - invalid or uncalibrated IMU data;
 - malformed telemetry packets;
-- machine-learning quality warnings.
+- machine-learning quality warnings;
+- failed Solcast requests when Solcast is configured;
+- failed telemetry website uploads when HTTP upload is configured.
 - a low or unavailable ASC route-energy forecast.
 
 **No active alerts** means the application has not identified a current
 problem. It is not a substitute for the vehicle's safety checks.
+
+Online-service alerts appear only after an attempted request fails. They remain
+hidden while the service is unconfigured, waiting for its first request, or
+working normally. A later successful request removes the corresponding alert
+automatically.
 
 ## Graphs
 
@@ -358,6 +406,9 @@ progress, lap timing, distance, and race-day averages.
 - Expand **Map setup** for controls.
 - Expand **Race details** for full lap, distance, route, and tile status.
 - The compact race summary remains visible while both drawers are collapsed.
+- Selecting **FSGP Track** shows only timing-line, official lap length, and
+  race-day duration controls. Selecting **ASC Route** shows only GPX route
+  speed, checkpoint-stop, and minimum-arrival-SOC controls.
 - On a narrow screen, swipe or use the horizontal scrollbar inside a long
   **Map setup** row. Race details and setup options scroll vertically within
   their drawers. Opening either drawer does not enlarge the application window.
@@ -671,10 +722,15 @@ The Telemetry Website/API section controls:
 - optional API key;
 - HTTP/database/both storage mode;
 - authentication header style;
-- legacy, IONOS, or dual payload format;
+- database/legacy, former IONOS compatibility, or dual payload format;
 - whether a JSON response is required;
 - session ID;
 - vehicle identifier.
+
+The direct database option is available in the application for the planned
+`sunseekerwmu.org` live-information integration, but that production connection
+is not currently configured. Enable it only after the team supplies the future
+database connection details.
 
 The ingest URL must start with `http://` or `https://`.
 
@@ -682,6 +738,48 @@ The Solcast section controls the API key and fallback coordinates. Enable
 **Follow valid vehicle GPS every 5 minutes** to use the newest valid GPS
 position for each weather poll. The manually configured location remains the
 fallback.
+
+The telemetry website API key and Solcast API key are separate credentials.
+Do not put the Solcast key in the website API field or the website key in the
+Solcast field.
+
+#### Configure telemetry website upload
+
+1. Connect the computer to the internet.
+2. Open **Settings > API & Solar**.
+3. Enter the complete **Ingest URL**, including `https://` when required.
+4. Enter the website **API Key** if the server requires one.
+5. Choose the storage mode, authentication style, and payload format required
+   by the team server.
+6. Enter a session ID and vehicle override only when the receiving system
+   expects them.
+7. Press **Apply Settings**.
+8. Check the application log for a successful HTTP status or a specific
+   connection/authentication error.
+
+Leaving the ingest URL blank disables HTTP upload. A failed upload does not
+stop the local display or CSV recording.
+
+#### Configure Solcast
+
+1. Obtain a valid Solcast API key for the team account.
+2. Connect the computer to the internet.
+3. Open **Settings > API & Solar**.
+4. Enter the **Solcast API Key**.
+5. Enter numeric fallback **Latitude** and **Longitude** values. All three
+   Solcast fields must be filled, or all three must be blank.
+6. Leave **Follow valid vehicle GPS every 5 minutes** enabled for a moving
+   vehicle. Disable it only when forecasts should remain at the fallback
+   coordinates.
+7. Press **Apply Settings**. Applying the settings starts an initial request
+   and schedules later polls every five minutes.
+8. Open the Data tab and inspect the **Solar Data (Live)** and forecast groups.
+   A changing fetched-at time confirms that new responses are arriving.
+
+If the computer is offline, the API key is rejected, or the service cannot be
+reached, new Solcast values will not arrive. Existing cached ASC route
+forecasts may be used until they expire, and local vehicle telemetry continues
+normally.
 
 ### Models
 
@@ -895,6 +993,22 @@ validation details.
 
 ## Weather and Online Telemetry
 
+### Internet requirements at a glance
+
+| Feature | Internet required? | Behavior without internet |
+|---|---|---|
+| Live serial telemetry, Dashboard, Graphs, Data, and CSV recording | No | Operates normally from the vehicle connection. |
+| FSGP timing, GPS distance, and loaded GPX route calculations | No | Operates normally when valid GPS telemetry is available. |
+| GPX loading and saved locations | No | Local files and saved coordinates remain available. |
+| OpenStreetMap background tiles | Yes, unless cached | The map can appear gray, but markers and race calculations continue. |
+| Solcast live weather and new forecasts | Yes | No new weather response; cached route forecasts may remain temporarily. |
+| Telemetry website/API upload | Yes | Local display and CSV recording continue; the failure is logged. |
+| Update version list and installation download | Yes | Refresh/install cannot complete until connectivity returns. |
+
+Internet access and API credentials solve different problems: the connection
+must be working, the correct service URL must be reachable, and the credential
+must be valid. Having only one or two of those is not enough.
+
 ### Solcast
 
 With valid credentials and coordinates, Solcast data is polled every five
@@ -903,6 +1017,9 @@ minutes. The live telemetry stream can include current weather plus 30-minute,
 
 If GPS following is enabled, each poll uses the newest valid vehicle position.
 If GPS is invalid, the configured coordinates are used.
+
+Solcast does not supply vehicle GPS. It uses either the GPS position already
+received from the car or the fallback coordinates entered in Settings.
 
 ### Online telemetry
 
@@ -914,6 +1031,24 @@ Check the ingest URL, network, authentication mode, payload format, and server
 response settings when uploads fail.
 
 Do not place API keys in exported notes, screenshots, or public issue reports.
+
+### Checking an online connection
+
+When an online feature is not updating:
+
+1. Confirm the computer can reach the internet through its current Wi-Fi,
+   Ethernet, or cellular connection.
+2. Confirm the computer date, time, and time zone are correct; incorrect clocks
+   can break HTTPS and make forecast times misleading.
+3. Check that a firewall, captive portal, VPN, or proxy is not blocking the
+   application.
+4. Confirm the correct URL and service-specific API key are entered.
+5. Press **Apply Settings** after correcting API or Solcast fields.
+6. Inspect the application log for DNS, timeout, HTTP status, authentication,
+   or invalid-response errors.
+
+The application performs online work in the background. A slow or failed
+request should not freeze local telemetry or stop CSV recording.
 
 ## End-of-Day Procedure
 

@@ -30,6 +30,7 @@ Use this page as the handoff map for a new maintainer.
 | Debug HTTP/database telemetry | `docs/WEBSITE_INTEGRATION.md`, `docs/ONLINE_TELEMETRY_SCHEMA.md`, `docs/TELEMETRY_DB_SETUP.sql` |
 | Work on predictions | `docs/MACHINE_LEARNING.md`, then `src/learning_datasets/`, `src/telemetry_application.py` |
 | Work on simulation | `src/simulation.py`, Simulation section in `README.md` |
+| Add or run automated tests | `dev/testing/README.md`, then `dev/testing/tests/` |
 
 ## Runtime Data Flow
 
@@ -53,3 +54,4 @@ or send online telemetry.
 - Keep GUI classes focused on display and user input. Put application actions in `TelemetryApplication` or a service module.
 - Local CSV can be high rate. Online HTTP/database ingest is throttled by `TELEMETRY_ONLINE_SEND_INTERVAL_SECONDS`, default `5`.
 - Website/browser code should read from a public backend endpoint, not directly from the protected ingest endpoint.
+- Add focused or regression tests under `dev/testing/tests/` for new behavior and bug fixes; run them with `python dev/testing/run_tests.py`.

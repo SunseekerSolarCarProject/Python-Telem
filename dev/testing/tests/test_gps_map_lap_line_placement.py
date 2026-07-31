@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 try:
     from PyQt6.QtCore import QDateTime, QPoint, Qt
@@ -63,6 +63,21 @@ class GPSMapLapLinePlacementTests(unittest.TestCase):
         self.assertEqual(changed_modes, [self.tab.RACE_MODE_ASC])
         self.assertFalse(self.tab.track_length_input.isEnabled())
         self.assertTrue(self.tab.asc_plan_speed_input.isEnabled())
+        self.assertTrue(self.tab.fsgp_options_widget.isHidden())
+        self.assertFalse(self.tab.asc_options_widget.isHidden())
+        self.assertIn("load the GPX route", self.tab.race_mode_guidance_label.text())
+
+    def test_selected_race_mode_shows_only_its_relevant_setup(self):
+        self.tab.set_race_mode(self.tab.RACE_MODE_FSGP)
+
+        self.assertFalse(self.tab.fsgp_options_widget.isHidden())
+        self.assertTrue(self.tab.asc_options_widget.isHidden())
+        self.assertIn("click Set Start", self.tab.race_mode_guidance_label.text())
+        self.assertTrue(
+            self.tab.fsgp_options_widget.isAncestorOf(
+                self.tab.set_lap_start_button
+            )
+        )
 
     def test_start_and_end_are_placed_from_scene_coordinates(self):
         center_x, center_y = self._scene_center()

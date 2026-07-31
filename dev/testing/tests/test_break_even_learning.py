@@ -6,7 +6,7 @@ import sys
 import pandas as pd
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from learning_datasets.machine_learning import MachineLearningModel
 from buffer_data import BufferData

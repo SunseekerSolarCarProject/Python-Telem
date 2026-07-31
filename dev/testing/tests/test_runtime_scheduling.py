@@ -7,10 +7,10 @@ import unittest
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from telemetry_application import TelemetryApplication
@@ -104,6 +104,46 @@ class RuntimeSchedulingTests(unittest.TestCase):
             TelemetryApplication.fetch_solcast_data(application)
 
         worker.assert_not_called()
+
+    def test_online_status_only_emits_when_service_state_changes(self):
+        application = SimpleNamespace(
+            _online_status_lock=threading.Lock(),
+            _online_status={
+                "solcast": ("disabled", ""),
+                "telemetry_upload": ("disabled", ""),
+            },
+            online_status_signal=SimpleNamespace(emit=Mock()),
+        )
+
+        TelemetryApplication._publish_online_status(
+            application,
+            "solcast",
+            "error",
+            "Connection timed out.",
+        )
+        TelemetryApplication._publish_online_status(
+            application,
+            "solcast",
+            "error",
+            "Connection timed out.",
+        )
+        TelemetryApplication._publish_online_status(
+            application,
+            "solcast",
+            "healthy",
+        )
+
+        self.assertEqual(
+            application.online_status_signal.emit.call_args_list,
+            [
+                call(
+                    "solcast",
+                    "error",
+                    "Connection timed out.",
+                ),
+                call("solcast", "healthy", ""),
+            ],
+        )
 
     def test_legacy_battery_model_schedules_background_refresh(self):
         application = TelemetryApplication.__new__(TelemetryApplication)

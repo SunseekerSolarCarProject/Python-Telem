@@ -93,6 +93,7 @@ class DashboardTab(QWidget):
         self.connection = "Starting"
         self.speed_source = self.SPEED_SOURCE_NAV
         self.race_mode = self.RACE_MODE_FSGP
+        self.online_service_status = {}
         self._init_ui()
 
     def _init_ui(self):
@@ -252,6 +253,20 @@ class DashboardTab(QWidget):
 
     def set_connection_status(self, status):
         self.connection = status or "Unknown"
+
+    def set_online_service_status(self, service, state, detail=""):
+        """Refresh conditional network alerts reported by background workers."""
+        service = str(service or "").strip().lower()
+        if service not in {"solcast", "telemetry_upload"}:
+            return
+        new_status = (
+            str(state or "").strip().lower(),
+            str(detail or "").strip(),
+        )
+        if self.online_service_status.get(service) == new_status:
+            return
+        self.online_service_status[service] = new_status
+        self._update_alerts(self.last_telemetry_data)
 
     def update_data(self, telemetry_data):
         self.last_telemetry_data = telemetry_data.copy()
@@ -513,6 +528,30 @@ class DashboardTab(QWidget):
         quality = str(telemetry_data.get(TelemetryKey.PREDICTION_QUALITY_FLAGS.value[0], "")).strip()
         if quality and quality.lower() not in ("0", "none", "ok", "n/a"):
             alerts.append(f"Prediction quality: {quality}")
+
+        solcast_state, solcast_detail = self.online_service_status.get(
+            "solcast", ("disabled", "")
+        )
+        if solcast_state == "error":
+            message = (
+                "Solcast connection failed — check the internet connection "
+                "and Solcast API settings."
+            )
+            if solcast_detail:
+                message += f" {solcast_detail}"
+            alerts.append(message)
+
+        upload_state, upload_detail = self.online_service_status.get(
+            "telemetry_upload", ("disabled", "")
+        )
+        if upload_state == "error":
+            message = (
+                "Telemetry upload failed — local recording is still active. "
+                "Check the internet connection and website/API settings."
+            )
+            if upload_detail:
+                message += f" {upload_detail}"
+            alerts.append(message)
 
         if self.race_mode == self.RACE_MODE_ASC:
             confidence = str(

@@ -17,6 +17,11 @@ The app supports three storage modes:
 | `db` | Insert JSON directly into the configured MariaDB/MySQL table. |
 | `both` | Do both. |
 
+The direct `db` path is intended for a near-future integration that will supply
+live information to `sunseekerwmu.org`. That production integration is not yet
+configured. The older HTTP deployment at `cagedmotion.com` was the preceding
+solution and is retained only for historical compatibility.
+
 ## Direct Database Table
 
 When direct database storage is enabled, the app writes to `telemetry_events` by default.
@@ -93,6 +98,10 @@ Same as the database payload:
 ```
 
 ### `ionos`
+
+Compatibility shape for the former `cagedmotion.com`/IONOS interim
+deployment. It is retained for older receivers and is not the format planned
+for the future `sunseekerwmu.org` database integration.
 
 ```json
 {

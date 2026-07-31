@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from updater.update_checker import UpdateChecker

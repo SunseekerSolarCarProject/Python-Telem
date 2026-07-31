@@ -350,29 +350,6 @@ class GPSMapTab(QWidget):
         delete_location_button.clicked.connect(self._delete_saved_location)
         saved_row.addWidget(delete_location_button)
 
-        route_row = QHBoxLayout()
-        self.set_lap_start_button = QPushButton("Set Start")
-        self.set_lap_start_button.setToolTip("Click, then double-click the first end of the timing line on the map.")
-        self.set_lap_start_button.clicked.connect(self._set_lap_start)
-        route_row.addWidget(self.set_lap_start_button)
-        self.set_lap_end_button = QPushButton("Set End")
-        self.set_lap_end_button.setToolTip("Click, then double-click the other end of the timing line on the map.")
-        self.set_lap_end_button.clicked.connect(self._set_lap_end)
-        route_row.addWidget(self.set_lap_end_button)
-        reset_laps_button = QPushButton("Reset Laps")
-        reset_laps_button.clicked.connect(self._reset_laps)
-        route_row.addWidget(reset_laps_button)
-        self.follow_vehicle_checkbox = QCheckBox("Follow vehicle")
-        self.follow_vehicle_checkbox.setChecked(True)
-        self.follow_vehicle_checkbox.setToolTip(
-            "Keep the vehicle centered. Drag or wheel-zoom the map to browse manually."
-        )
-        self.follow_vehicle_checkbox.toggled.connect(
-            self._follow_vehicle_changed
-        )
-        route_row.addWidget(self.follow_vehicle_checkbox)
-        route_row.addStretch()
-
         race_row = QHBoxLayout()
         race_row.addWidget(QLabel("Race mode:"))
         self.race_mode_combo = QComboBox()
@@ -383,7 +360,24 @@ class GPSMapTab(QWidget):
         )
         self.race_mode_combo.currentTextChanged.connect(self._race_mode_changed)
         race_row.addWidget(self.race_mode_combo)
-        race_row.addWidget(QLabel("Official lap length:"))
+
+        self.fsgp_options_widget = QWidget()
+        fsgp_options = QHBoxLayout(self.fsgp_options_widget)
+        fsgp_options.setContentsMargins(0, 0, 0, 0)
+        fsgp_options.setSpacing(6)
+        fsgp_options.addWidget(QLabel("Timing line:"))
+        self.set_lap_start_button = QPushButton("Set Start")
+        self.set_lap_start_button.setToolTip("Click, then double-click the first end of the timing line on the map.")
+        self.set_lap_start_button.clicked.connect(self._set_lap_start)
+        fsgp_options.addWidget(self.set_lap_start_button)
+        self.set_lap_end_button = QPushButton("Set End")
+        self.set_lap_end_button.setToolTip("Click, then double-click the other end of the timing line on the map.")
+        self.set_lap_end_button.clicked.connect(self._set_lap_end)
+        fsgp_options.addWidget(self.set_lap_end_button)
+        reset_laps_button = QPushButton("Reset Laps")
+        reset_laps_button.clicked.connect(self._reset_laps)
+        fsgp_options.addWidget(reset_laps_button)
+        fsgp_options.addWidget(QLabel("Official lap length:"))
         self.track_length_input = QDoubleSpinBox()
         self.track_length_input.setDecimals(3)
         self.track_length_input.setRange(0.0, 100.0)
@@ -396,8 +390,8 @@ class GPSMapTab(QWidget):
         )
         self.track_length_input.setEnabled(self.race_mode == self.RACE_MODE_FSGP)
         self.track_length_input.valueChanged.connect(self._track_length_changed)
-        race_row.addWidget(self.track_length_input)
-        race_row.addWidget(QLabel("Race-day duration:"))
+        fsgp_options.addWidget(self.track_length_input)
+        fsgp_options.addWidget(QLabel("Race-day duration:"))
         self.day_duration_input = QDoubleSpinBox()
         self.day_duration_input.setDecimals(1)
         self.day_duration_input.setRange(0.0, 24.0)
@@ -410,8 +404,14 @@ class GPSMapTab(QWidget):
         )
         self.day_duration_input.setEnabled(self.race_mode == self.RACE_MODE_FSGP)
         self.day_duration_input.valueChanged.connect(self._day_duration_changed)
-        race_row.addWidget(self.day_duration_input)
-        race_row.addWidget(QLabel("ASC plan speed:"))
+        fsgp_options.addWidget(self.day_duration_input)
+        race_row.addWidget(self.fsgp_options_widget)
+
+        self.asc_options_widget = QWidget()
+        asc_options = QHBoxLayout(self.asc_options_widget)
+        asc_options.setContentsMargins(0, 0, 0, 0)
+        asc_options.setSpacing(6)
+        asc_options.addWidget(QLabel("Planned road speed:"))
         self.asc_plan_speed_input = QDoubleSpinBox()
         self.asc_plan_speed_input.setDecimals(1)
         self.asc_plan_speed_input.setRange(5.0, 80.0)
@@ -427,8 +427,8 @@ class GPSMapTab(QWidget):
         self.asc_plan_speed_input.valueChanged.connect(
             self._asc_plan_speed_changed
         )
-        race_row.addWidget(self.asc_plan_speed_input)
-        race_row.addWidget(QLabel("Checkpoint stop:"))
+        asc_options.addWidget(self.asc_plan_speed_input)
+        asc_options.addWidget(QLabel("Default checkpoint stop:"))
         self.asc_checkpoint_stop_input = QDoubleSpinBox()
         self.asc_checkpoint_stop_input.setDecimals(0)
         self.asc_checkpoint_stop_input.setRange(0.0, 180.0)
@@ -447,8 +447,8 @@ class GPSMapTab(QWidget):
         self.asc_checkpoint_stop_input.valueChanged.connect(
             self._asc_checkpoint_stop_changed
         )
-        race_row.addWidget(self.asc_checkpoint_stop_input)
-        race_row.addWidget(QLabel("Minimum arrival SOC:"))
+        asc_options.addWidget(self.asc_checkpoint_stop_input)
+        asc_options.addWidget(QLabel("Minimum arrival SOC:"))
         self.asc_minimum_soc_input = QDoubleSpinBox()
         self.asc_minimum_soc_input.setDecimals(0)
         self.asc_minimum_soc_input.setRange(0.0, 100.0)
@@ -468,21 +468,45 @@ class GPSMapTab(QWidget):
         self.asc_minimum_soc_input.valueChanged.connect(
             self._asc_minimum_soc_changed
         )
-        race_row.addWidget(self.asc_minimum_soc_input)
+        asc_options.addWidget(self.asc_minimum_soc_input)
         reset_trip_button = QPushButton("Reset Trip")
         reset_trip_button.setToolTip("Reset GPS trip distance and ASC route progress.")
         reset_trip_button.clicked.connect(self._reset_trip)
-        race_row.addWidget(reset_trip_button)
+        asc_options.addWidget(reset_trip_button)
+        race_row.addWidget(self.asc_options_widget)
+        race_row.addStretch()
+
+        guidance_row = QHBoxLayout()
+        self.race_mode_guidance_label = QLabel()
+        self.race_mode_guidance_label.setWordWrap(True)
+        self.race_mode_guidance_label.setMinimumWidth(0)
+        self.race_mode_guidance_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        guidance_row.addWidget(self.race_mode_guidance_label, 1)
+
+        route_row = QHBoxLayout()
+        self.follow_vehicle_checkbox = QCheckBox("Follow vehicle")
+        self.follow_vehicle_checkbox.setChecked(True)
+        self.follow_vehicle_checkbox.setToolTip(
+            "Keep the vehicle centered. Drag or wheel-zoom the map to browse manually."
+        )
+        self.follow_vehicle_checkbox.toggled.connect(
+            self._follow_vehicle_changed
+        )
+        route_row.addWidget(self.follow_vehicle_checkbox)
         reset_day_button = QPushButton("Reset Day")
         reset_day_button.setToolTip("Reset trip, daily speed statistics, route progress, and lap results.")
         reset_day_button.clicked.connect(self._reset_day)
-        race_row.addWidget(reset_day_button)
-        race_row.addStretch()
+        route_row.addWidget(reset_day_button)
+        route_row.addStretch()
 
         self.setup_row_scrollers = [
+            self._make_scrollable_setup_row(race_row),
+            self._make_scrollable_setup_row(guidance_row),
             self._make_scrollable_setup_row(location_row),
             self._make_scrollable_setup_row(saved_row),
-            self._make_scrollable_setup_row(race_row),
             self._make_scrollable_setup_row(route_row),
         ]
         for row, row_scroller in enumerate(self.setup_row_scrollers):
@@ -493,6 +517,7 @@ class GPSMapTab(QWidget):
         layout.addWidget(self.setup_panel)
         self.setup_panel.setVisible(False)
         self._refresh_saved_locations_dropdown()
+        self._update_race_mode_controls()
 
         self.compact_summary_label = QLabel("Race summary: waiting for telemetry")
         self.compact_summary_label.setObjectName("mapCompactSummary")
@@ -967,6 +992,7 @@ class GPSMapTab(QWidget):
         self.asc_schedule_button.setEnabled(
             mode == self.RACE_MODE_ASC and bool(self.route_segments)
         )
+        self._update_race_mode_controls()
         if mode != previous_mode:
             # Completed laps remain available, but a partial circuit cannot be
             # meaningfully resumed after operating in point-to-point mode.
@@ -986,13 +1012,34 @@ class GPSMapTab(QWidget):
         if mode != previous_mode:
             self.race_mode_changed.emit(mode)
 
+    def _update_race_mode_controls(self):
+        """Show only the setup fields that apply to the selected race mode."""
+        is_fsgp = self.race_mode == self.RACE_MODE_FSGP
+        self.fsgp_options_widget.setVisible(is_fsgp)
+        self.asc_options_widget.setVisible(not is_fsgp)
+        if is_fsgp:
+            self.race_mode_guidance_label.setText(
+                "FSGP lap setup: click Set Start, then double-click one end "
+                "of the start/finish line on the map. Click Set End and "
+                "double-click its other end. Enter the official lap length "
+                "(or leave Use GPS) and the scheduled driving hours."
+            )
+        else:
+            self.race_mode_guidance_label.setText(
+                "ASC route setup: load the GPX route, then enter the expected "
+                "overall road speed, default minutes stopped at checkpoints, "
+                "and the minimum battery state of charge required on arrival."
+            )
+
     def set_race_mode(self, mode):
         """Set the shared Dashboard/Map race mode through the normal UI path."""
         if mode not in {self.RACE_MODE_FSGP, self.RACE_MODE_ASC}:
             return False
         if self.race_mode_combo.currentText() != mode:
             self.race_mode_combo.setCurrentText(mode)
-        elif self.race_mode != mode:
+        else:
+            # Also resynchronize contextual widgets if a caller restored the
+            # underlying mode before updating the visible controls.
             self._race_mode_changed(mode)
         return True
 

@@ -108,6 +108,7 @@ class TelemetryApplication(QObject):
 
     update_data_signal = pyqtSignal(dict)  # Emits enriched telemetry snapshots to GUI/buffer listeners.
     training_complete_signal = pyqtSignal(object)  # Emits None on success or an exception-like object on failure.
+    online_status_signal = pyqtSignal(str, str, str)
 
     def __init__(self, baudrate=9600, buffer_timeout=2.0, buffer_size=20,
                  log_level=logging.INFO, app=None, storage_folder=None, log_file_path=None):
@@ -188,6 +189,11 @@ class TelemetryApplication(QObject):
         self._pending_online_send = None
         self._solcast_fetch_lock = threading.Lock()
         self._solcast_fetch_in_progress = False
+        self._online_status_lock = threading.Lock()
+        self._online_status = {
+            "solcast": ("disabled", ""),
+            "telemetry_upload": ("disabled", ""),
+        }
         self.signals_connected = False
         self.used_Ah = 0
         self.shunt_integrator = AmpHourIntegrator(
@@ -676,7 +682,9 @@ class TelemetryApplication(QObject):
 
         if not all((self.solcast_key, self.solcast_lat, self.solcast_lon)):
             self.logger.warning("Missing Solcast configuration; skipping solar data fetch.")
+            self._publish_online_status("solcast", "disabled")
             return
+        self._publish_online_status("solcast", "waiting")
 
         if hasattr(self, 'solcast_timer') and self.solcast_timer is not None:
             # Settings can be changed while the app is running; stop the old
@@ -741,6 +749,14 @@ class TelemetryApplication(QObject):
                 self.gui.settings_tab.solcast_config_changed.connect(self.on_solcast_config_changed)
             if hasattr(self.gui.settings_tab, 'telemetry_ingestion_config_changed'):
                 self.gui.settings_tab.telemetry_ingestion_config_changed.connect(self.on_telemetry_ingestion_config_changed)
+            if hasattr(self.gui, "dashboard_tab"):
+                self.online_status_signal.connect(
+                    self.gui.dashboard_tab.set_online_service_status
+                )
+                for service, (state, detail) in self._online_status.items():
+                    self.online_status_signal.emit(
+                        service, state, detail
+                    )
             if (
                 hasattr(self.gui, "gps_map_tab")
                 and hasattr(self.gui.gps_map_tab, "asc_route_changed")
@@ -755,6 +771,41 @@ class TelemetryApplication(QObject):
                 self._refresh_legacy_battery_model_if_needed,
             )
             self.logger.debug("Connected GUI signals.")
+
+    def _publish_online_status(self, service, state, detail=""):
+        """Publish a service state only when it changes."""
+        service = str(service or "").strip().lower()
+        state = str(state or "").strip().lower()
+        detail = " ".join(str(detail or "").split())
+        if len(detail) > 220:
+            detail = detail[:217] + "..."
+        status = (state, detail)
+        with self._online_status_lock:
+            if self._online_status.get(service) == status:
+                return
+            self._online_status[service] = status
+        self.online_status_signal.emit(service, state, detail)
+
+    @staticmethod
+    def _online_error_summary(error):
+        """Return a useful network error without exposing endpoint secrets."""
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code is not None:
+            return f"Service returned HTTP {status_code}."
+        if isinstance(error, requests.exceptions.Timeout):
+            return "Request timed out."
+        if isinstance(error, requests.exceptions.ConnectionError):
+            return "Could not reach the service."
+        text = " ".join(str(error or "").split())
+        if text.startswith(
+            (
+                "Unexpected content type",
+                "Ingest endpoint returned HTML",
+            )
+        ):
+            return text
+        return f"{type(error).__name__}."
 
     def send_telemetry_data_to_server_async(self, data, device_tag="device1"):
         """Queue a bounded latest-value remote send off the GUI thread."""
@@ -790,6 +841,11 @@ class TelemetryApplication(QObject):
                 self.send_telemetry_data_to_server(data, device_tag)
             except Exception as exc:
                 self.logger.error("Unexpected online telemetry worker error: %s", exc)
+                self._publish_online_status(
+                    "telemetry_upload",
+                    "error",
+                    self._online_error_summary(exc),
+                )
 
             with self._online_send_lock:
                 current = self._pending_online_send
@@ -904,6 +960,7 @@ class TelemetryApplication(QObject):
             api_url = (self.telemetry_ingestion_api_url or API_URL).strip()
             if not api_url:
                 self.logger.debug("Telemetry ingestion URL is empty; skipping HTTP send.")
+                self._publish_online_status("telemetry_upload", "disabled")
                 return False
             response = requests.post(api_url, json=safe_payload, headers=headers, timeout=5)
             response.raise_for_status()
@@ -927,9 +984,15 @@ class TelemetryApplication(QObject):
                 )
 
             self.logger.info("Telemetry data sent successfully (HTTP %s).", response.status_code)
+            self._publish_online_status("telemetry_upload", "healthy")
             return True
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Failed to send telemetry data: {e}")
+            self._publish_online_status(
+                "telemetry_upload",
+                "error",
+                self._online_error_summary(e),
+            )
             return False
 
     def send_telemetry_data_to_server(self, data, device_tag="device1"):
@@ -1322,8 +1385,14 @@ class TelemetryApplication(QObject):
                 query_lon,
                 source,
             )
+            self._publish_online_status("solcast", "healthy")
         except Exception as e:
             self.logger.error(f"Solcast fetch failed: {e}")
+            self._publish_online_status(
+                "solcast",
+                "error",
+                self._online_error_summary(e),
+            )
         finally:
             with self._solcast_fetch_lock:
                 self._solcast_fetch_in_progress = False
@@ -1442,6 +1511,13 @@ class TelemetryApplication(QObject):
         self.telemetry_ingestion_vehicle = settings.telemetry_ingestion_vehicle
         self.telemetry_ingestion_expect_json = settings.telemetry_ingestion_expect_json
         self.storage_mode = settings.telemetry_storage_mode
+        http_enabled = self.storage_mode in ("http", "api", "both")
+        self._publish_online_status(
+            "telemetry_upload",
+            "waiting"
+            if http_enabled and self.telemetry_ingestion_api_url
+            else "disabled",
+        )
 
         if self.config_data_copy is None:
             self.config_data_copy = {}

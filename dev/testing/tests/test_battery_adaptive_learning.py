@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from learning_datasets.machine_learning import MachineLearningModel
 

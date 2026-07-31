@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 try:
     from PyQt6.QtWidgets import QApplication
@@ -135,6 +135,37 @@ class DashboardFocusTests(unittest.TestCase):
         )
         self.assertIn("ASC cutoff", alert_text)
         self.assertIn("Stage 2", alert_text)
+
+    def test_online_alerts_only_show_for_failed_configured_services(self):
+        self.tab.update_data({})
+        self.assertEqual(self.tab.alerts.item(0).text(), "No active alerts.")
+
+        self.tab.set_online_service_status("solcast", "waiting")
+        self.tab.set_online_service_status("telemetry_upload", "healthy")
+        self.assertEqual(self.tab.alerts.item(0).text(), "No active alerts.")
+
+        self.tab.set_online_service_status(
+            "solcast",
+            "error",
+            "Connection timed out.",
+        )
+        self.tab.set_online_service_status(
+            "telemetry_upload",
+            "error",
+            "HTTP 503.",
+        )
+        alert_text = " ".join(
+            self.tab.alerts.item(index).text()
+            for index in range(self.tab.alerts.count())
+        )
+        self.assertIn("Solcast connection failed", alert_text)
+        self.assertIn("Connection timed out", alert_text)
+        self.assertIn("Telemetry upload failed", alert_text)
+        self.assertIn("local recording is still active", alert_text)
+
+        self.tab.set_online_service_status("solcast", "healthy")
+        self.tab.set_online_service_status("telemetry_upload", "disabled")
+        self.assertEqual(self.tab.alerts.item(0).text(), "No active alerts.")
 
 
 if __name__ == "__main__":
